@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Support DealDost | Solana Donations</title>
+<meta name="description" content="Support DealDost with a Solana donation. Verify the wallet address before sending.">
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:#070b16;color:#f5f7ff;min-height:100vh}main{max-width:760px;margin:auto;padding:48px 20px}.card{background:#10172a;border:1px solid #26304a;border-radius:28px;padding:34px;box-shadow:0 20px 70px #0008}.badge{display:inline-block;padding:7px 12px;border-radius:999px;background:#6d4aff22;border:1px solid #6d4aff66;color:#bdaeff;font-size:13px;font-weight:700}h1{font-size:clamp(34px,7vw,58px);line-height:1.02;margin:18px 0 14px}p{color:#aeb8cf;line-height:1.7}.wallet{background:#080d19;border:1px solid #303b59;border-radius:16px;padding:16px;word-break:break-all;font-family:ui-monospace,monospace;font-size:14px;color:#dce4ff}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}.btn{border:0;border-radius:13px;padding:13px 18px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}.primary{background:#8b6cff;color:white}.secondary{background:#202a43;color:#fff}.qr{width:230px;height:230px;background:#fff;border-radius:18px;padding:10px;margin:22px auto}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:28px}.mini{padding:18px;border:1px solid #26304a;border-radius:18px}.mini b{display:block;margin-bottom:7px}.warn{font-size:13px;color:#d7deef;margin-top:24px}.center{text-align:center}.footer{margin-top:25px;text-align:center;font-size:13px;color:#7e8aa5}@media(max-width:600px){.grid{grid-template-columns:1fr}.card{padding:24px}}
+</style>
+</head>
+<body><main><section class="card">
+<span class="badge">SOLANA • SUPPORT DEALDOST</span>
+<h1>Support the DealDost vision 🚀</h1>
+<p>Your contribution helps support development, community activities and future project initiatives. Donations are voluntary and there is no promise of financial return.</p>
+<div class="center"><div id="qrcode" class="qr"></div></div>
+<div class="center"><strong>Scan to donate with a Solana wallet</strong></div>
+<p style="margin-bottom:8px"><strong>Solana wallet address</strong></p>
+<div class="wallet" id="wallet">CcawQsVWQjkoK2TSttDA5PUixta7pAKaXZ4ymFBeAcYs</div>
+<div class="actions"><button class="btn primary" onclick="copyWallet()">Copy Address</button><a class="btn secondary" id="pay" href="#">Open Wallet</a></div>
+<div class="grid"><div class="mini"><b>🙏 Every contribution matters</b><span>Small or large, your support is appreciated.</span></div><div class="mini"><b>🔎 Verify before sending</b><span>Always compare the address in your wallet with the address above.</span></div></div>
+<p class="warn">⚠️ Crypto transfers are generally irreversible. Send only SOL to this Solana address and verify the network and destination before confirming.</p>
+</section><div class="footer">DealDost • Community • Transparency • Growth</div></main>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+const address='CcawQsVWQjkoK2TSttDA5PUixta7pAKaXZ4ymFBeAcYs';
+new QRCode(document.getElementById('qrcode'),{text:'solana:'+address,width:210,height:210});
+document.getElementById('pay').href='solana:'+address;
+function copyWallet(){navigator.clipboard.writeText(address).then(()=>{const b=document.querySelector('.primary');b.textContent='Copied ✓';setTimeout(()=>b.textContent='Copy Address',1800)}).catch(()=>alert(address));}
+</script></body></html>

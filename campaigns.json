@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "campaigns": [
+    {
+      "slug": "dealdost-community",
+      "title": "Support DealDost Community",
+      "tagline": "Help build transparent community-support infrastructure on Solana.",
+      "description": "A voluntary support campaign for DealDost development, hosting, testing and future open-source initiatives.",
+      "wallet": "CcawQsVWQjkoK2TSttDA5PUixta7pAKaXZ4ymFBeAcYs",
+      "active": true
+    }
+  ]
+}

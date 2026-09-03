@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DealDost Campaign</title>
+<meta name="description" content="Support a DealDost community campaign with a voluntary SOL contribution and verify activity on Solana mainnet.">
+<meta property="og:title" content="DealDost Community Campaign">
+<meta property="og:description" content="Voluntary SOL support with public on-chain transparency.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:#090b10;color:#f5f7fb}main{max-width:900px;margin:auto;padding:28px 18px 60px}.card{background:#11151d;border:1px solid #252b38;border-radius:22px;padding:24px;margin:16px 0;box-shadow:0 12px 40px #0004}.hero{text-align:center;padding:38px 20px}.pill{display:inline-block;border:1px solid #354052;border-radius:999px;padding:7px 12px;font-size:13px;color:#aeb8c8}.wallet{font-size:13px;word-break:break-all;background:#0b0e14;border-radius:12px;padding:12px;color:#b8c2d2}button,a.btn{display:inline-block;border:0;border-radius:12px;padding:12px 16px;margin:5px;background:#f4f6fa;color:#090b10;font-weight:700;text-decoration:none;cursor:pointer}.secondary{background:#222936!important;color:#fff!important}.amounts button{min-width:76px}.qr{display:flex;justify-content:center;margin:20px 0}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat{background:#0b0e14;border-radius:14px;padding:16px;text-align:center}.stat b{display:block;font-size:22px;margin-bottom:4px}.muted{color:#9ca7b8;font-size:14px}.tx{padding:12px 0;border-bottom:1px solid #252b38}.tx:last-child{border-bottom:0}.tx a{color:#a9c7ff}.hidden{display:none}@media(max-width:650px){.stats{grid-template-columns:1fr}.hero{padding:25px 10px}}
+</style>
+</head>
+<body><main>
+<section class="card hero"><span class="pill">DealDost • Solana mainnet</span><h1 id="title">Loading campaign…</h1><p id="tagline" class="muted"></p><p id="description"></p><div><button onclick="shareCampaign()">Share Campaign</button><button class="secondary" onclick="copyWallet()">Copy Wallet</button></div></section>
+<section class="card"><h2>Support this campaign</h2><p class="muted">Contributions are voluntary. DealDost does not promise investment returns, rewards or profits.</p><div class="amounts"><button onclick="openWallet(.05)">0.05 SOL</button><button onclick="openWallet(.1)">0.10 SOL</button><button onclick="openWallet(.25)">0.25 SOL</button><button onclick="openWallet(.5)">0.50 SOL</button><button onclick="openWallet(1)">1 SOL</button></div><div class="qr" id="qr"></div><div class="wallet" id="wallet"></div><p id="status" class="muted"></p></section>
+<section class="card"><h2>Public on-chain activity</h2><p class="muted">Read-only tracker using Solana mainnet public RPC. It checks recent successful transactions for incoming SOL.</p><div class="stats"><div class="stat"><b id="incoming">0.0000</b><span class="muted">Incoming SOL</span></div><div class="stat"><b id="count">0</b><span class="muted">Incoming transfers</span></div><div class="stat"><b id="checked">—</b><span class="muted">Last checked</span></div></div><div id="txs" class="muted" style="margin-top:18px"></div></section>
+<section class="card"><h2>Campaign sharing</h2><p class="muted">Share the campaign URL to help people discover it. Referral codes are attribution-only unless a future backend adds verified analytics.</p><button onclick="copyLink()">Copy Campaign Link</button><button class="secondary" onclick="window.location.href='/promote'">Open Promotion Hub</button></section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+const DEFAULT={slug:'dealdost-community',title:'Support DealDost Community',tagline:'Help build transparent community-support infrastructure on Solana.',description:'A voluntary support campaign for DealDost development, hosting, testing and future open-source initiatives.',wallet:'CcawQsVWQjkoK2TSttDA5PUixta7pAKaXZ4ymFBeAcYs'};
+let campaign=DEFAULT, incoming=0, transfers=[];
+const $=id=>document.getElementById(id);
+async function loadCampaign(){try{const r=await fetch('/campaigns.json',{cache:'no-store'});const d=await r.json();const slug=new URLSearchParams(location.search).get('slug')||location.pathname.split('/').filter(Boolean).pop()||DEFAULT.slug;const found=(d.campaigns||[]).find(x=>x.slug===slug&&x.active);if(found)campaign=found}catch(e){}render()}
+function render(){document.title=campaign.title+' | DealDost';$('title').textContent=campaign.title;$('tagline').textContent=campaign.tagline;$('description').textContent=campaign.description;$('wallet').textContent=campaign.wallet;new QRCode($('qr'),{text:'solana:'+campaign.wallet,width:190,height:190});}
+function campaignUrl(){return location.origin+'/campaign?slug='+encodeURIComponent(campaign.slug)}
+function copy(text,msg){navigator.clipboard?.writeText(text).then(()=>{$('status').textContent=msg}).catch(()=>{$('status').textContent='Copy failed — please copy the wallet manually.'})}
+function copyWallet(){copy(campaign.wallet,'Wallet address copied.')}
+function copyLink(){copy(campaignUrl(),'Campaign link copied.')}
+async function shareCampaign(){const text='Support '+campaign.title+' — voluntary SOL support with public on-chain transparency. '+campaignUrl();if(navigator.share)try{await navigator.share({title:campaign.title,text,url:campaignUrl()})}catch(e){}else copy(text,'Share text/link copied.')}
+function openWallet(amount){const uri='solana:'+campaign.wallet+'?amount='+amount+'&label='+encodeURIComponent('DealDost')+'&message='+encodeURIComponent(campaign.title);location.href=uri}
+async function rpc(method,params){for(const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rpc.publicnode.com']){try{const c=new AbortController();const t=setTimeout(()=>c.abort(),9000);const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:c.signal});clearTimeout(t);if(r.ok){const j=await r.json();if(!j.error)return j.result}}catch(e){}}return null}
+async function tracker(){const sigs=await rpc('getSignaturesForAddress',[campaign.wallet,{limit:20}]);if(!sigs)return;$('checked').textContent=new Date().toLocaleTimeString();const recent=sigs.filter(s=>!s.err).slice(0,20);let rows=[];let total=0;for(let i=0;i<recent.length;i+=4){const batch=recent.slice(i,i+4);const vals=await Promise.all(batch.map(s=>rpc('getTransaction',[s.signature,{encoding:'jsonParsed',maxSupportedTransactionVersion:0}])));vals.forEach((tx,j)=>{if(!tx?.meta)return;const pre=tx.meta.preBalances?.[0]||0,post=tx.meta.postBalances?.[0]||0,delta=(post-pre)/1e9;if(delta>0){total+=delta;rows.push({sig:batch[j].signature,delta,time:tx.blockTime})}})}incoming=total;transfers=rows;$('incoming').textContent=total.toFixed(4);$('count').textContent=rows.length;$('txs').innerHTML=rows.length?rows.map(x=>'<div class="tx">+'+x.delta.toFixed(6)+' SOL · '+(x.time?new Date(x.time*1000).toLocaleString():'time unavailable')+' · <a target="_blank" rel="noopener" href="https://explorer.solana.com/tx/'+x.sig+'">Explorer</a></div>').join(''):'No incoming SOL transfers found in the latest checked transactions.'}
+loadCampaign();tracker();setInterval(tracker,60000);
+</script></body></html>

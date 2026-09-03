@@ -15,18 +15,21 @@
 <div class="center"><div id="qrcode" class="qr"></div><strong>Scan to donate with a Solana wallet</strong></div>
 <p style="margin-bottom:8px"><strong>Official Solana donation address</strong></p>
 <div class="wallet" id="wallet">CcawQsVWQjkoK2TSttDA5PUixta7pAKaXZ4ymFBeAcYs</div>
-<div class="actions"><button class="btn primary" onclick="copyWallet()">Copy Address</button><button class="btn secondary" onclick="openWallet()">Open Solana Wallet</button></div>
-<div class="amounts"><button class="amount" onclick="openWallet(.05)">0.05 SOL</button><button class="amount" onclick="openWallet(.10)">0.10 SOL</button><button class="amount" onclick="openWallet(.25)">0.25 SOL</button><button class="amount" onclick="openWallet(.50)">0.50 SOL</button><button class="amount" onclick="openWallet(1)">1 SOL</button></div>
+<div class="actions">
+<button class="btn primary" type="button" onclick="copyWallet()">Copy Address</button>
+<button class="btn secondary" type="button" onclick="openWallet()">Open Solana Wallet</button>
+</div>
+<div class="amounts">
+<button class="amount" type="button" onclick="openWallet(.05)">0.05 SOL</button><button class="amount" type="button" onclick="openWallet(.10)">0.10 SOL</button><button class="amount" type="button" onclick="openWallet(.25)">0.25 SOL</button><button class="amount" type="button" onclick="openWallet(.50)">0.50 SOL</button><button class="amount" type="button" onclick="openWallet(1)">1 SOL</button>
+</div>
 <div id="status" class="status"></div>
-
 <section class="tracker" id="tracker">
-<div class="tracker-head"><div><h2>🔎 Public On-Chain Donation Tracker</h2><div class="tiny">Read-only • Solana mainnet • independently verifiable</div></div><button class="btn secondary" onclick="loadDonations()">Refresh</button></div>
-<div class="stats"><div class="stat">Total received<strong id="total">—</strong></div><div class="stat">Verified donations<strong id="count">—</strong></div><div class="stat">Last checked<strong id="checked">—</strong></div></div>
+<div class="tracker-head"><div><h2>🔎 Public On-Chain Donation Tracker</h2><div class="tiny">Read-only • Solana mainnet • independently verifiable</div></div><button class="btn secondary" type="button" onclick="loadDonations()">Refresh</button></div>
+<div class="stats"><div class="stat">Incoming SOL<strong id="total">—</strong></div><div class="stat">Incoming transfers<strong id="count">—</strong></div><div class="stat">Last checked<strong id="checked">—</strong></div></div>
 <div id="donations" class="donations"><div class="empty">Loading public blockchain activity…</div></div>
 <p class="tiny">This tracker reads public Solana RPC data only. It does not connect to or control any wallet, and it never asks for private keys or seed phrases. Transactions are linked to Solana Explorer for independent verification.</p>
 </section>
-
-<div class="grid"><div class="mini"><b>🔎 Verify independently</b><span>Compare the address in your wallet and inspect every donation transaction on Solana Explorer.</span></div><div class="mini"><b>🛡️ No private keys</b><span>DealDost will never ask for your seed phrase, private key or wallet password.</span></div><div class="mini"><b>🤝 Voluntary support</b><span>Donations are optional and are not an investment or a purchase of guaranteed future returns.</span></div><div class="mini"><b>📢 Transparency</b><span>Public blockchain activity is displayed without claiming ownership of funds beyond the published wallet address.</span></div></div>
+<div class="grid"><div class="mini"><b>🔎 Verify independently</b><span>Compare the address in your wallet and inspect every transfer on Solana Explorer.</span></div><div class="mini"><b>🛡️ No private keys</b><span>DealDost will never ask for your seed phrase, private key or wallet password.</span></div><div class="mini"><b>🤝 Voluntary support</b><span>Donations are optional and are not an investment or a purchase of guaranteed future returns.</span></div><div class="mini"><b>📢 Transparency</b><span>Public blockchain activity is displayed without claiming ownership of funds beyond the published wallet address.</span></div></div>
 <p class="warn">⚠️ Crypto transfers are generally irreversible. Send only SOL on the Solana network. Always verify the destination address and network before confirming.</p>
 <div class="center"><a class="btn secondary" target="_blank" rel="noopener noreferrer" href="https://explorer.solana.com/address/CcawQsVWQjkoK2TSttDA5PUixta7pAKaXZ4ymFBeAcYs">View Wallet on Solana Explorer ↗</a></div>
 </section><div class="footer">DealDost • Community • Transparency • Growth</div></main>
@@ -36,29 +39,37 @@ const address='CcawQsVWQjkoK2TSttDA5PUixta7pAKaXZ4ymFBeAcYs';
 const rpc='https://api.mainnet-beta.solana.com';
 const explorer='https://explorer.solana.com';
 new QRCode(document.getElementById('qrcode'),{text:'solana:'+address,width:210,height:210});
-function copyWallet(){navigator.clipboard.writeText(address).then(()=>showStatus('Wallet address copied ✓')).catch(()=>prompt('Copy this Solana address:',address));}
-function showStatus(msg){const s=document.getElementById('status');s.textContent=msg;setTimeout(()=>s.textContent='',2500);}
-function openWallet(amount){const url='solana:'+address+(amount?'?amount='+encodeURIComponent(amount):'');window.location.href=url;setTimeout(()=>{if(document.visibilityState==='visible')showStatus('If no wallet opened, use Copy Address or scan the QR code.');},1200);}
-async function rpcCall(method,params){const r=await fetch(rpc,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:Date.now(),method,params})});if(!r.ok)throw new Error('RPC HTTP '+r.status);const j=await r.json();if(j.error)throw new Error(j.error.message||'RPC error');return j.result;}
+function copyWallet(){const done=()=>showStatus('Wallet address copied ✓');if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(address).then(done).catch(()=>fallbackCopy())}else fallbackCopy()}
+function fallbackCopy(){const ta=document.createElement('textarea');ta.value=address;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand('copy');showStatus('Wallet address copied ✓')}catch(e){prompt('Copy this Solana address:',address)}document.body.removeChild(ta)}
+function showStatus(msg){const s=document.getElementById('status');s.textContent=msg;clearTimeout(window.statusTimer);window.statusTimer=setTimeout(()=>s.textContent='',3500)}
+function isIOS(){return /iPad|iPhone|iPod/.test(navigator.userAgent)&&!window.MSStream}
+function isAndroid(){return /Android/i.test(navigator.userAgent)}
+function openWallet(amount){
+ const solanaUrl='solana:'+address+(amount?'?amount='+encodeURIComponent(amount):'');
+ const phantom='https://phantom.app/ul/v1/browse/'+encodeURIComponent(solanaUrl)+'?ref='+encodeURIComponent(window.location.origin);
+ const solflare='https://solflare.com/ul/v1/browse/'+encodeURIComponent(solanaUrl)+'?ref='+encodeURIComponent(window.location.origin);
+ showStatus('Opening your Solana wallet…');
+ let opened=false;
+ const markHidden=()=>{if(document.hidden){opened=true;showStatus('Wallet opened ✓')}};
+ document.addEventListener('visibilitychange',markHidden,{once:true});
+ if(isAndroid()){
+   window.location.href=solanaUrl;
+   setTimeout(()=>{if(!opened&&!document.hidden){window.location.href=phantom;setTimeout(()=>{if(!opened&&!document.hidden)showWalletFallback(amount)},1200)}},900);
+ }else if(isIOS()){
+   window.location.href=phantom;
+   setTimeout(()=>{if(!opened&&!document.hidden)showWalletFallback(amount)},1400);
+ }else{
+   window.open(solanaUrl,'_blank');
+   setTimeout(()=>showWalletFallback(amount),1000);
+ }
+}
+function showWalletFallback(amount){
+ const msg='Wallet app did not open. Your address is copied below; you can paste it into Phantom, Solflare or another Solana wallet.';
+ showStatus(msg);fallbackCopy();
+}
+async function rpcCall(method,params){const r=await fetch(rpc,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:Date.now(),method,params})});if(!r.ok)throw new Error('RPC HTTP '+r.status);const j=await r.json();if(j.error)throw new Error(j.error.message||'RPC error');return j.result}
 function shortSig(s){return s.slice(0,8)+'…'+s.slice(-6)}
 function fmtTime(ts){return ts?new Date(ts*1000).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'Time unavailable'}
-async function loadDonations(){
- const box=document.getElementById('donations');box.innerHTML='<div class="empty">Checking Solana mainnet…</div>';document.getElementById('checked').textContent='…';
- try{
-  const sigs=await rpcCall('getSignaturesForAddress',[address,{limit:20,commitment:'finalized'}]);
-  const valid=sigs.filter(x=>!x.err).slice(0,20);
-  const txs=await Promise.all(valid.map(x=>rpcCall('getTransaction',[x.signature,{encoding:'jsonParsed',commitment:'finalized',maxSupportedTransactionVersion:0}]).catch(()=>null)));
-  const incoming=[];
-  for(let i=0;i<txs.length;i++){
-   const tx=txs[i];if(!tx||!tx.meta||!tx.transaction)continue;
-   const keys=tx.transaction.message.accountKeys.map(k=>typeof k==='string'?k:k.pubkey);const idx=keys.indexOf(address);if(idx<0)continue;
-   const before=(tx.meta.preBalances||[])[idx]??0;const after=(tx.meta.postBalances||[])[idx]??0;const delta=after-before;
-   if(delta>0)incoming.push({signature:valid[i].signature,sol:delta/1e9,time:tx.blockTime});
-  }
-  const total=incoming.reduce((a,d)=>a+d.sol,0);document.getElementById('total').textContent=total.toFixed(4)+' SOL';document.getElementById('count').textContent=String(incoming.length);document.getElementById('checked').textContent=new Date().toLocaleTimeString();
-  if(!incoming.length){box.innerHTML='<div class="empty">No incoming SOL transfers found in the latest checked transactions.</div>';return;}
-  box.innerHTML=incoming.map(d=>`<div class="donation"><div><div class="amount-in">+${d.sol.toFixed(6)} SOL</div><small>${fmtTime(d.time)}</small></div><a target="_blank" rel="noopener noreferrer" href="${explorer}/tx/${d.signature}">${shortSig(d.signature)} ↗</a></div>`).join('');
- }catch(e){document.getElementById('total').textContent='—';document.getElementById('count').textContent='—';document.getElementById('checked').textContent='Error';box.innerHTML='<div class="empty">Could not read Solana RPC right now. Please try Refresh in a moment. The donation address and Explorer link remain available for independent verification.</div>';console.error(e);}
-}
+async function loadDonations(){const box=document.getElementById('donations');box.innerHTML='<div class="empty">Checking Solana mainnet…</div>';document.getElementById('checked').textContent='…';try{const sigs=await rpcCall('getSignaturesForAddress',[address,{limit:20,commitment:'finalized'}]);const valid=sigs.filter(x=>!x.err).slice(0,20);const txs=await Promise.all(valid.map(x=>rpcCall('getTransaction',[x.signature,{encoding:'jsonParsed',commitment:'finalized',maxSupportedTransactionVersion:0}]).catch(()=>null)));const incoming=[];for(let i=0;i<txs.length;i++){const tx=txs[i];if(!tx||!tx.meta||!tx.transaction)continue;const keys=tx.transaction.message.accountKeys.map(k=>typeof k==='string'?k:k.pubkey);const idx=keys.indexOf(address);if(idx<0)continue;const before=(tx.meta.preBalances||[])[idx]??0;const after=(tx.meta.postBalances||[])[idx]??0;const delta=after-before;if(delta>0)incoming.push({signature:valid[i].signature,sol:delta/1e9,time:tx.blockTime})}const total=incoming.reduce((a,d)=>a+d.sol,0);document.getElementById('total').textContent=total.toFixed(4)+' SOL';document.getElementById('count').textContent=String(incoming.length);document.getElementById('checked').textContent=new Date().toLocaleTimeString();if(!incoming.length){box.innerHTML='<div class="empty">No incoming SOL transfers found in the latest checked transactions.</div>';return}box.innerHTML=incoming.map(d=>`<div class="donation"><div><div class="amount-in">+${d.sol.toFixed(6)} SOL</div><small>${fmtTime(d.time)}</small></div><a target="_blank" rel="noopener noreferrer" href="${explorer}/tx/${d.signature}">${shortSig(d.signature)} ↗</a></div>`).join('')}catch(e){document.getElementById('total').textContent='—';document.getElementById('count').textContent='—';document.getElementById('checked').textContent='Error';box.innerHTML='<div class="empty">Could not read Solana RPC right now. Please try Refresh in a moment. The donation address and Explorer link remain available for independent verification.</div>';console.error(e)}}
 loadDonations();setInterval(loadDonations,60000);
 </script></body></html>

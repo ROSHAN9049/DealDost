@@ -2,20 +2,13 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "headers": [
-    {
-      "source": "/promote.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=60, must-revalidate" }
-      ]
-    },
-    {
-      "source": "/index.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=60, must-revalidate" }
-      ]
-    }
+    {"source":"/promote.html","headers":[{"key":"Cache-Control","value":"public, max-age=60, must-revalidate"}]},
+    {"source":"/index.html","headers":[{"key":"Cache-Control","value":"public, max-age=60, must-revalidate"}]},
+    {"source":"/campaign.html","headers":[{"key":"Cache-Control","value":"public, max-age=60, must-revalidate"}]},
+    {"source":"/campaigns.json","headers":[{"key":"Cache-Control","value":"public, max-age=60, must-revalidate"}]}
   ],
   "redirects": [
-    { "source": "/promote", "destination": "/promote.html", "permanent": false }
+    {"source":"/promote","destination":"/promote.html","permanent":false},
+    {"source":"/campaign","destination":"/campaign.html","permanent":false}
   ]
 }

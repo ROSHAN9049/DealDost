@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Binance AI Scanner</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+<header><div><h1>Binance AI Scanner <span>V1</span></h1><p>Live market scanner • Paper trading first • Live trading ready architecture</p></div><div class="status"><i></i><span id="connection">Connecting…</span></div></header>
+<section class="controls"><button id="paperBtn" class="on">Paper Trading ON</button><button id="refreshBtn">Refresh Now</button><select id="mode"><option value="momentum">Momentum 5m → 15m</option><option value="scalp">Scalping 1m → 5m</option></select><label>Min 24H Change <input id="minChange" type="number" value="0.5" step="0.1">%</label><label>Min Score <input id="minScore" type="number" value="70" min="0" max="100"></label></section>
+<section class="cards"><div><small>Market</small><strong id="market">—</strong></div><div><small>Scanner Coins</small><strong id="coinCount">0</strong></div><div><small>Signals</small><strong id="signalCount">0</strong></div><div><small>Paper Equity</small><strong id="equity">₹10,000</strong></div><div><small>Realised P&L</small><strong id="realised">₹0</strong></div><div><small>Open Trades</small><strong id="openCount">0</strong></div></section>
+<div class="grid">
+<section class="panel"><div class="panelHead"><h2>Live Signals</h2><span id="updated">—</span></div><div class="tableWrap"><table><thead><tr><th>Coin</th><th>Price</th><th>24H</th><th>Volume</th><th>Signal</th><th>Score</th><th>Entry</th><th>SL</th><th>TP</th><th>Reason</th><th>Action</th></tr></thead><tbody id="signals"><tr><td colspan="11" class="empty">Loading Binance market…</td></tr></tbody></table></div></section>
+<section class="panel"><div class="panelHead"><h2>Risk Guard</h2><span class="safe">SAFE</span></div><div class="risk"><p>Daily loss limit <b>₹300</b></p><p>Consecutive loss stop <b>3</b></p><p>Max open per strategy <b>3</b></p><p>Daily trade limit <b>Disabled</b></p><p>Real trading <b class="off">OFF</b></p></div></section>
+<section class="panel"><div class="panelHead"><h2>Open Paper Positions</h2><button id="resetBtn" class="danger">Reset Paper</button></div><div id="positions" class="positions"><p class="empty">No open positions.</p></div></section>
+<section class="panel"><div class="panelHead"><h2>Completed Trades</h2><span id="stats">0 trades • 0% win rate</span></div><div class="tableWrap"><table><thead><tr><th>Time</th><th>Coin</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>Reason</th></tr></thead><tbody id="trades"><tr><td colspan="7" class="empty">No completed trades.</td></tr></tbody></table></div></section>
+</div>
+<footer>Binance public market data • Paper trading only • API keys are not requested or stored in this browser.</footer>
+</div><script src="app.js"></script></body></html>

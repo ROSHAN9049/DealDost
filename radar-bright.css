@@ -1,0 +1,10 @@
+/* Delta Scanner inspired radar highlights */
+.radarCards .radarCard:nth-child(1){border-color:#1f6b49;background:linear-gradient(180deg,#0c2118,#0b111c);box-shadow:0 0 18px rgba(72,223,145,.14)}
+.radarCards .radarCard:nth-child(2){border-color:#71313b;background:linear-gradient(180deg,#250f14,#0b111c);box-shadow:0 0 18px rgba(255,105,122,.14)}
+.radarCards .radarCard:nth-child(1) li span{color:#d8ffe9;font-weight:900;text-shadow:0 0 7px rgba(72,223,145,.35)}
+.radarCards .radarCard:nth-child(2) li span{color:#ffe0e4;font-weight:900;text-shadow:0 0 7px rgba(255,105,122,.35)}
+.radarCards .radarCard:nth-child(1) li strong{color:#48df91!important;font-size:11px;font-weight:900;text-shadow:0 0 9px rgba(72,223,145,.65)}
+.radarCards .radarCard:nth-child(2) li strong{color:#ff697a!important;font-size:11px;font-weight:900;text-shadow:0 0 9px rgba(255,105,122,.65)}
+.radarCards .radarCard:nth-child(1) small{color:#72e3a5}
+.radarCards .radarCard:nth-child(2) small{color:#ff8b98}
+.radarCards .radarCard:nth-child(1) ol,.radarCards .radarCard:nth-child(2) ol{line-height:1.25}

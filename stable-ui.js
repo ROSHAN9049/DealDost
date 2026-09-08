@@ -6,7 +6,7 @@
     const body=document.getElementById('signals'); if(!body)return;
     const list=Array.isArray(rows)?rows:[];
     for(const r of list){const s=String(r?.t?.symbol||'');if(s&&!order.has(s))order.set(s,seq++);}
-    // Keep the first-seen Delta liquidity order. A later volume change cannot move a row.
+    // Keep first-seen liquidity order. A later volume change cannot move an existing row.
     const ordered=[...list].sort((a,b)=>(order.get(String(a?.t?.symbol||''))??999999)-(order.get(String(b?.t?.symbol||''))??999999)).slice(0,33);
     const search=(document.getElementById('search')?.value||'').trim().toUpperCase().replace('/','');
     const visible=search?ordered.filter(r=>String(r.t.symbol||'').includes(search)):ordered;
@@ -18,9 +18,11 @@
     box.innerHTML=signals.length?`<b>🔥 TOP LIVE SIGNALS · ${signals.length}</b><span>${signals.map((s,i)=>`${i+1}. ${esc(s.symbol)} · ${esc(s.side||s.signal)} · ${esc(s.engine)} · Score ${s.score}`).join(' &nbsp; | &nbsp; ')}</span><small>Coin position is locked after first appearance; live values update without moving the row.</small>`:'<b>🔥 TOP LIVE SIGNALS</b><span>No qualifying signal at the current scan.</span><small>Coin position is locked after first appearance.</small>';
     const qualifying=list.filter(r=>r.mom?.signal==='LONG'||r.mom?.signal==='SHORT'||r.scalp?.signal==='LONG'||r.scalp?.signal==='SHORT').length; const set=window.set||((id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v}); set('scannerInfo',`${visible.length} coins${search?' · filtered':''} · stable Delta-style order`);set('signalCount',`${qualifying} qualifying signals`);
   }
-  // app.js analyses 5 coins at a time. Ignore those intermediate renders; redraw only when the full selected set is ready.
+  // app.js analyses up to 100 candle candidates in batches. coinCount is the full liquid universe,
+  // so wait for the smaller candle-analysis target (max 100), not the full Binance contract count.
   window.renderSignals=function(rows){
-    const expected=Number((document.getElementById('coinCount')?.textContent||'').split('/')[0])||0;
+    const universe=Number((document.getElementById('coinCount')?.textContent||'').split('/')[0])||0;
+    const expected=Math.min(100,universe);
     if(expected>0 && Array.isArray(rows) && rows.length<expected)return;
     deltaStyleRenderSignals(rows);
   };

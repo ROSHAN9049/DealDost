@@ -1,9 +1,50 @@
-/* Delta-style visual stabilizer. Keeps scanner coins in fixed first-seen positions while live values update. */
+/* Delta-style visual stabilizer + paper risk guard. Keeps scanner coins fixed while live values update, and prevents rapid revenge re-entry. */
 (function(){
   let lastHtml='', arranging=false;
   const order=new Map(); let nextOrder=0;
   const $=id=>document.getElementById(id);
   const num=v=>Number(String(v??'').replace(/[^0-9.+-]/g,''))||0;
+
+  /* Paper re-entry protection:
+     - 5 minute cooldown after any position closes
+     - after 2 losing closes for the same symbol+engine, 30 minute lock
+     - does not affect scanner signals or real Binance orders (which remain OFF)
+  */
+  const GUARD_KEY='binancePaperRiskGuardV1',COOLDOWN=5*60*1000,LOSS_WINDOW=30*60*1000,LOSS_LIMIT=2,LOSS_LOCK=30*60*1000;
+  let guard={};
+  try{guard=JSON.parse(localStorage.getItem(GUARD_KEY)||'{}')||{}}catch(e){guard={}};
+  const saveGuard=()=>{try{localStorage.setItem(GUARD_KEY,JSON.stringify(guard))}catch(e){}};
+  const cleanGuard=()=>{const now=Date.now();Object.keys(guard).forEach(k=>{const g=guard[k];if(!g||((g.lastClose||0)+LOSS_WINDOW<now&&!(g.blockedUntil>now)))delete guard[k];else if(Array.isArray(g.losses))g.losses=g.losses.filter(t=>t+LOSS_WINDOW>=now)});saveGuard()};
+  function installRiskGuard(){
+    if(typeof window.paperOpen!=='function'||window.__dealDostRiskGuard)return false;
+    const original=window.paperOpen;window.__dealDostRiskGuard=true;
+    window.paperOpen=function(s,auto=false){
+      cleanGuard();
+      const symbol=s?.symbol,engine=s?.engine;if(!symbol||!engine)return original(s,auto);
+      const key=symbol+'|'+engine,now=Date.now(),g=guard[key]||{};
+      if(g.blockedUntil>now)return false;
+      if(g.lastClose&&now-g.lastClose<COOLDOWN)return false;
+      return original(s,auto);
+    };
+    return true;
+  }
+  let previousPositions=new Map();
+  function monitorClosedPositions(){
+    if(typeof state==='undefined'||!Array.isArray(state.positions))return;
+    cleanGuard();
+    const current=new Map(state.positions.map(p=>[(p.symbol||'')+'|'+(p.engine||'')+'|'+(p.openedAt||0),p]));
+    for(const [id,p] of previousPositions){
+      if(current.has(id))continue;
+      const key=(p.symbol||'')+'|'+(p.engine||'');if(!p.symbol||!p.engine)continue;
+      const now=Date.now(),g=guard[key]||{};g.lastClose=now;
+      const recent=Array.isArray(state.trades)?state.trades.slice().reverse().find(t=>t&&t.symbol===p.symbol&&t.engine===p.engine):null;
+      const pnl=recent&&Number.isFinite(Number(recent.pnl))?Number(recent.pnl):Number(p.unreal||0);
+      if(pnl<0){g.losses=Array.isArray(g.losses)?g.losses.filter(t=>t+LOSS_WINDOW>=now):[];g.losses.push(now);if(g.losses.length>=LOSS_LIMIT)g.blockedUntil=now+LOSS_LOCK;}
+      guard[key]=g;
+    }
+    previousPositions=current;saveGuard();
+  }
+
   function arrange(){
     const body=$('signals');if(!body||arranging)return;
     const rows=[...body.querySelectorAll('tr')].filter(tr=>tr.querySelector('td'));
@@ -39,4 +80,5 @@
   function observe(){const body=$('signals');if(!body)return false;new MutationObserver(()=>{if(arranging)return;if(body.innerHTML!==lastHtml){lastHtml=body.innerHTML;requestAnimationFrame(decorate)}else{requestAnimationFrame(arrange);colorPnl()}}).observe(body,{childList:true,subtree:true});decorate();return true}
   if(!observe()){const t=setInterval(()=>{if(observe())clearInterval(t)},100)}
   $('search')?.addEventListener('input',()=>requestAnimationFrame(decorate));
+  installRiskGuard();setInterval(()=>{installRiskGuard();monitorClosedPositions()},1000);
 })();

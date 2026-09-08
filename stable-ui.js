@@ -1,12 +1,12 @@
-/* Stable scanner UI: keeps contract rows deterministic and highlights live signals separately. */
+/* Binance scanner UI: mirror the Delta Scanner layout/order — top liquid contracts first. */
 (function(){
-  const originalRender = window.renderSignals;
   function esc(v){return String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
-  function stableRenderSignals(rows){
+  function deltaStyleRenderSignals(rows){
     const body=document.getElementById('signals'); if(!body)return;
     const search=(document.getElementById('search')?.value||'').trim().toUpperCase().replace('/','');
-    const sorted=[...(rows||[])].sort((a,b)=>String(a.t.symbol).localeCompare(String(b.t.symbol)));
-    const visible=search?sorted.filter(r=>r.t.symbol.includes(search)):sorted;
+    // Delta-style: rows arrive already sorted by 24H turnover/volume. Show only the top 33 liquid contracts.
+    const ordered=[...(rows||[])].slice(0,33);
+    const visible=search?ordered.filter(r=>String(r.t.symbol||'').includes(search)):ordered;
     const cls=x=>x?.signal==='LONG'?'long':x?.signal==='SHORT'?'short':'watch';
     body.innerHTML=visible.map(r=>{
       const a=r.mom,z=r.scalp;
@@ -16,16 +16,12 @@
     body.querySelectorAll('.signalBtn').forEach(q=>q.onclick=()=>window.paperOpen(JSON.parse(decodeURIComponent(q.dataset.s))));
     const signals=visible.flatMap(r=>[r.mom,r.scalp]).filter(x=>x&&(x.signal==='LONG'||x.signal==='SHORT')).sort((a,b)=>(b.score||0)-(a.score||0)).slice(0,8);
     let box=document.getElementById('topSignals');
-    if(!box){
-      box=document.createElement('div'); box.id='topSignals'; box.className='notice';
-      const panel=document.querySelector('#signals')?.closest('.panel');
-      panel?.insertBefore(box,panel.querySelector('.tableWrap'));
-    }
-    box.innerHTML=signals.length?`<b>🔥 TOP LIVE SIGNALS · ${signals.length}</b><span>${signals.map((s,i)=>`${i+1}. ${esc(s.symbol)} · ${esc(s.side||s.signal)} · ${s.engine} · Score ${s.score}`).join(' &nbsp; | &nbsp; ')}</span><small>Table order is now fixed alphabetically; live prices, volume and signals update without reordering the rows.</small>`:'<b>🔥 TOP LIVE SIGNALS</b><span>No qualifying signal at the current scan.</span><small>Table order is fixed alphabetically.</small>';
+    if(!box){box=document.createElement('div');box.id='topSignals';box.className='notice';const panel=document.querySelector('#signals')?.closest('.panel');panel?.insertBefore(box,panel.querySelector('.tableWrap'));}
+    box.innerHTML=signals.length?`<b>🔥 TOP LIVE SIGNALS · ${signals.length}</b><span>${signals.map((s,i)=>`${i+1}. ${esc(s.symbol)} · ${esc(s.side||s.signal)} · ${esc(s.engine)} · Score ${s.score}`).join(' &nbsp; | &nbsp; ')}</span><small>Delta-style order: highest 24H-volume/liquidity contracts appear first. Live values update on each scan.</small>`:'<b>🔥 TOP LIVE SIGNALS</b><span>No qualifying signal at the current scan.</span><small>Delta-style order: highest 24H-volume/liquidity contracts appear first.</small>';
     const qualifying=(rows||[]).filter(r=>r.mom?.signal==='LONG'||r.mom?.signal==='SHORT'||r.scalp?.signal==='LONG'||r.scalp?.signal==='SHORT').length;
     const set=window.set||((id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v});
-    set('scannerInfo',`${visible.length} analysed${search?' · filtered':''} · stable order`);
+    set('scannerInfo',`${visible.length} coins${search?' · filtered':''} · Delta-style liquidity order`);
     set('signalCount',`${qualifying} qualifying signals`);
   }
-  window.renderSignals=stableRenderSignals;
+  window.renderSignals=deltaStyleRenderSignals;
 })();

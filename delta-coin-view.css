@@ -1,0 +1,20 @@
+/* DeltaScanner-style coin table for Binance scanner */
+.deltaCompact{min-width:1180px!important}
+.deltaCompact th{padding:8px 10px!important;font-size:8px!important}
+.deltaCompact td{padding:8px 10px!important;font-size:10px!important}
+.deltaCompact tbody tr{transition:background .12s ease,box-shadow .12s ease}
+.deltaCompact tbody tr:hover{background:#101827!important}
+.deltaCompact td:first-child{font-weight:900;font-size:11px!important;letter-spacing:.1px}
+.deltaCompact td:nth-child(2){font-variant-numeric:tabular-nums}
+.deltaCompact td:nth-child(4){color:#aeb8c8}
+.deltaCompact td:nth-child(6),.deltaCompact td:nth-child(9){font-weight:900}
+.deltaCompact td:nth-child(11){max-width:330px;overflow:hidden;text-overflow:ellipsis}
+.deltaCompact tbody tr.rowLong{box-shadow:inset 2px 0 0 #48df91}
+.deltaCompact tbody tr.rowShort{box-shadow:inset 2px 0 0 #ff697a}
+.deltaCompact tbody tr.rowLong td:nth-child(7),.deltaCompact tbody tr.rowLong td:nth-child(10){color:#48df91!important;font-weight:900}
+.deltaCompact tbody tr.rowShort td:nth-child(7),.deltaCompact tbody tr.rowShort td:nth-child(10){color:#ff697a!important;font-weight:900}
+.deltaCompact .coinUp{color:#e8edf7!important}
+.deltaCompact .coinDown{color:#e8edf7!important}
+.deltaCompact .coinLong{color:#48df91!important;font-weight:900}
+.deltaCompact .coinShort{color:#ff697a!important;font-weight:900}
+@media(max-width:700px){.deltaCompact{min-width:1180px!important}}

@@ -1,10 +1,15 @@
-/* Delta Scanner inspired radar highlights */
-.radarCards .radarCard:nth-child(1){border-color:#1f6b49;background:linear-gradient(180deg,#0c2118,#0b111c);box-shadow:0 0 18px rgba(72,223,145,.14)}
-.radarCards .radarCard:nth-child(2){border-color:#71313b;background:linear-gradient(180deg,#250f14,#0b111c);box-shadow:0 0 18px rgba(255,105,122,.14)}
-.radarCards .radarCard:nth-child(1) li span{color:#d8ffe9;font-weight:900;text-shadow:0 0 7px rgba(72,223,145,.35)}
-.radarCards .radarCard:nth-child(2) li span{color:#ffe0e4;font-weight:900;text-shadow:0 0 7px rgba(255,105,122,.35)}
-.radarCards .radarCard:nth-child(1) li strong{color:#48df91!important;font-size:11px;font-weight:900;text-shadow:0 0 9px rgba(72,223,145,.65)}
-.radarCards .radarCard:nth-child(2) li strong{color:#ff697a!important;font-size:11px;font-weight:900;text-shadow:0 0 9px rgba(255,105,122,.65)}
-.radarCards .radarCard:nth-child(1) small{color:#72e3a5}
-.radarCards .radarCard:nth-child(2) small{color:#ff8b98}
-.radarCards .radarCard:nth-child(1) ol,.radarCards .radarCard:nth-child(2) ol{line-height:1.25}
+/* Delta Scanner inspired radar highlights - V2 */
+.radarCards .radarCard:nth-child(1){border:1px solid #39d98a!important;background:linear-gradient(180deg,#103522 0%,#0b111c 100%)!important;box-shadow:0 0 22px rgba(57,217,138,.28),inset 0 0 18px rgba(57,217,138,.08)!important}
+.radarCards .radarCard:nth-child(2){border:1px solid #ff5268!important;background:linear-gradient(180deg,#35131a 0%,#0b111c 100%)!important;box-shadow:0 0 22px rgba(255,82,104,.28),inset 0 0 18px rgba(255,82,104,.08)!important}
+.radarCards .radarCard:nth-child(1)>small{color:#7dffb7!important;font-weight:900!important;text-shadow:0 0 8px rgba(57,217,138,.45)!important}
+.radarCards .radarCard:nth-child(2)>small{color:#ff9aa7!important;font-weight:900!important;text-shadow:0 0 8px rgba(255,82,104,.45)!important}
+.radarCards .radarCard:nth-child(1) ol,.radarCards .radarCard:nth-child(2) ol{margin:7px 0 0!important;padding-left:18px!important;line-height:1.35!important}
+.radarCards .radarCard:nth-child(1) ol li{color:#dffff0!important;font-weight:900!important}
+.radarCards .radarCard:nth-child(2) ol li{color:#ffe3e7!important;font-weight:900!important}
+.radarCards .radarCard:nth-child(1) ol li span{color:#f2fff8!important;font-weight:950!important;text-shadow:0 0 8px rgba(57,217,138,.55)!important}
+.radarCards .radarCard:nth-child(2) ol li span{color:#fff4f5!important;font-weight:950!important;text-shadow:0 0 8px rgba(255,82,104,.55)!important}
+.radarCards .radarCard:nth-child(1) ol li strong{color:#39ff96!important;font-size:12px!important;font-weight:950!important;text-shadow:0 0 10px rgba(57,255,150,.85)!important}
+.radarCards .radarCard:nth-child(2) ol li strong{color:#ff5268!important;font-size:12px!important;font-weight:950!important;text-shadow:0 0 10px rgba(255,82,104,.85)!important}
+.radarCards .radarCard:nth-child(1)>span,.radarCards .radarCard:nth-child(2)>span{font-weight:900!important}
+.radarCards .radarCard:nth-child(1)>span{color:#f2fff8!important;text-shadow:0 0 8px rgba(57,217,138,.35)!important}
+.radarCards .radarCard:nth-child(2)>span{color:#fff4f5!important;text-shadow:0 0 8px rgba(255,82,104,.35)!important}

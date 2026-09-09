@@ -6,8 +6,26 @@
 <meta name="theme-color" content="#060a12" />
 <meta name="description" content="Binance USDⓈ-M Futures all-coins live scanner and controlled execution engine" />
 <title>Binance All-Coins Auto Engine</title>
+<style>
+.engine-rules{margin:12px auto 0;max-width:1400px;padding:14px 16px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:linear-gradient(135deg,#101827,#17112a);color:#fff;font-family:Arial,sans-serif;box-sizing:border-box}.engine-rules h3{margin:0 0 10px;font-size:15px}.engine-rules-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.engine-rule{padding:10px;border-radius:11px;background:rgba(255,255,255,.07);font-size:12px;line-height:1.35}.engine-rule b{display:block;font-size:13px;margin-bottom:3px}.engine-rule span{opacity:.8}@media(max-width:900px){.engine-rules-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.engine-rules-grid{grid-template-columns:1fr}.engine-rules{margin:8px;padding:12px}}
+</style>
 </head>
 <body>
+<div class="engine-rules" aria-label="Auto trading engine rules">
+  <h3>⚙️ AUTO ENGINE — ACTIVE RULES & SAFETY</h3>
+  <div class="engine-rules-grid">
+    <div class="engine-rule"><b>🌐 Full Universe Scan</b><span>All active Binance USDT perpetual contracts are scanned in the background.</span></div>
+    <div class="engine-rule"><b>📊 Signal Score Filter</b><span>Only strongest qualifying signals pass the minimum score filter.</span></div>
+    <div class="engine-rule"><b>🎯 ATR SL + 2R TP</b><span>Automatic entry uses ATR-based stop-loss and a 2R take-profit target.</span></div>
+    <div class="engine-rule"><b>💰 Risk Sizing</b><span>Position quantity is calculated from configured risk per trade and stop distance.</span></div>
+    <div class="engine-rule"><b>🛡️ Max Positions</b><span>New entries stop when the configured simultaneous-position limit is reached.</span></div>
+    <div class="engine-rule"><b>🛑 Daily Loss Guard</b><span>New entries are blocked after the configured daily loss limit is reached.</span></div>
+    <div class="engine-rule"><b>⏳ Coin Cooldown</b><span>After an entry, the same coin is blocked for the configured cooldown period.</span></div>
+    <div class="engine-rule"><b>📏 Binance Quantity Rules</b><span>Order quantity is rounded to the symbol LOT_SIZE step and checked against min/max quantity.</span></div>
+    <div class="engine-rule"><b>🧪 PAPER Default</b><span>PAPER mode sends no real Binance orders and is the safe default.</span></div>
+    <div class="engine-rule"><b>🔴 LIVE Protected</b><span>LIVE orders require server-side BINANCE_API_KEY and BINANCE_API_SECRET.</span></div>
+  </div>
+</div>
 <div id="root"></div>
 <script type="module" src="/src/both.jsx"></script>
 </body>

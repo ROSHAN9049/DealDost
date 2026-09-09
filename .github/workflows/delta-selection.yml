@@ -17,13 +17,13 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           p = Path('app.js')
           s = p.read_text(encoding='utf-8')
           s = s.replace('MAX_SCAN=31', 'MAX_SCAN=50', 1)
           old_scan = "tickers=(all||[]).filter(t=>map.has(t.symbol)).sort((a,b)=>Math.abs(n(b.priceChangePercent))-Math.abs(n(a.priceChangePercent)));"
           new_scan = "tickers=(all||[]).filter(t=>map.has(t.symbol)).sort((a,b)=>Math.abs(n(b.priceChangePercent))-Math.abs(n(a.priceChangePercent))).slice(0,MAX_SCAN);"
-          if old_scan in s:
-              s=s.replace(old_scan,new_scan,1)
+          if old_scan in s:s=s.replace(old_scan,new_scan,1)
           start=s.find('function renderSignals(rows){')
           end=s.find('function paperOpen(',start)
           if start>=0 and end>start:
@@ -33,17 +33,18 @@ jobs:
 
           p=Path('index.html')
           h=p.read_text(encoding='utf-8')
-          old='<th>CONTRACT</th><th>PRICE</th><th>24H CHANGE</th><th>VOLUME</th><th>MOMENTUM</th><th>SCORE</th><th>SIGNAL</th><th>SCALPING</th><th>SCORE</th><th>SIGNAL</th><th>SIGNAL REASON</th><th>ACTION</th>'
-          new='<th>#</th><th>COIN</th><th>PRICE</th><th>24H CHANGE</th><th>VOLUME</th><th>MOMENTUM</th><th>SCORE</th><th>SIGNAL</th><th>S/R</th><th>ACTION</th>'
-          if old in h:h=h.replace(old,new,1)
+          pattern=r'<table(?: class="deltaCompact")?><thead><tr><th>CONTRACT</th>.*?</tr></thead><tbody id="signals"'
+          replacement='<table class="deltaCompact"><thead><tr><th>#</th><th>COIN</th><th>PRICE</th><th>24H CHANGE</th><th>VOLUME</th><th>MOMENTUM</th><th>SCORE</th><th>SIGNAL</th><th>S/R</th><th>ACTION</th></tr></thead><tbody id="signals"'
+          h,n=re.subn(pattern,replacement,h,count=1,flags=re.S)
+          if not n:
+              h=h.replace('<table><thead><tr><th>CONTRACT</th>','<table class="deltaCompact"><thead><tr><th>#</th><th>COIN</th>',1)
           h=h.replace('colspan="12" class="empty"','colspan="10" class="empty"')
-          h=h.replace('All eligible contracts discovered; top 31 liquid contracts analysed each scan for Delta-style compact view','All eligible perpetual contracts discovered; Top 50 selected by absolute 24H change for Delta-style compact view')
-          h=h.replace('style.css?v=20260908-9','style.css?v=20260909-1').replace('delta-coin-view.css?v=20260908-1','delta-coin-view.css?v=20260909-2').replace('app.js?v=20260908-7','app.js?v=20260909-2').replace('stable-ui.js?v=20260908-5','stable-ui.js?v=20260909-2')
+          h=h.replace('style.css?v=20260908-9','style.css?v=20260909-3').replace('delta-coin-view.css?v=20260908-1','delta-coin-view.css?v=20260909-3').replace('app.js?v=20260908-7','app.js?v=20260909-3').replace('stable-ui.js?v=20260908-5','stable-ui.js?v=20260909-3')
           p.write_text(h,encoding='utf-8')
 
           p=Path('style.css')
           c=p.read_text(encoding='utf-8')
-          extra='''\n/* Delta-style Top-50 compact scanner */\n.deltaCompact th,.deltaCompact td{padding:7px 9px;font-size:10px}.deltaCompact th{font-size:8px}.deltaCompact td:nth-child(1){text-align:center;color:#718099;width:28px}.deltaCompact td:nth-child(2){font-weight:900}.deltaCompact td:nth-child(4){font-weight:900}.deltaCompact td:nth-child(7),.deltaCompact td:nth-child(8),.deltaCompact td:nth-child(9){text-align:center}.deltaCompact td:nth-child(10){text-align:center}.deltaCompact .signalBtn{padding:5px 8px;font-size:9px}\n@media(max-width:700px){.deltaCompact{min-width:760px}.deltaCompact th,.deltaCompact td{padding:7px 8px;font-size:9px}.deltaCompact th{font-size:7px}}\n'''
+          extra='''\n/* Delta-style Top-50 compact scanner */\n.deltaCompact{min-width:900px}.deltaCompact th,.deltaCompact td{padding:7px 9px;font-size:10px}.deltaCompact th{font-size:8px}.deltaCompact td:nth-child(1){text-align:center;color:#718099;width:28px}.deltaCompact td:nth-child(2){font-weight:900}.deltaCompact td:nth-child(4){font-weight:900}.deltaCompact td:nth-child(7),.deltaCompact td:nth-child(8),.deltaCompact td:nth-child(9),.deltaCompact td:nth-child(10){text-align:center}.deltaCompact .signalBtn{padding:5px 8px;font-size:9px}\n@media(max-width:700px){.deltaCompact{min-width:760px}.deltaCompact th,.deltaCompact td{padding:7px 8px;font-size:9px}.deltaCompact th{font-size:7px}}\n'''
           if '/* Delta-style Top-50 compact scanner */' not in c:c+=extra
           p.write_text(c,encoding='utf-8')
           PY

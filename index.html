@@ -14,19 +14,20 @@
 <div class="engine-rules" aria-label="Auto trading engine rules">
   <h3>⚙️ AUTO ENGINE — ACTIVE RULES & SAFETY</h3>
   <div class="engine-rules-grid">
-    <div class="engine-rule"><b>🌐 Full Universe Scan</b><span>All active Binance USDT perpetual contracts are scanned in the background.</span></div>
-    <div class="engine-rule"><b>📊 Signal Score Filter</b><span>Only strongest qualifying signals pass the minimum score filter.</span></div>
-    <div class="engine-rule"><b>🎯 ATR SL + 2R TP</b><span>Automatic entry uses ATR-based stop-loss and a 2R take-profit target.</span></div>
-    <div class="engine-rule"><b>💰 Risk Sizing</b><span>Position quantity is calculated from configured risk per trade and stop distance.</span></div>
-    <div class="engine-rule"><b>🛡️ Max Positions</b><span>New entries stop when the configured simultaneous-position limit is reached.</span></div>
-    <div class="engine-rule"><b>🛑 Daily Loss Guard</b><span>New entries are blocked after the configured daily loss limit is reached.</span></div>
-    <div class="engine-rule"><b>⏳ Coin Cooldown</b><span>After an entry, the same coin is blocked for the configured cooldown period.</span></div>
-    <div class="engine-rule"><b>📏 Binance Quantity Rules</b><span>Order quantity is rounded to the symbol LOT_SIZE step and checked against min/max quantity.</span></div>
-    <div class="engine-rule"><b>🧪 PAPER Default</b><span>PAPER mode sends no real Binance orders and is the safe default.</span></div>
-    <div class="engine-rule"><b>🔴 LIVE Protected</b><span>LIVE orders require server-side BINANCE_API_KEY and BINANCE_API_SECRET.</span></div>
+    <div class="engine-rule"><b>🌐 Full Universe Scan</b><span>All active Binance USDT perpetual contracts are scanned in rotating deep-analysis batches.</span></div>
+    <div class="engine-rule"><b>📊 Signal Score Filter</b><span>Only qualifying signals with score 75+ can start a paper trade.</span></div>
+    <div class="engine-rule"><b>🎯 ATR SL + 2R TP</b><span>Paper entries use ATR-based stop-loss and 2R take-profit.</span></div>
+    <div class="engine-rule"><b>💰 Risk Sizing</b><span>Paper quantity is calculated from current virtual equity and configured risk.</span></div>
+    <div class="engine-rule"><b>🛡️ Max Positions</b><span>Maximum 3 simultaneous paper positions by default.</span></div>
+    <div class="engine-rule"><b>🛑 Daily Loss Guard</b><span>New paper entries stop after the 3% daily loss limit.</span></div>
+    <div class="engine-rule"><b>⏳ Coin Cooldown</b><span>Same coin is blocked for 15 minutes after entry.</span></div>
+    <div class="engine-rule"><b>📏 Quantity Rules</b><span>Paper sizing follows a conservative quantity calculation.</span></div>
+    <div class="engine-rule"><b>🧪 PAPER AUTO-START</b><span>Browser paper engine starts automatically in PAPER mode with ₹10,000.</span></div>
+    <div class="engine-rule"><b>🔴 LIVE Protected</b><span>LIVE still requires the server-side worker and Binance API credentials.</span></div>
   </div>
 </div>
 <div id="root"></div>
 <script type="module" src="/src/both.jsx"></script>
+<script type="module" src="/src/paper-engine.js"></script>
 </body>
 </html>

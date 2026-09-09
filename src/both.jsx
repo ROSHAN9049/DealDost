@@ -1,4 +1,4 @@
-import React,{useEffect,useMemo,useState}from'react';
+import React,{useEffect,useMemo,useRef,useState}from'react';
 import{createRoot}from'react-dom/client';
 import'./style.css';
 
@@ -6,9 +6,8 @@ const TICKER='https://fapi.binance.com/fapi/v1/ticker/24hr';
 const KLINES='https://fapi.binance.com/fapi/v1/klines';
 const REFRESH=15000;
 const num=v=>Number.isFinite(Number(v))?Number(v):0;
-const priceOf=r=>num(r?.lastPrice||r?.price||r?.marketPrice);
 const fmt=v=>num(v).toLocaleString('en-US',{maximumFractionDigits:8});
-const money=v=>Math.abs(num(v))>=1e6?'$'+(Math.abs(v)/1e6).toFixed(2)+'M':Math.abs(v)>=1e3?'$'+(Math.abs(v)/1e3).toFixed(1)+'K':'$'+Math.abs(v).toFixed(0);
+const money=v=>Math.abs(num(v))>=1e9?'$'+(Math.abs(v)/1e9).toFixed(2)+'B':Math.abs(num(v))>=1e6?'$'+(Math.abs(v)/1e6).toFixed(2)+'M':Math.abs(num(v))>=1e3?'$'+(Math.abs(v)/1e3).toFixed(1)+'K':'$'+Math.abs(v).toFixed(0);
 
 async function getJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('Binance API HTTP '+r.status);return r.json()}
 async function candles(symbol,interval='5m',limit=30){const j=await getJSON(`${KLINES}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`);return Array.isArray(j)?j:[]}
@@ -17,11 +16,10 @@ function spike(k){if(k.length<8)return 0;const v=k.slice(-8,-1).map(x=>num(x[5])
 function analyse(r,k5,k15){const t5=trend(k5),t15=trend(k15),sp=spike(k5),chg=num(r.change),changeScore=Math.min(Math.abs(chg)/8,1)*30,spikeScore=Math.min(Math.max(sp-2,0)/2,1)*25,trendScore=t5===t15&&t5!=='WAIT'?25:0,score=Math.round(changeScore+spikeScore+trendScore+Math.min(num(r.volume)/50000000,1)*20),buy=chg>=2&&t5==='BULLISH'&&t15==='BULLISH'&&sp>=2&&score>=70,sell=chg<=-2&&t5==='BEARISH'&&t15==='BEARISH'&&sp>=2&&score>=70;return{t5,t15,spike:sp,score,signal:buy?'BUY':sell?'SELL':'WATCH'}}
 
 function App(){
- const[rows,setRows]=useState([]),[coinOrder,setCoinOrder]=useState([]),[loading,setLoading]=useState(true),[analysing,setAnalysing]=useState(false),[err,setErr]=useState(''),[paper,setPaper]=useState(()=>localStorage.getItem('deal-paper')==='1'),[capital,setCapital]=useState(()=>num(localStorage.getItem('deal-capital'))||10000),[search,setSearch]=useState(''),[side,setSide]=useState('ALL'),[sort,setSort]=useState('fixed'),[lastUpdate,setLastUpdate]=useState('—');
- async function load(){setAnalysing(true);try{const j=await getJSON(TICKER);if(!Array.isArray(j))throw Error('Invalid Binance ticker response');const all=j.filter(x=>x.symbol?.endsWith('USDT')&&x.symbol!=='USDCUSDT'&&x.symbol!=='BTCDOMUSDT');
-   const bySymbol=new Map(all.map(x=>[x.symbol,x]));
-   let order=coinOrder;
-   if(!order.length){order=all.map(x=>x.symbol).sort((a,b)=>Math.abs(num(bySymbol.get(b)?.priceChangePercent))-Math.abs(num(bySymbol.get(a)?.priceChangePercent))).slice(0,50);setCoinOrder(order)}
+ const[rows,setRows]=useState([]),[coinOrder,setCoinOrder]=useState([]),orderRef=useRef([]),[loading,setLoading]=useState(true),[analysing,setAnalysing]=useState(false),[err,setErr]=useState(''),[paper,setPaper]=useState(()=>localStorage.getItem('deal-paper')==='1'),[capital,setCapital]=useState(()=>num(localStorage.getItem('deal-capital'))||10000),[search,setSearch]=useState(''),[side,setSide]=useState('ALL'),[sort,setSort]=useState('fixed'),[lastUpdate,setLastUpdate]=useState('—');
+ async function load(){setAnalysing(true);try{const j=await getJSON(TICKER);if(!Array.isArray(j))throw Error('Invalid Binance ticker response');const all=j.filter(x=>x.symbol?.endsWith('USDT')&&x.symbol!=='USDCUSDT'&&x.symbol!=='BTCDOMUSDT');const bySymbol=new Map(all.map(x=>[x.symbol,x]));
+   let order=orderRef.current;
+   if(!order.length){order=all.map(x=>x.symbol).sort((a,b)=>Math.abs(num(bySymbol.get(b)?.priceChangePercent))-Math.abs(num(bySymbol.get(a)?.priceChangePercent))).slice(0,50);orderRef.current=order;setCoinOrder(order)}
    const base=order.map(symbol=>{const x=bySymbol.get(symbol);return x?{symbol,change:num(x.priceChangePercent),volume:num(x.quoteVolume),lastPrice:num(x.lastPrice),high:num(x.highPrice),low:num(x.lowPrice),signal:{signal:'WATCH',score:0,spike:0,t5:'WAIT',t15:'WAIT'}}:null}).filter(Boolean);
    if(!base.length)throw Error('No Binance USDT perpetual coins returned');
    setRows(prev=>base.map(r=>{const old=prev.find(p=>p.symbol===r.symbol);return old?{...old,change:r.change,volume:r.volume,lastPrice:r.lastPrice,high:r.high,low:r.low}:r}));setLoading(false);setErr('');setLastUpdate(new Date().toLocaleTimeString());
@@ -30,10 +28,10 @@ function App(){
  useEffect(()=>{load();const id=setInterval(load,REFRESH);return()=>clearInterval(id)},[]);
  useEffect(()=>localStorage.setItem('deal-paper',paper?'1':'0'),[paper]);useEffect(()=>localStorage.setItem('deal-capital',capital),[capital]);
  const filtered=useMemo(()=>{let a=rows.filter(r=>!search||r.symbol.toLowerCase().includes(search.toLowerCase()));if(side!=='ALL')a=a.filter(r=>r.signal.signal===side);if(sort==='score')return[...a].sort((a,b)=>b.signal.score-a.signal.score);if(sort==='change')return[...a].sort((a,b)=>Math.abs(b.change)-Math.abs(a.change));if(sort==='volume')return[...a].sort((a,b)=>b.volume-a.volume);return a},[rows,search,side,sort]);
- const buys=rows.filter(r=>r.signal.signal==='BUY').length,sells=rows.filter(r=>r.signal.signal==='SELL').length;
+ const buys=rows.filter(r=>r.signal.signal==='BUY').length,sells=rows.filter(r=>r.signal.signal==='SELL').length,topPump=rows.length?rows.reduce((best,r)=>r.change>best.change?r:best,rows[0]):null;
  return <div className="app"><header><div><div className="brand">⚡ BINANCE SCANNER</div><div className="sub">Binance USDⓈ-M Futures · Live Momentum + Scalping Scanner</div></div><div className="live"><span/>LIVE · 15s</div></header>
  <section className="hero"><div><h1>Momentum + Scalping Scanner</h1><p>Live Binance Futures perpetual scanner. Top 50 coins are selected once when the scanner starts; the coin list and row order stay stable while price, volume and signals update live. Paper trading only — real orders remain OFF.</p></div><button onClick={load} disabled={analysing}>↻ Refresh</button></section>
- <section className="cards"><div className="card"><small>COINS LOADED</small><strong>{rows.length}</strong><span>Stable scanner coin list</span></div><div className="card"><small>TOP PUMP</small><strong className="up">{rows[0]?`+${rows[0].change.toFixed(2)}%`:'—'}</strong><span>{rows[0]?.symbol||'Waiting for market data'}</span></div><div className="card"><small>BUY SIGNALS</small><strong className="up">{buys}</strong><span>5m + 15m confirmation</span></div><div className="card"><small>SELL SIGNALS</small><strong className="down">{sells}</strong><span>Paper mode only</span></div></section>
+ <section className="cards"><div className="card"><small>COINS LOADED</small><strong>{rows.length}</strong><span>Stable scanner coin list</span></div><div className="card"><small>TOP PUMP</small><strong className="up">{topPump?`${topPump.change>=0?'+':''}${topPump.change.toFixed(2)}%`:'—'}</strong><span>{topPump?.symbol||'Waiting for market data'}</span></div><div className="card"><small>BUY SIGNALS</small><strong className="up">{buys}</strong><span>5m + 15m confirmation</span></div><div className="card"><small>SELL SIGNALS</small><strong className="down">{sells}</strong><span>Paper mode only</span></div></section>
  <section className="panel paper"><div className="panelhead"><h2>📄 PAPER TRADING</h2><span>NO REAL ORDERS</span></div><div className="papergrid"><div className="dualbox"><b>Paper Trading {paper?'ON':'OFF'}</b><span>Virtual capital only. Binance API keys and real order execution are not used.</span><button className="toggle" onClick={()=>setPaper(v=>!v)}>{paper?'Turn OFF':'Turn ON'}</button></div><label>VIRTUAL CAPITAL<input type="number" value={capital} onChange={e=>setCapital(Math.max(0,num(e.target.value)))}/></label></div><p className="papernote">{paper?'Paper trading is ON. Signals can be used for simulated entries only.':'Paper trading is OFF. Scanner continues to show live market signals.'}</p></section>
  {err&&<div className="error">⚠ {err} <button onClick={load}>Retry</button></div>}
  <div className="controls"><input placeholder="Search coin…" value={search} onChange={e=>setSearch(e.target.value)}/><label>SIGNAL <select value={side} onChange={e=>setSide(e.target.value)}><option>ALL</option><option>BUY</option><option>SELL</option><option>WATCH</option></select></label><label>SORT <select value={sort} onChange={e=>setSort(e.target.value)}><option value="fixed">Fixed Coin Order</option><option value="score">Score</option><option value="change">24H Change</option><option value="volume">Volume</option></select></label><span style={{marginLeft:'auto',color:'#748196',fontSize:10}}>Updated {lastUpdate}{analysing?' · analysing…':''}</span></div>

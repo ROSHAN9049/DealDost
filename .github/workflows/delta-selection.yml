@@ -19,12 +19,9 @@ jobs:
           from pathlib import Path
           p = Path('app.js')
           s = p.read_text(encoding='utf-8')
-          old = "const API='https://fapi.binance.com',START=10000,RISK=.01,MAX=5,SCAN_MS=10000,MAX_SCAN=31,KEY='binanceScannerPaperV2';"
-          new = "const API='https://fapi.binance.com',START=10000,RISK=.01,MAX=5,SCAN_MS=10000,MAX_SCAN=50,KEY='binanceScannerPaperV2';"
-          if old in s:
-              s = s.replace(old, new, 1)
-          old_scan = "const minVol=n($('minVolume')?.value)||100000,mode=$('mode')?.value||'both';if(!contracts.length)await loadContracts();const all=await api(`${API}/fapi/v1/ticker/24hr`),map=new Map(contracts.map(c=>[c.symbol,c]));tickers=(all||[]).filter(t=>map.has(t.symbol)&&n(t.quoteVolume)>=minVol).sort((a,b)=>n(b.quoteVolume)-n(a.quoteVolume));set('coinCount',`${Math.min(tickers.length,MAX_SCAN)}/${contracts.length}`);set('scannerInfo',`${Math.min(tickers.length,MAX_SCAN)} liquid contracts · Delta-style compact scan`);"
-          new_scan = "const mode=$('mode')?.value||'both';if(!contracts.length)await loadContracts();const all=await api(`${API}/fapi/v1/ticker/24hr`),map=new Map(contracts.map(c=>[c.symbol,c]));tickers=(all||[]).filter(t=>map.has(t.symbol)).sort((a,b)=>Math.abs(n(b.priceChangePercent))-Math.abs(n(a.priceChangePercent)));set('coinCount',`${Math.min(tickers.length,MAX_SCAN)}/${contracts.length}`);set('scannerInfo',`${Math.min(tickers.length,MAX_SCAN)} contracts · Delta-style 24H change order`);"
+          s = s.replace("MAX_SCAN=31", "MAX_SCAN=50", 1)
+          old_scan = "tickers=(all||[]).filter(t=>map.has(t.symbol)).sort((a,b)=>Math.abs(n(b.priceChangePercent))-Math.abs(n(a.priceChangePercent)));"
+          new_scan = "tickers=(all||[]).filter(t=>map.has(t.symbol)).sort((a,b)=>Math.abs(n(b.priceChangePercent))-Math.abs(n(a.priceChangePercent))).slice(0,MAX_SCAN);"
           if old_scan in s:
               s = s.replace(old_scan, new_scan, 1)
           p.write_text(s, encoding='utf-8')
@@ -37,6 +34,6 @@ jobs:
           if git diff --cached --quiet; then
             echo 'No scanner selection changes needed.'
           else
-            git commit -m 'Match scanner selection to DeltaScanner top 50 by absolute 24H change'
+            git commit -m 'Enforce Binance top 50 by absolute 24H change'
             git push
           fi

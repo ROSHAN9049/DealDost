@@ -1,0 +1,21 @@
+/* VISIBLE COLOUR THEME v2 */
+body{background:radial-gradient(circle at 0 0,#00eaff 0,#063d9b 18%,#4b00a8 43%,#b50072 68%,#02020a 100%)!important;background-attachment:fixed!important}
+header{background:linear-gradient(120deg,#001d52,#007cff 30%,#8c00ff 58%,#ff007f 82%,#4b0038)!important;border-color:#7fffff!important;box-shadow:0 0 70px #00eaffaa,0 0 100px #9d00ff55,0 22px 70px #000e!important}
+.brand{background:linear-gradient(90deg,#00ffff,#7aff00,#fff000,#ff43e9,#00ffff)!important;-webkit-background-clip:text!important;background-clip:text!important;color:transparent!important}
+.hero>div:nth-child(1){background:linear-gradient(145deg,#00e5ff,#006eff,#00276e)!important;box-shadow:0 0 50px #00e5ff99!important}
+.hero>div:nth-child(2){background:linear-gradient(145deg,#00ff9d,#00a85a,#003d28)!important;box-shadow:0 0 50px #00ff9d99!important}
+.hero>div:nth-child(3){background:linear-gradient(145deg,#ff174f,#e00055,#57001e)!important;box-shadow:0 0 50px #ff174f99!important}
+.hero>div:nth-child(4){background:linear-gradient(145deg,#e000ff,#7b00ff,#28004d)!important;box-shadow:0 0 50px #c000ff99!important}
+.control{background:linear-gradient(120deg,#0067bd,#007cff 32%,#7300ff 62%,#d0007f)!important;border-color:#8fffff!important;box-shadow:0 0 55px #00aaff77,0 14px 40px #000c!important}
+.panel{background:linear-gradient(145deg,#0a2861,#071127 52%,#55006f)!important;border-color:#678fff!important}
+.scanner-panel{border-color:#71f6ff!important;box-shadow:0 0 70px #00cfff66,0 14px 40px #000d!important}
+.tablewrap{border-color:#5ceeff!important;box-shadow:0 0 45px #00cfff55!important}
+th{background:linear-gradient(180deg,#00d5ff,#5c22ff 55%,#ff007f)!important}
+tbody tr:nth-child(odd) td{background:linear-gradient(90deg,#071d48,#14255f)!important}
+tbody tr:nth-child(even) td{background:linear-gradient(90deg,#132d60,#42165f)!important}
+tbody tr:hover td{background:linear-gradient(90deg,#087bda,#c000b0)!important;filter:brightness(1.2)}
+.buyrow td{background:linear-gradient(90deg,#005f38,#00c978,#00ff9d)!important}
+.sellrow td{background:linear-gradient(90deg,#730026,#e00050,#ff174f)!important}
+.pill.buy{background:linear-gradient(135deg,#00d984,#00ffae)!important;color:#001b10!important;box-shadow:0 0 28px #00ffae!important}
+.pill.sell{background:linear-gradient(135deg,#ff174f,#ff003c)!important;box-shadow:0 0 28px #ff174f!important}
+.pill.watch{background:linear-gradient(135deg,#347cff,#8a2dff)!important;border-color:#c8c0ff!important}

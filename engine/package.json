@@ -1,0 +1,6 @@
+{
+  "name":"binance-auto-engine",
+  "private":true,
+  "type":"module",
+  "scripts":{"start":"node worker.mjs"}
+}

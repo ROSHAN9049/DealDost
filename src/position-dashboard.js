@@ -1,18 +1,14 @@
 const KEY='paper-engine-state-v1';
-const REFRESH=2000;
+const REFRESH=1000;
+let live=new Map(),ws=null,retry=null;
 function fmt(v){return Number(v||0).toLocaleString('en-IN',{maximumFractionDigits:8})}
+function money(v){return `₹${Number(v||0).toFixed(2)}`}
+function connect(){try{ws?.close();ws=new WebSocket('wss://fstream.binance.com/stream');ws.onopen=()=>ws.send(JSON.stringify({method:'SUBSCRIBE',params:['!ticker@arr'],id:7788}));ws.onmessage=e=>{try{const m=JSON.parse(e.data),data=Array.isArray(m)?m:(Array.isArray(m.data)?m.data:[]);data.forEach(x=>{if(x?.s&&x.c)live.set(x.s,+x.c)})}catch{}};ws.onclose=()=>{clearTimeout(retry);retry=setTimeout(connect,3000)}}catch{clearTimeout(retry);retry=setTimeout(connect,3000)}}
 function render(){
-  let el=document.getElementById('position-dashboard');
-  if(!el){
-    el=document.createElement('section');
-    el.id='position-dashboard';
-    el.style='margin:12px auto;max-width:1400px;padding:14px 16px;border:1px solid rgba(0,255,180,.25);border-radius:16px;background:linear-gradient(135deg,#071a18,#111827);color:#fff;font-family:Arial,sans-serif;box-sizing:border-box';
-    document.body.insertBefore(el,document.getElementById('root'));
-  }
-  let s;
-  try{s=JSON.parse(localStorage.getItem(KEY)||'{}')}catch{s={}}
-  const positions=Object.values(s.positions||{});
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><b>📌 POSITION DASHBOARD</b><div style="font-size:12px;opacity:.75;margin-top:3px">Browser PAPER engine positions · updates every 2 seconds</div></div><div style="font-weight:800">${positions.length}/${3} OPEN</div></div>${positions.length?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin-top:12px">${positions.map(p=>`<div style="padding:12px;border-radius:12px;background:${p.side==='BUY'?'rgba(0,180,100,.12)':'rgba(255,70,90,.12)'};border:1px solid ${p.side==='BUY'?'rgba(0,255,180,.3)':'rgba(255,80,100,.3)'}"><div style="display:flex;justify-content:space-between"><b>🪙 ${p.symbol}</b><b>${p.side==='BUY'?'🟢 BUY':'🔴 SELL'}</b></div><div style="font-size:12px;line-height:1.8;margin-top:6px">Entry: <b>${fmt(p.entry)}</b><br>Qty: <b>${fmt(p.qty)}</b><br>Stop Loss: <b>${fmt(p.sl)}</b><br>Take Profit: <b>${fmt(p.tp)}</b><br>Opened: <b>${p.opened?new Date(p.opened).toLocaleTimeString():'—'}</b></div></div>`).join('')}</div>`:`<div style="margin-top:12px;padding:16px;border-radius:12px;background:rgba(255,255,255,.06);text-align:center;opacity:.85">⏳ No open paper position yet. Engine is scanning for fully qualified BUY/SELL signals with score ≥ 75.</div>`}`;
+ let el=document.getElementById('position-dashboard');
+ if(!el){el=document.createElement('section');el.id='position-dashboard';el.style='margin:12px auto;max-width:1400px;padding:14px 16px;border:1px solid rgba(0,255,180,.25);border-radius:16px;background:linear-gradient(135deg,#071a18,#111827);color:#fff;font-family:Arial,sans-serif;box-sizing:border-box';document.body.insertBefore(el,document.getElementById('root'))}
+ let s;try{s=JSON.parse(localStorage.getItem(KEY)||'{}')}catch{s={}}
+ const positions=Object.values(s.positions||{});
+ el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><b>📌 POSITION DASHBOARD</b><div style="font-size:12px;opacity:.75;margin-top:3px">Browser PAPER engine positions · live P&L updates</div></div><div style="font-weight:800">${positions.length}/${3} OPEN</div></div>${positions.length?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin-top:12px">${positions.map(p=>{const price=live.get(p.symbol)||Number(p.current)||Number(p.entry);const pnl=p.side==='BUY'?(price-p.entry)*p.qty:(p.entry-price)*p.qty;return `<div style="padding:12px;border-radius:12px;background:${p.side==='BUY'?'rgba(0,180,100,.12)':'rgba(255,70,90,.12)'};border:1px solid ${p.side==='BUY'?'rgba(0,255,180,.3)':'rgba(255,80,100,.3)'}"><div style="display:flex;justify-content:space-between"><b>🪙 ${p.symbol}</b><b>${p.side==='BUY'?'🟢 BUY':'🔴 SELL'}</b></div><div style="font-size:12px;line-height:1.8;margin-top:6px">Entry: <b>${fmt(p.entry)}</b><br>Current: <b>${fmt(price)}</b><br>Qty: <b>${fmt(p.qty)}</b><br>Stop Loss: <b>${fmt(p.sl)}</b><br>Take Profit: <b>${fmt(p.tp)}</b><br>Opened: <b>${p.opened?new Date(p.opened).toLocaleTimeString():'—'}</b><br>Live P&L: <b style="font-size:16px">${money(pnl)}</b></div></div>`}).join('')}</div>`:`<div style="margin-top:12px;padding:16px;border-radius:12px;background:rgba(255,255,255,.06);text-align:center;opacity:.85">⏳ No open paper position yet. Engine is scanning for fully qualified BUY/SELL signals with score ≥ 75.</div>`}`;
 }
-render();
-setInterval(render,REFRESH);
+connect();render();setInterval(render,REFRESH);

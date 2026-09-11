@@ -1,0 +1,54 @@
+name: Fix Binance candle streams
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Fix Futures WebSocket market-stream endpoint
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [Path('src/both.jsx'), Path('src/paper-engine.js'), Path('src/scalping-engine.js')]
+          replacements = {
+              'wss://fstream.binance.com/market/ws': 'wss://fstream.binance.com/stream',
+              'wss://fstream.binance.com/market/stream': 'wss://fstream.binance.com/stream',
+          }
+          changed = []
+          for path in files:
+              if not path.exists():
+                  continue
+              text = path.read_text(encoding='utf-8')
+              new = text
+              for old, repl in replacements.items():
+                  new = new.replace(old, repl)
+              if new != text:
+                  path.write_text(new, encoding='utf-8')
+                  changed.append(str(path))
+          print('Updated:', ', '.join(changed) if changed else 'none')
+          PY
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/both.jsx src/paper-engine.js src/scalping-engine.js
+          if git diff --cached --quiet; then
+            echo 'No stream endpoint changes needed.'
+          else
+            git commit -m 'fix: use Binance combined futures stream endpoint for candles'
+            git push
+          fi

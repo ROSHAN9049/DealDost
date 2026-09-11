@@ -1,6 +1,6 @@
 const SCALP_KEY='scalping-paper-state-v1';
 const START=10000,RISK=.005,RR=1.5,MAX_POS=3,MIN_SCORE=70,SCAN=30000,MAX_CANDLES=60,TIMEOUT=5000;
-const WS='wss://fstream.binance.com/market/ws';
+const WS='wss://fstream.binance.com/stream';
 const esc=s=>String(s).replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]));
 const num=v=>Number(v)||0;
 const ema=(a,p=9)=>{if(!a.length)return 0;const k=2/(p+1);let e=num(a[0]);for(let i=1;i<a.length;i++)e=num(a[i])*k+e*(1-k);return e};

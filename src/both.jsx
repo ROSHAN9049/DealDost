@@ -2,7 +2,7 @@ import React,{useEffect,useMemo,useRef,useState}from'react';
 import{createRoot}from'react-dom/client';
 import'./style.css';import'./colour-dashboard.css';
 const n=v=>Number(v)||0,fmt=v=>n(v).toLocaleString('en-IN',{maximumFractionDigits:8}),pct=v=>`${n(v)>=0?'+':''}${n(v).toFixed(2)}%`;
-const WS_URL='wss://fstream.binance.com/market/ws';
+const WS_URL='wss://fstream.binance.com/stream';
 async function get(path){const direct=`https://fapi.binance.com${path}`;try{const r=await fetch(direct,{cache:'no-store'});if(r.ok)return r.json()}catch{}const r=await fetch(`/api/binance-market?path=${encodeURIComponent(path)}`,{cache:'no-store'});if(!r.ok)throw Error(`Binance ${r.status}`);return r.json()}
 function ema(a,p=9){if(!a.length)return 0;const k=2/(p+1);let e=n(a[0]);for(let i=1;i<a.length;i++)e=n(a[i])*k+e*(1-k);return e}
 function atr(k,p=14){if(k.length<p+1)return 0;let s=0;for(let i=k.length-p;i<k.length;i++){const h=n(k[i][2]),l=n(k[i][3]),pc=n(k[i-1][4]);s+=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc))}return s/p}

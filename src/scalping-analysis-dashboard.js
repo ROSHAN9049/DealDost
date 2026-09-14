@@ -18,7 +18,7 @@ function data(){
   for(const x of scannerRows())if(allowed.has(x.symbol))map.set(x.symbol,{...x});
   for(const [symbol,x] of Object.entries(c))if(allowed.has(symbol))map.set(symbol,{...map.get(symbol),...x,symbol});
   for(const x of engineCards())if(allowed.has(x.symbol))map.set(x.symbol,{...map.get(x.symbol),...x,symbol});
-  const signals=[...map.values()].map(x=>{const t=ticks[x.symbol]||ticks[x.symbol.toLowerCase()]||{};const price=n(x.price)||n(x.lastPrice)||n(t.price)||n(t.lastPrice);const vol=n(x.quoteVolume)||n(t.quoteVolume);const ch=f(x.priceChangePercent)??f(t.priceChangePercent)??0;return {...x,price,quoteVolume:vol,priceChangePercent:ch,signal:(x.signal||'WAIT'),valid:price>0&&vol>0};});
+  const signals=[...map.values()].map(x=>{const t=ticks[x.symbol]||ticks[x.symbol.toLowerCase()]||{};const price=n(x.price)||n(x.lastPrice)||n(t.price)||n(t.lastPrice);const vol=n(x.quoteVolume)||n(t.quoteVolume);const ch=f(x.priceChangePercent)??f(t.priceChangePercent)??0;const sig=x.signal||'WAIT';const readyReason=String(x.reason||'').includes('READY');const ready=sig==='BUY'||sig==='SELL';const direction=ready?sig:(readyReason?(String(x.reason).includes('SELL')?'SELL':'BUY'):null);return {...x,price,quoteVolume:vol,priceChangePercent:ch,signal:sig,valid:price>0&&vol>0,trend1:x.trend1||direction||'WAIT',trend5:x.trend5||direction||'WAIT',trend15:x.trend15||direction||'WAIT'};});
   return {u,signals,cacheCount:Object.keys(c).filter(k=>allowed.has(k)).length};
 }
 function rowsFor(signals){return signals.filter(x=>x.valid).sort((a,b)=>(b.score??-1)-(a.score??-1)||Math.abs(b.priceChangePercent)-Math.abs(a.priceChangePercent)).slice(0,20)}

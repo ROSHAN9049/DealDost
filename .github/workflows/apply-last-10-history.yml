@@ -3,6 +3,7 @@ name: Apply last 10 paper history
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,8 +20,6 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
-
           path = Path('src/paper-engine.js')
           text = path.read_text(encoding='utf-8')
 

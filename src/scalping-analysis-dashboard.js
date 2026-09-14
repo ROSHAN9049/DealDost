@@ -25,15 +25,27 @@ function scoreRows(signals){return signals.filter(x=>!x.invalidTicker||x.signal=
 function render(){
   let el=document.getElementById(rootId);if(!el){el=document.createElement('section');el.id=rootId;const root=document.getElementById('root');(root?.parentElement||document.body).appendChild(el)}const{universe,signals,engineActive}=getData();const rows=scoreRows(signals),buys=signals.filter(x=>!x.invalidTicker&&x.signal==='BUY'),sells=signals.filter(x=>!x.invalidTicker&&x.signal==='SELL');const top=buys[0]||sells[0]||rows[0],ready=buys.length+sells.length;el.innerHTML=`<div class="scalp-head"><div><div class="scalp-kicker">⚡ BINANCE SCALPING MODE</div><h2>📊 LIVE ANALYSIS DASHBOARD</h2><p>1M momentum + 5M trend · 24H direction · volume spike · score engine · paper only</p></div><div class="scalp-live"><i></i> ${engineActive?'LIVE ANALYSIS':'WAITING FOR ENGINE'}</div></div><div class="scalp-kpis"><div><small>🟢 BUY READY</small><b class="bull">${buys.length}</b></div><div><small>🔴 SELL READY</small><b class="bear">${sells.length}</b></div><div><small>🎯 BEST SCORE</small><b class="score">${top?.score??'—'}</b></div><div><small>📡 READY SIGNALS</small><b>${ready}</b></div><div><small>🌐 MARKET COINS</small><b>${universe.length}</b></div></div>${top?`<div class="scalp-focus"><div><small>🔥 TOP SCALP CANDIDATE</small><strong>${esc(top.symbol)}</strong><span class="${top.signal==='BUY'?'bull':top.signal==='SELL'?'bear':'neutral'}">${top.signal==='BUY'?'🟢 BUY':top.signal==='SELL'?'🔴 SELL':'⚪ WATCH'}</span></div><div><small>PRICE</small><b>${num(top.price).toLocaleString('en-IN',{maximumFractionDigits:8})}</b></div><div><small>24H</small><b class="${num(top.priceChangePercent)>=0?'bull':'bear'}">${pct(top.priceChangePercent)}</b></div><div><small>VOLUME SPIKE</small><b>${top.spike==null?'—':`${fmt(top.spike)}x`}</b></div><div><small>REASON</small><b>${esc(top.reason||'—')}</b></div></div>`:''}<div class="scalp-table-wrap"><table class="scalp-table"><thead><tr><th>#</th><th>COIN</th><th>PRICE</th><th>24H</th><th>VOL</th><th>1M</th><th>5M</th><th>15M</th><th>SPIKE</th><th>SCORE</th><th>SIGNAL</th><th>ANALYSIS</th></tr></thead><tbody>${rows.map((r,i)=>`<tr class="${r.signal==='BUY'?'row-buy':r.signal==='SELL'?'row-sell':'row-watch'}"><td>${i+1}</td><td><strong>${esc(r.symbol)}</strong></td><td>${num(r.price).toLocaleString('en-IN',{maximumFractionDigits:8})}</td><td class="${num(r.priceChangePercent)>=0?'bull':'bear'}">${pct(r.priceChangePercent)}</td><td>${money(r.quoteVolume)}</td><td class="${cls(r.trend1)}">${esc(r.trend1||'WAIT')}</td><td class="${cls(r.trend5)}">${esc(r.trend5||'WAIT')}</td><td class="${cls(r.trend15)}">${esc(r.trend15||'N/A')}</td><td class="${num(r.spike)>=1.5?'hot':''}">${r.spike==null?'—':`${fmt(r.spike)}x`}</td><td class="${num(r.score)>=75?'score':''}">${r.score??'—'}</td><td><span class="sig ${r.signal==='BUY'?'sig-buy':r.signal==='SELL'?'sig-sell':'sig-watch'}">${r.signal==='BUY'?'🟢 BUY':r.signal==='SELL'?'🔴 SELL':'⚪ WATCH'}</span></td><td class="reason">${esc(r.invalidTicker?'Waiting for valid live ticker':(r.reason||'Waiting for analysis'))}</td></tr>`).join('')}</tbody></table></div><div class="scalp-foot"><span>🧠 Standard stable universe · ${universe.length} active USDT perpetuals</span><span>🛡️ Dashboard only · real orders remain OFF</span></div>`;
 }
-function colorScalpHistoryPnl(){
-  const table=document.querySelector('#scalping-engine-panel #scalp-history table');
-  if(!table)return;
-  table.querySelectorAll('tbody tr').forEach(row=>{
+
+function colorPnlCells(){
+  const history=document.querySelector('#scalping-engine-panel #scalp-history table');
+  if(history) history.querySelectorAll('tbody tr').forEach(row=>{
     const cell=row.children[5];
     if(!cell)return;
     const value=Number((cell.textContent||'').replace(/[^0-9.-]/g,''));
-    cell.style.fontWeight='900';
-    cell.style.color=value>0?'#48df91':value<0?'#ff697a':'#c1c8d2';
+    cell.style.setProperty('font-weight','900','important');
+    cell.style.setProperty('color',value>0?'#48df91':value<0?'#ff697a':'#c1c8d2','important');
+  });
+  const open=document.querySelector('#scalping-engine-panel');
+  if(open) open.querySelectorAll('[data-scalp-pnl], .scalp-pnl, .live-pnl').forEach(cell=>{
+    const value=Number((cell.textContent||'').replace(/[^0-9.-]/g,''));
+    if(Number.isFinite(value)){
+      cell.style.setProperty('font-weight','900','important');
+      cell.style.setProperty('color',value>0?'#48df91':value<0?'#ff697a':'#c1c8d2','important');
+    }
   });
 }
-render();setInterval(()=>{render();colorScalpHistoryPnl()},1500);
+
+render();
+setInterval(()=>{render();colorPnlCells()},1000);
+const pnlObserver=new MutationObserver(()=>colorPnlCells());
+pnlObserver.observe(document.body,{childList:true,subtree:true});

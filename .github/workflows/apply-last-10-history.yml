@@ -1,0 +1,55 @@
+name: Apply last 10 paper history
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch paper history panel
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('src/paper-engine.js')
+          text = path.read_text(encoding='utf-8')
+
+          if 'LAST 10 CLOSED TRADES' in text:
+              print('Last 10 history already present')
+              raise SystemExit(0)
+
+          marker = "const ps=Object.values(state.positions),limit=maxPositions(),a=analytics(),target=a.n<50?50:100,remaining=Math.max(0,target-a.n),pfText=a.pf===Infinity?'∞':a.pf.toFixed(2),ddPct=(a.maxDD/START)*100;"
+          if marker not in text:
+              raise SystemExit('Panel marker not found')
+
+          history_code = r'''const recentHistory=(state.history||[]).slice(-10).reverse();
+          const historyHtml=`<div style="margin-top:12px;padding:11px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.04);overflow:auto"><div style="font-weight:700;margin-bottom:8px">🧾 LAST 10 CLOSED TRADES</div>${recentHistory.length?`<table style="width:100%;min-width:620px;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:6px">TIME</th><th style="text-align:left;padding:6px">COIN</th><th style="text-align:left;padding:6px">SIDE</th><th style="text-align:right;padding:6px">P&L</th><th style="text-align:right;padding:6px">R</th><th style="text-align:right;padding:6px">EQUITY</th></tr></thead><tbody>${recentHistory.map(x=>`<tr><td style="padding:6px">${new Date(x.time).toLocaleTimeString()}</td><td style="padding:6px;font-weight:700">${x.symbol}</td><td style="padding:6px">${x.side||'—'}</td><td style="padding:6px;text-align:right;font-weight:700;color:${+x.pnl>=0?'#22c55e':'#ef4444'}">${+x.pnl>=0?'+':''}₹${(+x.pnl||0).toFixed(2)}</td><td style="padding:6px;text-align:right;color:${+x.r>=0?'#22c55e':'#ef4444'}">${+x.r>=0?'+':''}${(+x.r||0).toFixed(2)}R</td><td style="padding:6px;text-align:right">₹${(+x.equity||0).toLocaleString('en-IN',{maximumFractionDigits:2})}</td></tr>`).join('')}</tbody></table>`:'<small>No closed trades yet</small>'}</div>`;
+          '''
+          text = text.replace(marker, marker + history_code, 1)
+          text = text.replace('p.innerHTML=`<div style=', 'p.innerHTML=`${historyHtml}<div style=', 1)
+          path.write_text(text, encoding='utf-8')
+          print('Last 10 history panel inserted')
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/paper-engine.js
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+          else
+            git commit -m 'fix: add last 10 closed trades dashboard'
+            git push
+          fi

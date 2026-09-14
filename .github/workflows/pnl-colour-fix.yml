@@ -1,0 +1,56 @@
+name: PnL colour patch
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Colour positive and negative PnL
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/paper-engine.js')
+          if not p.exists():
+              raise SystemExit('src/paper-engine.js not found')
+          s=p.read_text(encoding='utf-8')
+          old=s
+          s=s.replace(
+              'Realised P&L ₹${state.realised.toFixed(2)}',
+              '<span style="color:${state.realised>=0?\'#22c55e\':\'#ef4444\'};font-weight:700">Realised P&L ₹${state.realised.toFixed(2)}</span>'
+          )
+          s=re.sub(
+              r'P&L ₹\\\$\\\{p\\.unrealised\\.toFixed\\(2\\)\\}',
+              '<span style="color:${p.unrealised>=0?\'#22c55e\':\'#ef4444\'};font-weight:700">P&L ₹${p.unrealised.toFixed(2)}</span>',
+              s
+          )
+          if s==old:
+              print('No PnL placeholders found; nothing to change.')
+          else:
+              p.write_text(s,encoding='utf-8')
+              print('PnL colour patch applied.')
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/paper-engine.js
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+          else
+            git commit -m 'fix: show positive PnL green and negative PnL red'
+            git push
+          fi

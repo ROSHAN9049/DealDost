@@ -7,9 +7,9 @@ function patch(src){
   src=src.replace("mode:'PAPER'","mode:(localStorage.getItem('ddMode')||'PAPER')");
   src=src.replace("liveAuto:false","liveAuto:(localStorage.getItem('ddMode')==='TESTNET')");
   src=src.replace("function paperOpen(x,e){if(S.mode!=='PAPER'", "function paperOpen(x,e){if(!['PAPER','TESTNET'].includes(S.mode)");
+  src=src.replace("feeRate:F,mode:'PAPER',reason:x.reasons", "feeRate:F,mode:S.mode,reason:x.reasons");
   src=src.replace("if(S.mode==='PAPER'){if(x.m>=65", "if(S.mode==='PAPER'||S.mode==='TESTNET'){if(x.m>=65");
   src=src.replace("function managePaper(){for(const p of [...S.pos]){if(p.mode!=='PAPER')continue;", "function managePaper(){for(const p of [...S.pos]){if(!['PAPER','TESTNET'].includes(p.mode))continue;");
-  src=src.replace("if(S.mode==='LIVE'){S.pos=", "if(S.mode==='LIVE'){S.pos=");
   src=src.replace("async function syncAccount(){if(Date.now()-S.lastAccount<2500)return;", "async function syncAccount(){if(S.mode==='TESTNET'){S.account=null;S.err='';return;}if(Date.now()-S.lastAccount<2500)return;");
   src=src.replace("S.err=(S.mode==='PAPER'?'':('Account sync: '+e.message))", "S.err=(S.mode==='PAPER'||S.mode==='TESTNET'?'':('Account sync: '+e.message))");
   src=src.replace("if(!['LIVE','TESTNET'].includes(S.mode)||!S.liveAuto)","if(S.mode!=='LIVE'||!S.liveAuto)");

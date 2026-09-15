@@ -8,7 +8,59 @@ const STOP=Number(process.env.TESTNET_STOP_PCT||0.006);
 const RR=Number(process.env.TESTNET_TP_RR||2);
 function dec(v){const n=Number(v);return Number.isFinite(n)?n:0}
 function sign(params){const qs=new URLSearchParams(params);qs.set('signature',crypto.createHmac('sha256',SECRET).update(qs.toString()).digest('hex'));return qs.toString()}
-async function req(method,path,params={}){const q={...params,timestamp:String(Date.now()),recvWindow:'5000'};const r=await fetch(BASE+path+(method==='GET'?'?'+sign(q):''),{method,headers:{'X-MBX-APIKEY':KEY,'Content-Type':'application/x-www-form-urlencoded',accept:'application/json'},...(method==='GET'?{}:{body:sign(q)}),cache:'no-store'});const text=await r.text();let j;try{j=JSON.parse(text)}catch{j={raw:text}}if(!r.ok)throw Error(j.msg||j.error||'Binance Demo request failed');return j}
+async function req(method,path,params={}){
+  const q={...params,timestamp:String(Date.now()),recvWindow:'5000'};
+  const r=await fetch(BASE+path+(method==='GET'?'?'+sign(q):''),{method,headers:{'X-MBX-APIKEY':KEY,'Content-Type':'application/x-www-form-urlencoded',accept:'application/json'},...(method==='GET'?{}:{body:sign(q)}),cache:'no-store'});
+  const text=await r.text();let j;try{j=JSON.parse(text)}catch{j={raw:text}}
+  if(!r.ok){
+    const e=Error(j.msg||j.error||'Binance Demo request failed');
+    e.status=r.status;e.code=j.code;e.binanceMessage=j.msg||j.message||j.error;
+    if(r.status===403||r.status===451)e.restricted=true;
+    throw e;
+  }
+  return j;
+}
 function floorStep(v,step){if(!step||step<=0)return v;const p=Math.max(0,Math.ceil(-Math.log10(step)));return Number((Math.floor((v+1e-12)/step)*step).toFixed(p))}
 async function symbolInfo(symbol){const e=await req('GET','/fapi/v1/exchangeInfo');const s=(e.symbols||[]).find(x=>x.symbol===symbol);if(!s||s.status!=='TRADING'||s.contractType!=='PERPETUAL'||s.quoteAsset!=='USDT')throw Error('Only active USDT-M perpetuals are allowed');return s}
-export default async function handler(req0,res){if(req0.method!=='POST')return res.status(405).json({error:'POST only'});if(!UNLOCKED)return res.status(403).json({error:'Binance Futures Demo trading is locked'});if(!KEY||!SECRET)return res.status(503).json({error:'Binance Futures Demo credentials are not configured'});try{const b=req0.body||{},action=String(b.action||'order'),symbol=String(b.symbol||'').toUpperCase();if(!['order','close','cancelAll'].includes(action))return res.status(400).json({error:'Unsupported action'});if(!/^[A-Z0-9_]{5,30}$/.test(symbol))return res.status(400).json({error:'Invalid symbol'});if(action==='cancelAll')return res.status(200).json(await req('DELETE','/fapi/v1/allOpenOrders',{symbol}));const info=await symbolInfo(symbol);const lot=(info.filters||[]).find(x=>x.filterType==='LOT_SIZE')||{};let quantity=floorStep(Math.abs(dec(b.quantity)),dec(lot.stepSize));if(quantity<dec(lot.minQty))return res.status(400).json({error:'Quantity below Binance minimum'});if(dec(lot.maxQty)&&quantity>dec(lot.maxQty))quantity=dec(lot.maxQty);const mark=await req('GET','/fapi/v1/premiumIndex?symbol='+encodeURIComponent(symbol));const px=dec(mark.markPrice);if(quantity*px>MAX_NOTIONAL)quantity=floorStep(MAX_NOTIONAL/px,dec(lot.stepSize));if(quantity<dec(lot.minQty))return res.status(400).json({error:'Testnet safety cap is below minimum order size'});const requestedSide=String(b.side||'BUY').toUpperCase();if(!['BUY','SELL'].includes(requestedSide))return res.status(400).json({error:'Invalid side'});const side=action==='close'?(requestedSide==='BUY'?'SELL':'BUY'):requestedSide;const entry=await req('POST','/fapi/v1/order',{symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'});if(action==='close')return res.status(200).json(entry);const fill=dec(entry.avgPrice)||px;const stop=Math.min(Math.max(dec(b.stopPct)||STOP,.003),.012),sl=side==='BUY'?fill*(1-stop):fill*(1+stop),tp=side==='BUY'?fill*(1+stop*RR):fill*(1-stop*RR),exitSide=side==='BUY'?'SELL':'BUY';let protection=null;if(process.env.TESTNET_PROTECT_ORDERS!=='false'){try{const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:String(sl),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:String(tp),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp}}catch(e){try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}throw Error('Demo entry protection failed; emergency close attempted: '+e.message)}}return res.status(200).json({entry,protection,serverPrice:px,quantity,notional:quantity*fill})}catch(e){return res.status(502).json({error:e.message})}}
+export default async function handler(req0,res){
+  if(req0.method!=='POST')return res.status(405).json({error:'POST only'});
+  if(!UNLOCKED)return res.status(403).json({error:'Binance Futures Demo trading is locked'});
+  if(!KEY||!SECRET)return res.status(503).json({error:'Binance Futures Demo credentials are not configured'});
+  try{
+    const b=req0.body||{},action=String(b.action||'order'),symbol=String(b.symbol||'').toUpperCase();
+    if(!['order','close','cancelAll'].includes(action))return res.status(400).json({error:'Unsupported action'});
+    if(!/^[A-Z0-9_]{5,30}$/.test(symbol))return res.status(400).json({error:'Invalid symbol'});
+    if(action==='cancelAll')return res.status(200).json(await req('DELETE','/fapi/v1/allOpenOrders',{symbol}));
+    const info=await symbolInfo(symbol);
+    const lot=(info.filters||[]).find(x=>x.filterType==='LOT_SIZE')||{};
+    let quantity=floorStep(Math.abs(dec(b.quantity)),dec(lot.stepSize));
+    if(quantity<dec(lot.minQty))return res.status(400).json({error:'Quantity below Binance minimum'});
+    if(dec(lot.maxQty)&&quantity>dec(lot.maxQty))quantity=dec(lot.maxQty);
+    const mark=await req('GET','/fapi/v1/premiumIndex?symbol='+encodeURIComponent(symbol));
+    const px=dec(mark.markPrice);
+    if(quantity*px>MAX_NOTIONAL)quantity=floorStep(MAX_NOTIONAL/px,dec(lot.stepSize));
+    if(quantity<dec(lot.minQty))return res.status(400).json({error:'Testnet safety cap is below minimum order size'});
+    const requestedSide=String(b.side||'BUY').toUpperCase();
+    if(!['BUY','SELL'].includes(requestedSide))return res.status(400).json({error:'Invalid side'});
+    const side=action==='close'?(requestedSide==='BUY'?'SELL':'BUY'):requestedSide;
+    const entry=await req('POST','/fapi/v1/order',{symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'});
+    if(action==='close')return res.status(200).json(entry);
+    const fill=dec(entry.avgPrice)||px;
+    const stop=Math.min(Math.max(dec(b.stopPct)||STOP,.003),.012),sl=side==='BUY'?fill*(1-stop):fill*(1+stop),tp=side==='BUY'?fill*(1+stop*RR):fill*(1-stop*RR),exitSide=side==='BUY'?'SELL':'BUY';
+    let protection=null;
+    if(process.env.TESTNET_PROTECT_ORDERS!=='false'){
+      try{
+        const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:String(sl),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
+        const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:String(tp),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
+        protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp};
+      }catch(e){
+        try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}
+        throw Error('Demo entry protection failed; emergency close attempted: '+e.message)
+      }
+    }
+    return res.status(200).json({entry,protection,serverPrice:px,quantity,notional:quantity*fill});
+  }catch(e){
+    if(e.restricted)return res.status(403).json({error:e.binanceMessage||'Binance Futures Demo trading is unavailable from this deployment location or account eligibility.',testnetUnavailable:true,restricted:true,upstreamStatus:e.status,code:e.code||null,baseUrl:BASE});
+    return res.status(502).json({error:e.message,code:e.code||null});
+  }
+}

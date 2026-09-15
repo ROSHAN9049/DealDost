@@ -10,6 +10,8 @@ function patch(src){
   src=src.replace("feeRate:F,mode:'PAPER',reason:x.reasons", "feeRate:F,mode:S.mode,reason:x.reasons");
   src=src.replace("if(S.mode==='PAPER'){if(x.m>=65", "if(S.mode==='PAPER'||S.mode==='TESTNET'){if(x.m>=65");
   src=src.replace("function managePaper(){for(const p of [...S.pos]){if(p.mode!=='PAPER')continue;", "function managePaper(){for(const p of [...S.pos]){if(!['PAPER','TESTNET'].includes(p.mode))continue;");
+  src=src.replace("if(p.mode==='PAPER'){const x=N(S.t[s]?.p);", "if(['PAPER','TESTNET'].includes(p.mode)){const x=N(S.t[s]?.p);");
+  src=src.replace("S.mode==='LIVE'?'LIVE MODE · Binance account sync active.':'PAPER MODE · Real orders are OFF.'", "S.mode==='LIVE'?'LIVE MODE · Binance account sync active.':S.mode==='TESTNET'?'TESTNET · LOCAL SIMULATION · Real orders are OFF.':'PAPER MODE · Real orders are OFF.'");
   src=src.replace("async function syncAccount(){if(Date.now()-S.lastAccount<2500)return;", "async function syncAccount(){if(S.mode==='TESTNET'){S.account=null;S.err='';return;}if(Date.now()-S.lastAccount<2500)return;");
   src=src.replace("S.err=(S.mode==='PAPER'?'':('Account sync: '+e.message))", "S.err=(S.mode==='PAPER'||S.mode==='TESTNET'?'':('Account sync: '+e.message))");
   src=src.replace("if(!['LIVE','TESTNET'].includes(S.mode)||!S.liveAuto)","if(S.mode!=='LIVE'||!S.liveAuto)");

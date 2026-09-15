@@ -1,21 +1,12 @@
 import crypto from 'crypto';
-const BASE=process.env.BINANCE_TESTNET_BASE_URL||'https://testnet.binancefuture.com';
+const BASE=process.env.BINANCE_FUTURES_DEMO_BASE_URL||'https://demo-fapi.binance.com';
 const KEY=process.env.BINANCE_TESTNET_API_KEY;
 const SECRET=process.env.BINANCE_TESTNET_API_SECRET;
-const UNLOCKED=String(process.env.BINANCE_TESTNET_UNLOCKED||'false').toLowerCase()==='true';
-function sign(params){const qs=new URLSearchParams(params);const signature=crypto.createHmac('sha256',SECRET).update(qs.toString()).digest('hex');qs.set('signature',signature);return qs.toString()}
-export default async function handler(req,res){
-  if(req.method!=='POST')return res.status(405).json({error:'POST only'});
-  if(!UNLOCKED)return res.status(403).json({error:'Binance Futures Testnet trading is locked'});
-  if(!KEY||!SECRET)return res.status(503).json({error:'Binance Futures Testnet credentials are not configured'});
-  try{
-    const b=req.body||{};const action=String(b.action||'order');
-    if(!['order','close'].includes(action))return res.status(400).json({error:'Unsupported testnet action'});
-    const symbol=String(b.symbol||'').toUpperCase();const quantity=Math.abs(Number(b.quantity||0));
-    if(!/^[A-Z0-9_]{5,30}$/.test(symbol)||!Number.isFinite(quantity)||quantity<=0)return res.status(400).json({error:'Invalid symbol or quantity'});
-    const p={symbol,side:action==='close'?(String(b.side||'BUY').toUpperCase()==='BUY'?'SELL':'BUY'):String(b.side||'BUY').toUpperCase(),type:'MARKET',quantity:String(quantity),timestamp:String(Date.now()),recvWindow:'5000'};
-    if(action==='close')p.reduceOnly='true';
-    const r=await fetch(BASE+'/fapi/v1/order',{method:'POST',headers:{'X-MBX-APIKEY':KEY,'Content-Type':'application/x-www-form-urlencoded'},body:sign(p)});
-    const text=await r.text();res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');return res.status(r.status).send(text);
-  }catch(e){return res.status(502).json({error:e.message})}
-}
+const UNLOCKED=String(process.env.TESTNET_UNLOCKED||'false').toLowerCase()==='true';
+const MAX_NOTIONAL=Number(process.env.TESTNET_MAX_NOTIONAL_USDT||100);
+function dec(v){const n=Number(v);return Number.isFinite(n)?n:0}
+function sign(params){const qs=new URLSearchParams(params);qs.set('signature',crypto.createHmac('sha256',SECRET).update(qs.toString()).digest('hex'));return qs.toString()}
+async function get(path){const r=await fetch(BASE+path,{headers:{accept:'application/json'},cache:'no-store'});const j=await r.json();if(!r.ok)throw Error(j.msg||'Binance Demo request failed');return j}
+function floorStep(v,step){if(!step||step<=0)return v;const p=Math.max(0,Math.ceil(-Math.log10(step)));return Number((Math.floor((v+1e-12)/step)*step).toFixed(p))}
+async function symbolInfo(symbol){const e=await get('/fapi/v1/exchangeInfo');const s=(e.symbols||[]).find(x=>x.symbol===symbol);if(!s||s.status!=='TRADING'||s.contractType!=='PERPETUAL'||s.quoteAsset!=='USDT')throw Error('Only active USDT-M perpetuals are allowed');return s}
+export default async function handler(req,res){if(req.method!=='POST')return res.status(405).json({error:'POST only'});if(!UNLOCKED)return res.status(403).json({error:'Binance Futures Demo trading is locked'});if(!KEY||!SECRET)return res.status(503).json({error:'Binance Futures Demo credentials are not configured'});try{const b=req.body||{},action=String(b.action||'order');const symbol=String(b.symbol||'').toUpperCase();if(!['order','close'].includes(action))return res.status(400).json({error:'Unsupported action'});if(!/^[A-Z0-9_]{5,30}$/.test(symbol))return res.status(400).json({error:'Invalid symbol'});const info=await symbolInfo(symbol);const lot=(info.filters||[]).find(x=>x.filterType==='LOT_SIZE')||{};let quantity=floorStep(Math.abs(dec(b.quantity)),dec(lot.stepSize));if(quantity<dec(lot.minQty))return res.status(400).json({error:'Quantity below Binance minimum'});if(dec(lot.maxQty)&&quantity>dec(lot.maxQty))quantity=dec(lot.maxQty);const mark=await get('/fapi/v1/premiumIndex?symbol='+encodeURIComponent(symbol));const px=dec(mark.markPrice);if(quantity*px>MAX_NOTIONAL)quantity=floorStep(MAX_NOTIONAL/px,dec(lot.stepSize));if(quantity<dec(lot.minQty))return res.status(400).json({error:'Testnet safety cap is below minimum order size'});const requestedSide=String(b.side||'BUY').toUpperCase();if(!['BUY','SELL'].includes(requestedSide))return res.status(400).json({error:'Invalid side'});const side=action==='close'?(requestedSide==='BUY'?'SELL':'BUY'):requestedSide;const p={symbol,side,type:'MARKET',quantity:String(quantity),timestamp:String(Date.now()),recvWindow:'5000',newOrderRespType:'RESULT'};if(action==='close')p.reduceOnly='true';const r=await fetch(BASE+'/fapi/v1/order',{method:'POST',headers:{'X-MBX-APIKEY':KEY,'Content-Type':'application/x-www-form-urlencoded'},body:sign(p)});const text=await r.text();res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');return res.status(r.status).send(text)}catch(e){return res.status(502).json({error:e.message})}}

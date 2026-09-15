@@ -266,7 +266,7 @@ function connectWS(){
         const z=JSON.parse(ev.data),a=Array.isArray(z)?z:(z.data||[]);
         a.forEach(x=>{if(x&&x.s&&S.t[x.s])S.t[x.s]={p:N(x.c),c:N(x.P),v:N(x.q)}});
         managePaper();
-        if(['dashboard','momentum','scalping','positions'].includes(S.tab))render();
+        if(['dashboard','momentum','scalping','positions'].includes(S.tab))renderThrottled();
       }catch(e){}
     };
     S.ws.onclose=()=>{S.wsStatus='offline';render();if(S.wsTimer)clearTimeout(S.wsTimer);S.wsTimer=setTimeout(connectWS,4000)};
@@ -397,7 +397,7 @@ function scannerTable(mode){
       '<td>'+signalBadge(z==='WAIT'?'NEUTRAL':z)+'</td>'+
       '<td><button class="btn sm blue" onclick="DD.manualEntry(\''+E(x.s)+'\',\''+E(z)+'\')">Trade</button></td></tr>';
   }).join('');
-  const fb='<div class="filters"><span class="filter-label">Search:</span><input class="filter-input" placeholder="Coin name…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()"></div>';
+  const fb='<div class="filters"><span class="filter-label">Search:</span><input class="filter-input" id="filter-coin-scan" placeholder="Coin name…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()"></div>';
   return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Coin</th><th>Price</th><th>24H</th><th>24H Vol</th><th>Vol Spike</th><th>Mom</th><th>Mom Score</th><th>Scalp</th><th>Scalp Score</th><th>Trend</th><th>Support</th><th>Resistance</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
@@ -405,7 +405,7 @@ function scannerTable(mode){
 function historyTable(arr){
   if(!arr.length)return '<div class="empty"><div class="icon">📋</div>No trades yet.</div>';
   const fb='<div class="filters">'+
-    '<span class="filter-label">Coin:</span><input class="filter-input" placeholder="Search…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()">'+
+    '<span class="filter-label">Coin:</span><input class="filter-input" id="filter-coin-h" placeholder="Search…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()">'+
     '<select class="filter-select" onchange="DD.filterResult=this.value;DD.render()"><option value="">All Results</option><option value="win" '+(S.filterResult==='win'?'selected':'')+'>Winning</option><option value="loss" '+(S.filterResult==='loss'?'selected':'')+'>Losing</option></select>'+
     '<input class="filter-select" type="date" value="'+E(S.filterDate)+'" onchange="DD.filterDate=this.value;DD.render()"></div>';
   const filtered=arr.filter(h=>{
@@ -430,7 +430,7 @@ function historyTable(arr){
 /* ===== Full history table with all filters ===== */
 function fullHistoryTable(){
   const fb='<div class="filters">'+
-    '<span class="filter-label">Coin:</span><input class="filter-input" placeholder="Search…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()">'+
+    '<span class="filter-label">Coin:</span><input class="filter-input" id="filter-coin-fh" placeholder="Search…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()">'+
     '<select class="filter-select" onchange="DD.filterMode=this.value;DD.render()"><option value="">All Modes</option><option value="PAPER" '+(S.filterMode==='PAPER'?'selected':'')+'>Paper</option><option value="TESTNET" '+(S.filterMode==='TESTNET'?'selected':'')+'>Testnet</option><option value="LIVE" '+(S.filterMode==='LIVE'?'selected':'')+'>Live</option></select>'+
     '<select class="filter-select" onchange="DD.filterStrategy=this.value;DD.render()"><option value="">All Strategies</option><option value="MOMENTUM" '+(S.filterStrategy==='MOMENTUM'?'selected':'')+'>Momentum</option><option value="SCALPING" '+(S.filterStrategy==='SCALPING'?'selected':'')+'>Scalping</option><option value="OPTIONS" '+(S.filterStrategy==='OPTIONS'?'selected':'')+'>Options</option></select>'+
     '<select class="filter-select" onchange="DD.filterResult=this.value;DD.render()"><option value="">All Results</option><option value="win" '+(S.filterResult==='win'?'selected':'')+'>Winning</option><option value="loss" '+(S.filterResult==='loss'?'selected':'')+'>Losing</option></select>'+
@@ -634,9 +634,13 @@ function renderSettings(){
     '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">Data Management</div></div><div class="btn-row"><button class="btn" onclick="DD.resetPaper()">Reset Paper Data</button><button class="btn" onclick="DD.exportData()">Export Data</button><button class="btn" onclick="DD.scan()">Refresh Scanner</button><button class="btn" onclick="DD.reconnect()">Reconnect WebSocket</button></div></div>';
 }
 
-/* ===== Main Render ===== */
+/* ===== Main Render (with focus preservation + throttle) ===== */
+let _lastRender=0;
 function render(){
   const app=document.getElementById('app');if(!app)return;
+  let focusInfo=null;
+  const ae=document.activeElement;
+  if(ae&&ae!==document.body&&app.contains(ae)){focusInfo={tag:ae.tagName,id:ae.id||'',class:ae.className||'',selStart:ae.selectionStart,selEnd:ae.selectionEnd,value:ae.value||''}}
   const wsClass=S.wsStatus==='online'?'online':S.wsStatus==='connecting'?'connecting':'offline';
   const wsLabel=S.wsStatus==='online'?'LIVE':S.wsStatus==='connecting'?'CONNECTING':'OFFLINE';
   let body='';
@@ -660,7 +664,30 @@ function render(){
   const bottomNav='<div class="bottom-nav">'+BOTTOM_NAV.map(n=>'<button class="bn-btn '+(S.tab===n?'active':'')+'" onclick="DD.tab=\''+n+'\';DD.render()"><span class="bn-icon">'+(BN_ICONS[n]||'?')+'</span>'+NAV_LABELS[n]+'</button>').join('')+'</div>';
   const err=S.err?'<div class="error-banner"><span>'+E(S.err)+'</span><button class="btn sm" onclick="DD.err=\'\';DD.render();DD.scan()">Retry</button></div>':'';
   app.innerHTML=topbar+navbar+err+body+bottomNav;
+  // Restore focus after re-render
+  if(focusInfo){
+    try{
+      let el=null;
+      if(focusInfo.id)el=app.querySelector('#'+focusInfo.id);
+      if(!el&&focusInfo.name)el=app.querySelector('[name="'+focusInfo.name+'"]');
+      if(!el&&focusInfo.class){
+        const cls=focusInfo.class.split(' ')[0];
+        const inputs=app.querySelectorAll(focusInfo.tag.toLowerCase()+'.'+cls);
+        // Match by value if multiple
+        for(const e of inputs){if(e.value===focusInfo.value){el=e;break}}
+        if(!el&&inputs.length)el=inputs[0];
+      }
+      if(el){el.focus();if(el.setSelectionRange&&focusInfo.selStart!=null)el.setSelectionRange(focusInfo.selStart,focusInfo.selEnd)}
+    }catch(e){}
+  }
   if(S.tab==='pnl')renderPnlCharts();
+}
+// Throttled render for high-frequency updates (WS ticks, manage intervals)
+function renderThrottled(){
+  const now=Date.now();
+  if(now-_lastRender<1000)return;
+  _lastRender=now;
+  render();
 }
 
 /* ===== DD API (window interface) ===== */
@@ -728,7 +755,7 @@ function boot(){
   // Timers (dedup guarded)
   clearTimers();
   S.scanTimer=setInterval(()=>{scan()},(N(S.settings.scanInterval)||30)*1000);
-  S.manageTimer=setInterval(()=>{managePaper();if(['dashboard','positions'].includes(S.tab))render()},3000);
+  S.manageTimer=setInterval(()=>{managePaper();if(['dashboard','positions'].includes(S.tab))renderThrottled()},3000);
   S.optTimer=setInterval(()=>{scanOptions()},30000);
 }
 // Start only once

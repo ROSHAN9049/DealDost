@@ -20,6 +20,9 @@ function patch(src){
   src=src.replace("e:S.mode,side:N(p.positionAmt)>0?'BUY':'SELL'", "e:'LIVE',side:N(p.positionAmt)>0?'BUY':'SELL'");
   src=src.replace("mode:S.mode}))", "mode:'LIVE'}))");
   src=src.replace("x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING'","x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING'&&/^[A-Z0-9_]{5,30}$/.test(x.symbol)");
+  /* Strong fallback patches: the scanner is minified, so keep TESTNET behavior even if a render string changes. */
+  src=src.replace("function save(){try{localStorage.ddv5=", "function save(){try{localStorage['ddv5_'+S.mode]=");
+  src=src.replace("function load(){try{const q=JSON.parse(localStorage.ddv5||'{}')", "function load(){try{const q=JSON.parse(localStorage['ddv5_'+S.mode]||'{}')");
   return src;
 }
 function controls(){
@@ -37,6 +40,17 @@ function controls(){
   note.textContent=current==='PAPER'?'Local paper simulation':current==='TESTNET'?'TESTNET · local simulation fallback (Binance Demo private API is region-restricted)':'Binance LIVE · real orders locked by server';
   root.appendChild(note);
 }
-async function boot(){try{controls();const r=await fetch('/app-scanner-v3.js?mode='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('Scanner source failed '+r.status);let src=await r.text();src=patch(src);(0,eval)(src);controls()}catch(e){const a=document.getElementById('app');if(a)a.innerHTML='<div style="padding:30px"><b>Scanner startup error</b><div style="color:#ff6178;margin-top:8px">'+String(e.message||e)+'</div></div>'}}
+function forceTestnetUi(){
+  if(localStorage.getItem(KEY)!=='TESTNET')return;
+  const fix=()=>{
+    document.querySelectorAll('#app *').forEach(el=>{
+      if(el.children.length===0&&el.textContent.includes('PAPER MODE · Real orders are OFF.'))el.textContent=el.textContent.replace('PAPER MODE · Real orders are OFF.','TESTNET · LOCAL SIMULATION · Real orders are OFF.');
+      if(el.children.length===0&&el.textContent.includes('AUTO LIVE'))el.textContent=el.textContent.replace(/AUTO LIVE/g,'AUTO TESTNET');
+    });
+  };
+  fix();
+  new MutationObserver(fix).observe(document.getElementById('app')||document.body,{subtree:true,childList:true,characterData:true});
+}
+async function boot(){try{controls();const r=await fetch('/app-scanner-v3.js?mode='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('Scanner source failed '+r.status);let src=await r.text();src=patch(src);(0,eval)(src);controls();forceTestnetUi()}catch(e){const a=document.getElementById('app');if(a)a.innerHTML='<div style="padding:30px"><b>Scanner startup error</b><div style="color:#ff6178;margin-top:8px">'+String(e.message||e)+'</div></div>'}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();

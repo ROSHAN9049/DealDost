@@ -3,7 +3,8 @@
 const nativeFetch=window.fetch.bind(window);
 window.fetch=async function(input,init){
   const u=typeof input==='string'?input:(input&&input.url)||'';
-  if(u.includes('/api/binance-account?path=') && document.body && /PAPER/i.test(document.body.innerText||'') && !/LIVE AUTO/i.test(document.body.innerText||'')){
+  const body=document.body?.innerText||'';
+  if(u.includes('/api/binance-account?path=') && /PAPER/i.test(body) && /LIVE OFF/i.test(body)){
     return new Response(JSON.stringify({availableBalance:10000,totalWalletBalance:10000,totalUnrealizedProfit:0,totalMarginBalance:10000,assets:[{asset:'USDT',availableBalance:'10000',walletBalance:'10000'}],positions:[]}),{status:200,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
   }
   return nativeFetch(input,init);

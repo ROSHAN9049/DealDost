@@ -2,16 +2,22 @@
 const KEY='ddMode';
 const mode=localStorage.getItem(KEY)||'PAPER';
 function patch(src){
-  src=src.replace("const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade'","const PUB='/api/binance-market?path=',AC=(localStorage.getItem('ddMode')==='TESTNET'?'/api/binance-testnet-account?path=':'/api/binance-account?path='),TR=(localStorage.getItem('ddMode')==='TESTNET'?'/api/binance-testnet-trade':'/api/binance-trade')");
+  const testnet="localStorage.getItem('ddMode')==='TESTNET'";
+  src=src.replace("const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade'","const PUB='/api/binance-market?path=',AC=("+testnet+"?'/api/binance-testnet-account?path=':'/api/binance-account?path='),TR=("+testnet+"?'/api/binance-testnet-trade':'/api/binance-trade')");
   src=src.replace("mode:'PAPER'","mode:(localStorage.getItem('ddMode')||'PAPER')");
   src=src.replace("liveAuto:false","liveAuto:(localStorage.getItem('ddMode')==='TESTNET')");
-  src=src.replace("if(S.mode!=='LIVE'||!S.liveAuto)","if(!['LIVE','TESTNET'].includes(S.mode)||!S.liveAuto)");
-  src=src.replace("else if(S.mode==='LIVE'&&S.liveAuto)","else if((S.mode==='LIVE'||S.mode==='TESTNET')&&S.liveAuto)");
-  src=src.replace("if(S.mode==='LIVE'){","if(S.mode==='LIVE'||S.mode==='TESTNET'){");
-  src=src.replace("e:'LIVE',side:N(p.positionAmt)>0?'BUY':'SELL'","e:S.mode,side:N(p.positionAmt)>0?'BUY':'SELL'");
-  src=src.replace("mode:'LIVE'}))","mode:S.mode}))");
+  src=src.replace("function paperOpen(x,e){if(S.mode!=='PAPER'", "function paperOpen(x,e){if(!['PAPER','TESTNET'].includes(S.mode)");
+  src=src.replace("if(S.mode==='PAPER'){if(x.m>=65", "if(S.mode==='PAPER'||S.mode==='TESTNET'){if(x.m>=65");
+  src=src.replace("function managePaper(){for(const p of [...S.pos]){if(p.mode!=='PAPER')continue;", "function managePaper(){for(const p of [...S.pos]){if(!['PAPER','TESTNET'].includes(p.mode))continue;");
+  src=src.replace("if(S.mode==='LIVE'){S.pos=", "if(S.mode==='LIVE'){S.pos=");
+  src=src.replace("async function syncAccount(){if(Date.now()-S.lastAccount<2500)return;", "async function syncAccount(){if(S.mode==='TESTNET'){S.account=null;S.err='';return;}if(Date.now()-S.lastAccount<2500)return;");
+  src=src.replace("S.err=(S.mode==='PAPER'?'':('Account sync: '+e.message))", "S.err=(S.mode==='PAPER'||S.mode==='TESTNET'?'':('Account sync: '+e.message))");
+  src=src.replace("if(!['LIVE','TESTNET'].includes(S.mode)||!S.liveAuto)","if(S.mode!=='LIVE'||!S.liveAuto)");
+  src=src.replace("else if((S.mode==='LIVE'||S.mode==='TESTNET')&&S.liveAuto)","else if(S.mode==='LIVE'&&S.liveAuto)");
+  src=src.replace("if(S.mode==='LIVE'||S.mode==='TESTNET')", "if(S.mode==='LIVE')");
+  src=src.replace("e:S.mode,side:N(p.positionAmt)>0?'BUY':'SELL'", "e:'LIVE',side:N(p.positionAmt)>0?'BUY':'SELL'");
+  src=src.replace("mode:S.mode}))", "mode:'LIVE'}))");
   src=src.replace("x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING'","x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING'&&/^[A-Z0-9_]{5,30}$/.test(x.symbol)");
-  src=src.replace("S.err='Account sync: '+e.message","S.err=(S.mode==='PAPER'?'':('Account sync: '+e.message))");
   return src;
 }
 function controls(){
@@ -26,7 +32,7 @@ function controls(){
     root.appendChild(b);
   });
   const note=document.createElement('span');note.style.cssText='font-size:11px;color:#8295ad;margin-left:4px';
-  note.textContent=current==='PAPER'?'Local paper simulation':current==='TESTNET'?'Binance Futures Demo · automatic futures entries + exchange SL/TP · server key required':'Binance LIVE · real orders locked by server';
+  note.textContent=current==='PAPER'?'Local paper simulation':current==='TESTNET'?'TESTNET · local simulation fallback (Binance Demo private API is region-restricted)':'Binance LIVE · real orders locked by server';
   root.appendChild(note);
 }
 async function boot(){try{controls();const r=await fetch('/app-scanner-v3.js?mode='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('Scanner source failed '+r.status);let src=await r.text();src=patch(src);(0,eval)(src);controls()}catch(e){const a=document.getElementById('app');if(a)a.innerHTML='<div style="padding:30px"><b>Scanner startup error</b><div style="color:#ff6178;margin-top:8px">'+String(e.message||e)+'</div></div>'}}

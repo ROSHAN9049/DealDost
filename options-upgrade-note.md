@@ -1,0 +1,1 @@
+Binance options scanner upgrade planned: scan all TRADING crypto option contracts, use underlying signal plus option mark Greeks, and support up to 4 simultaneous paper debit spreads. Real exchange orders remain disabled until authenticated execution is deliberately added.

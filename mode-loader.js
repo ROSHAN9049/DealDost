@@ -6,8 +6,8 @@ function patch(src){
  src=src.replace("mode:'PAPER',auto:true,liveAuto:false","mode:(localStorage.getItem('ddMode')||'PAPER'),auto:true,liveAuto:(localStorage.getItem('ddMode')==='TESTNET')");
  src=src.replace("if(S.mode!=='PAPER'||!canOpen(x,e))return false;","if(!['PAPER','TESTNET'].includes(S.mode)||!canOpen(x,e))return false;");
  src=src.replace("feeRate:F,mode:'PAPER'","feeRate:F,mode:S.mode");
- src=src.replace("function engine(){if(!S.auto||S.busy)return;","function engine(){if(!S.auto)return;");
- src=src.replace("if(S.mode==='PAPER'){if(x.m>=65","if(S.mode==='PAPER'||S.mode==='TESTNET'){if(x.m>=65");
+ /* TESTNET uses the proven local paper execution path. Do not call Binance private APIs. */
+ src=src.replace(/function engine\(\)\{[\s\S]*?\}\nfunction managePaper/,"function engine(){if(!S.auto&&S.mode!=='TESTNET')return;const arr=S.rows.filter(x=>x&&(x.m>=65||x.sc>=65)).sort((a,b)=>Math.max(b.m,b.sc)-Math.max(a.m,a.sc));for(const x of arr){if(S.mode==='PAPER'||S.mode==='TESTNET'){if(x.m>=65&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');if(x.sc>=65&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING')}else if(S.mode==='LIVE'&&S.liveAuto){if(x.m>=78&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)liveOpen(x,'MOMENTUM');if(x.sc>=78&&S.pos.filter(p=>p.e==='SCALPING').length<SC)liveOpen(x,'SCALPING')}}}\nfunction managePaper");
  src=src.replace("function managePaper(){for(const p of [...S.pos]){if(p.mode!=='PAPER')continue;","function managePaper(){for(const p of [...S.pos]){if(!['PAPER','TESTNET'].includes(p.mode))continue;");
  src=src.replace("async function syncAccount(){if(Date.now()-S.lastAccount<2500)return;","async function syncAccount(){if(S.mode==='TESTNET'){S.account=null;S.err='';return;}if(Date.now()-S.lastAccount<2500)return;");
  src=src.replace("S.err=(S.mode==='PAPER'?'':('Account sync: '+e.message))","S.err=(S.mode==='PAPER'||S.mode==='TESTNET'?'':('Account sync: '+e.message))");

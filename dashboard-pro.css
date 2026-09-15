@@ -2,24 +2,32 @@
 :root{--dd-bg:#050a12;--dd-panel:#0b1422;--dd-panel2:#0e1a2b;--dd-line:#1d3047;--dd-blue:#4da3ff;--dd-green:#35df91;--dd-red:#ff6178;--dd-yellow:#ffc857;--dd-muted:#8295ad;--dd-text:#e9f1fb}
 body{background:radial-gradient(circle at 82% -12%,rgba(39,104,170,.28),transparent 34%),linear-gradient(180deg,#050a12,#07111e 55%,#050a12)!important}
 #app .app{max-width:1540px;padding:18px}
-#app .top{border-radius:20px;padding:18px 20px;background:linear-gradient(135deg,rgba(13,29,47,.98),rgba(7,16,28,.98));box-shadow:0 18px 50px rgba(0,0,0,.34)}
+#app .top{border-radius:20px;padding:18px 20px;background:linear-gradient(135deg,rgba(13,29,47,.98),rgba(7,16,28,.98));box-shadow:0 18px 50px rgba(0,0,0,.34);border:1px solid #29425e}
 #app .top b{font-size:23px;letter-spacing:.2px}
+#app .top button{border-radius:10px;min-height:38px}
 #app .stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}
-#app .stats div{position:relative;overflow:hidden;min-height:82px;padding:14px 15px;border:1px solid #213951;border-radius:15px;background:linear-gradient(145deg,#0c1929,#09131f);box-shadow:0 8px 25px rgba(0,0,0,.18)}
+#app .stats div{position:relative;overflow:hidden;min-height:86px;padding:14px 15px;border:1px solid #213951;border-radius:15px;background:linear-gradient(145deg,#0c1929,#09131f);box-shadow:0 8px 25px rgba(0,0,0,.18);transition:.18s}
+#app .stats div:hover{transform:translateY(-1px);border-color:#315473}
 #app .stats div:after{content:"";position:absolute;right:-20px;top:-25px;width:80px;height:80px;border-radius:50%;background:rgba(77,163,255,.06)}
-#app .stats b{font-size:21px;margin-top:2px}
-#app .nav{border-radius:14px;background:rgba(8,17,28,.88);padding:7px;backdrop-filter:blur(8px)}
-#app .nav button{border-radius:9px;padding:9px 14px}
+#app .stats b{font-size:21px;margin-top:2px;position:relative;z-index:1}
+#app .nav{border-radius:14px;background:rgba(8,17,28,.9);padding:7px;backdrop-filter:blur(10px);box-shadow:0 7px 24px rgba(0,0,0,.2);position:sticky;top:48px;z-index:20}
+#app .nav button{border-radius:9px;padding:9px 14px;transition:.15s}
+#app .nav button:hover{background:#10233a;border-color:#315473}
 #app .panel{margin-top:13px;padding:18px;border-radius:18px;border-color:#213951;box-shadow:0 14px 40px rgba(0,0,0,.22)}
-#app .panel h3{font-size:20px;margin-bottom:9px}
+#app .panel h3{font-size:20px;margin:2px 0 9px;letter-spacing:.1px}
+#app .panel h4{letter-spacing:.1px}
 #app .note,#app .notice{border-radius:11px;background:linear-gradient(145deg,#0e1c2d,#0a1523);border-color:#213951}
 #app .tw,#app .tablewrap{border-radius:13px;border-color:#213951;box-shadow:inset 0 1px rgba(255,255,255,.02)}
-#app th{height:36px;background:#0c1929;color:#7890aa}
+#app th{height:38px;background:#0c1929;color:#7890aa;font-weight:800}
 #app td{padding:11px 10px}
 #app tr:hover td{background:rgba(77,163,255,.055)}
-#app .pos{border-radius:13px;background:linear-gradient(145deg,#0d1b2b,#09131f);border-left-width:4px;padding:14px;box-shadow:0 7px 20px rgba(0,0,0,.18)}
+#app .pos{border-radius:13px;background:linear-gradient(145deg,#0d1b2b,#09131f);border-left-width:4px;padding:14px;box-shadow:0 7px 20px rgba(0,0,0,.18);transition:.18s}
+#app .pos:hover{border-color:#315473;transform:translateY(-1px)}
 #app .pos button{border-radius:8px;transition:.15s}.pos button:hover{border-color:#4da3ff;transform:translateY(-1px)}
-#app .optbox{border-radius:14px;background:linear-gradient(145deg,#0d1b2b,#09131f);border-color:#25445f}
+#app .optbox{border-radius:14px;background:linear-gradient(145deg,#0d1b2b,#09131f);border-color:#25445f;box-shadow:0 7px 20px rgba(0,0,0,.16)}
 #app .buy{font-weight:850}.sell{font-weight:850}
-@media(max-width:900px){#app .stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:520px){#app .app{padding:9px}#app .top b{font-size:18px}#app .stats{gap:8px}#app .stats div{min-height:72px;padding:11px}#app .stats b{font-size:17px}#app .panel{padding:11px;border-radius:14px}}
+#app .error{border:1px solid rgba(255,97,120,.25);border-radius:10px;background:rgba(255,97,120,.06)}
+#dd-mode-root{box-shadow:0 5px 18px rgba(0,0,0,.25);backdrop-filter:blur(12px)}
+#dd-mode-root button{transition:.15s}#dd-mode-root button:hover{transform:translateY(-1px)}
+@media(max-width:900px){#app .stats{grid-template-columns:repeat(2,minmax(0,1fr))}.nav{top:47px}}
+@media(max-width:520px){#app .app{padding:9px}#app .top{padding:13px}#app .top b{font-size:18px}#app .stats{gap:8px}#app .stats div{min-height:72px;padding:11px}#app .stats b{font-size:17px}#app .panel{padding:11px;border-radius:14px}#app .nav{top:46px;padding:4px}#app .nav button{padding:8px 10px;font-size:12px}}

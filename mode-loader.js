@@ -3,10 +3,9 @@ const KEY='ddMode';
 function patch(src){
  const testnet="localStorage.getItem('ddMode')==='TESTNET'";
  src=src.replace("const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade'","const PUB='/api/binance-market?path=',AC=("+testnet+"?'/api/binance-testnet-account?path=':'/api/binance-account?path='),TR=("+testnet+"?'/api/binance-testnet-trade':'/api/binance-trade')");
- src=src.replace("mode:'PAPER'","mode:(localStorage.getItem('ddMode')||'PAPER')");
- src=src.replace("liveAuto:false","liveAuto:(localStorage.getItem('ddMode')==='TESTNET')");
+ src=src.replace("mode:'PAPER',auto:true,liveAuto:false","mode:(localStorage.getItem('ddMode')||'PAPER'),auto:true,liveAuto:(localStorage.getItem('ddMode')==='TESTNET')");
  src=src.replace("if(S.mode!=='PAPER'||!canOpen(x,e))return false;","if(!['PAPER','TESTNET'].includes(S.mode)||!canOpen(x,e))return false;");
- src=src.replace("mode:'PAPER'","mode:S.mode");
+ src=src.replace("feeRate:F,mode:'PAPER'","feeRate:F,mode:S.mode");
  src=src.replace("if(S.mode==='PAPER'){if(x.m>=65","if(S.mode==='PAPER'||S.mode==='TESTNET'){if(x.m>=65");
  src=src.replace("function managePaper(){for(const p of [...S.pos]){if(p.mode!=='PAPER')continue;","function managePaper(){for(const p of [...S.pos]){if(!['PAPER','TESTNET'].includes(p.mode))continue;");
  src=src.replace("async function syncAccount(){if(Date.now()-S.lastAccount<2500)return;","async function syncAccount(){if(S.mode==='TESTNET'){S.account=null;S.err='';return;}if(Date.now()-S.lastAccount<2500)return;");

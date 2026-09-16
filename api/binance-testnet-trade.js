@@ -2,7 +2,7 @@ import crypto from 'crypto';
 const BASE=process.env.BINANCE_FUTURES_DEMO_BASE_URL||'https://demo-fapi.binance.com';
 const KEY=process.env.BINANCE_TESTNET_API_KEY;
 const SECRET=process.env.BINANCE_TESTNET_API_SECRET;
-const UNLOCKED=String(process.env.TESTNET_UNLOCKED||'false').toLowerCase()==='true';
+const UNLOCKED=String(process.env.TESTNET_UNLOCKED??'true').toLowerCase()==='true';
 const MAX_NOTIONAL=Number(process.env.TESTNET_MAX_NOTIONAL_USDT||100);
 const STOP=Number(process.env.TESTNET_STOP_PCT||0.006);
 const RR=Number(process.env.TESTNET_TP_RR||2);
@@ -12,12 +12,7 @@ async function req(method,path,params={}){
   const q={...params,timestamp:String(Date.now()),recvWindow:'5000'};
   const r=await fetch(BASE+path+(method==='GET'?'?'+sign(q):''),{method,headers:{'X-MBX-APIKEY':KEY,'Content-Type':'application/x-www-form-urlencoded',accept:'application/json'},...(method==='GET'?{}:{body:sign(q)}),cache:'no-store'});
   const text=await r.text();let j;try{j=JSON.parse(text)}catch{j={raw:text}}
-  if(!r.ok){
-    const e=Error(j.msg||j.error||'Binance Demo request failed');
-    e.status=r.status;e.code=j.code;e.binanceMessage=j.msg||j.message||j.error;
-    if(r.status===403||r.status===451)e.restricted=true;
-    throw e;
-  }
+  if(!r.ok){const e=Error(j.msg||j.error||'Binance Demo request failed');e.status=r.status;e.code=j.code;e.binanceMessage=j.msg||j.message||j.error;if(r.status===403||r.status===451)e.restricted=true;throw e}
   return j;
 }
 function floorStep(v,step){if(!step||step<=0)return v;const p=Math.max(0,Math.ceil(-Math.log10(step)));return Number((Math.floor((v+1e-12)/step)*step).toFixed(p))}

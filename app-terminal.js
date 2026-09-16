@@ -23,7 +23,7 @@ const S={
   wsStatus:'connecting',ws:null,wsTimer:null,
   t:{},rows:[],k:{},universe:[],
   pos:[],hist:[],eq:10000,real:0,fees:0,
-  account:null,testnetAccount:null,testnetStatus:null,
+  account:null,testnetAccount:null,testnetStatus:null,testnetRestricted:false,
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
@@ -66,7 +66,7 @@ async function api(base,path){
 function storageKey(){return 'ddv5_'+S.mode}
 function save(){
   try{
-    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade});
+    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets});
     localStorage.setItem('ddSettings',JSON.stringify(S.settings));
   }catch(e){}
 }
@@ -76,6 +76,7 @@ function load(){
     S.pos=q.pos||[];S.hist=q.hist||[];
     S.eq=N(q.eq)||(S.mode==='PAPER'?N(S.settings.paperCapital)||10000:10000);
     S.real=N(q.real);S.fees=N(q.fees);S.lastTrade=q.lastTrade||{};
+    if(q.optSets&&Array.isArray(q.optSets)&&q.optSets.length===OPT_SETS)S.optSets=q.optSets;
   }catch(e){}
 }
 
@@ -137,11 +138,19 @@ function paperOpen(x,e){
 }
 async function testnetOpen(x,e){
   if(S.mode!=='TESTNET'||!canOpen(x,e))return false;
+  if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
   const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
   if(!Number.isFinite(r.q)||r.q<=0)return false;
   try{
     const resp=await fetch(TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'order',symbol:x.s,side:z,quantity:r.q,type:'MARKET',stopPct:r.stop})});
-    const j=await resp.json();if(!resp.ok)throw Error(j.error||'Testnet order failed');
+    const j=await resp.json();
+    if(j.testnetUnavailable||j.restricted){
+      S.testnetRestricted=true;S.auto=false;
+      try{localStorage.setItem('ddTestnetRestrictedAt',String(Date.now()))}catch(e){}
+      S.err='TESTNET: '+(j.error||'Binance Futures Demo trading is unavailable from this deployment location or account eligibility.');
+      render();return false;
+    }
+    if(!resp.ok)throw Error(j.error||'Testnet order failed');
     const ent=j.entry||j,fillPx=N(ent.avgPrice)||x.p;
     S.pos.push({id:'tn-'+Date.now(),s:x.s,e,side:z,entry:fillPx,current:fillPx,q:N(j.quantity)||r.q,
       sl:z==='BUY'?fillPx*(1-r.stop):fillPx*(1+r.stop),tp:z==='BUY'?fillPx*(1+2*r.stop):fillPx*(1-2*r.stop),
@@ -215,7 +224,15 @@ async function syncAccount(){
 async function syncTestnet(){
   if(S.mode!=='TESTNET')return;
   try{
-    const a=await api(TN_AC,'/fapi/v2/account');const bal=(a.assets||[]).find(x=>x.asset==='USDT');
+    const a=await api(TN_AC,'/fapi/v2/account');
+    if(a.testnetUnavailable||a.restricted){
+      S.testnetRestricted=true;S.auto=false;
+      try{localStorage.setItem('ddTestnetRestrictedAt',String(Date.now()))}catch(e){}
+      S.err='TESTNET: '+(a.error||'Binance Futures Demo is unavailable from this deployment location.');
+      return;
+    }
+    S.testnetRestricted=false;
+    const bal=(a.assets||[]).find(x=>x.asset==='USDT');
     S.testnetAccount={availableBalance:N(a.availableBalance||bal?.availableBalance),walletBalance:N(a.totalWalletBalance||bal?.walletBalance),unrealized:N(a.totalUnrealizedProfit),margin:N(a.totalMarginBalance)};
   }catch(e){S.err='Testnet sync: '+e.message}
 }
@@ -696,9 +713,9 @@ function renderPaper(){
 function renderTestnet(){
   const ta=S.testnetAccount,st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
   const ts=S.testnetStatus||{};
-  const restricted=typeof localStorage!=='undefined'&&localStorage.getItem('ddTestnetRestrictedAt')&&(Date.now()-Number(localStorage.getItem('ddTestnetRestrictedAt'))<600000);
+  const restricted=S.testnetRestricted||(typeof localStorage!=='undefined'&&localStorage.getItem('ddTestnetRestrictedAt')&&(Date.now()-Number(localStorage.getItem('ddTestnetRestrictedAt'))<600000));
   let statusNote='';
-  if(restricted){statusNote='<div class="note warn"><b>Binance Futures Demo trading is unavailable from this deployment location or account eligibility.</b> Auto trading has been stopped. Paper Trading remains fully functional.</div>'}
+  if(restricted){statusNote='<div class="note warn"><b>Binance Futures Demo trading is unavailable from this deployment location or account eligibility.</b> Auto trading has been stopped. Paper Trading remains fully functional. <button class="btn sm" onclick="DD.retryTestnet()">Retry Testnet</button></div>'}
   else if(ts.apiKeyConfigured===false){statusNote='<div class="note info">Testnet API keys are not configured. To enable Testnet trading, add BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET to your environment. Paper Trading works without configuration.</div>'}
   else if(ts.testnetUnlocked===false){statusNote='<div class="note info">Testnet is locked. Set TESTNET_UNLOCKED=true in your environment to enable Demo orders.</div>'}
   else{statusNote='<div class="note info">Testnet API: Configured · '+(ts.testnetUnlocked?'Unlocked':'Locked')+' · Base: '+E(ts.baseUrl)+'</div>'}
@@ -846,6 +863,7 @@ window.DD={
   reconnect(){connectWS()},
   syncAcc(){syncAccount().then(render)},
   checkTestnet(){checkTestnetStatus().then(()=>{syncTestnet();render()})},
+  retryTestnet(){S.testnetRestricted=false;try{localStorage.removeItem('ddTestnetRestrictedAt')}catch(e){}S.err='';checkTestnetStatus().then(()=>{syncTestnet();render()})},
   closeOptSet(i){
     const set=S.optSets[i];if(!set||set.status!=='OPEN')return;
     const mk=S.optData.marks[set.contract];
@@ -859,7 +877,7 @@ window.DD={
     set.status='CLOSED';set.closed=Date.now();set.pnl=0;set.entry=0;set.current=0;set.qty=0;set.contract='';set.entryFee=0;save();render();
   },
   updateSetting(k,v){S.settings[k]=v;save();render()},
-  resetPaper(){if(confirm('Reset '+S.mode+' trading data? This clears positions and history for this mode.')){S.pos=[];S.hist=[];S.eq=N(S.settings.paperCapital)||10000;S.real=0;S.fees=0;S.lastTrade={};save();render()}},
+  resetPaper(){if(confirm('Reset '+S.mode+' trading data? This clears positions and history for this mode.')){S.pos=[];S.hist=[];S.eq=N(S.settings.paperCapital)||10000;S.real=0;S.fees=0;S.lastTrade={};S.optSets=Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''}));save();render()}},
   exportData(){try{const d=localStorage[storageKey()];const blob=new Blob([d],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='dealdost-'+S.mode.toLowerCase()+'-'+Date.now()+'.json';a.click();URL.revokeObjectURL(url)}catch(e){alert('Export failed: '+e.message)}},
   drawLine,drawBar
 };

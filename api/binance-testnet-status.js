@@ -3,10 +3,11 @@ export default async function handler(req,res){
   const key=String(process.env.BINANCE_TESTNET_API_KEY||'').trim();
   const secret=String(process.env.BINANCE_TESTNET_API_SECRET||'').trim();
   const base=String(process.env.BINANCE_FUTURES_DEMO_BASE_URL||'https://demo-fapi.binance.com').trim();
+  const unlocked=String(process.env.TESTNET_UNLOCKED??'true').toLowerCase()==='true';
   return res.status(200).json({
     apiKeyConfigured:Boolean(key),
     apiSecretConfigured:Boolean(secret),
     baseUrl:base,
-    testnetUnlocked:String(process.env.TESTNET_UNLOCKED||'false').toLowerCase()==='true'
+    testnetUnlocked:unlocked
   });
 }

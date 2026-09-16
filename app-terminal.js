@@ -9,7 +9,7 @@
 /* ===== Constants (preserved from scanner-v3) ===== */
 const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade',
   TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',
-  F=.0005,MC=3,SC=3,OC=4,COOLDOWN=5*60e3;
+  F=.0005,MC=3,SC=3,OC=4,COOLDOWN=5*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01;
 const NAV=['dashboard','momentum','momentum-history','scalping','scalping-history','options','options-history','positions','trade-history','pnl','paper','testnet','live','analytics','settings'];
 const NAV_LABELS={'dashboard':'Dashboard','momentum':'Momentum','momentum-history':'Mom History','scalping':'Scalping','scalping-history':'Scalp History','options':'Options','options-history':'Opt History','positions':'Positions','trade-history':'Trade History','pnl':'PNL','paper':'Paper Trading','testnet':'Testnet','live':'Live Trading','analytics':'Analytics','settings':'Settings'};
 const BOTTOM_NAV=['dashboard','momentum','scalping','options','positions','pnl','analytics','settings'];
@@ -26,6 +26,7 @@ const S={
   account:null,testnetAccount:null,testnetStatus:null,
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
+  optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
   scanTimer:null,manageTimer:null,optTimer:null,
   settings:JSON.parse(localStorage.getItem('ddSettings')||'{}'),
   filterCoin:'',filterMode:'',filterStrategy:'',filterResult:'',filterDate:''
@@ -197,6 +198,7 @@ function managePaper(){
       S.lastTrade[p.s]=Date.now();S.pos=S.pos.filter(q=>q.id!==p.id);save();
     }
   }
+  manageOptions();
 }
 
 /* ===== Account sync ===== */
@@ -274,7 +276,7 @@ function connectWS(){
   }catch(e){S.wsStatus='offline';if(S.wsTimer)clearTimeout(S.wsTimer);S.wsTimer=setTimeout(connectWS,4000)}
 }
 
-/* ===== Options (preserved from options-fix.js, integrated) ===== */
+/* ===== Options (preserved logic, extended with 4 independent paper sets) ===== */
 async function scanOptions(){
   if(S.optLoading)return;S.optLoading=true;
   try{
@@ -291,6 +293,7 @@ async function scanOptions(){
     const f=await api(PUB,'/fapi/v1/ticker/24hr');S.optData.underlying={};
     (Array.isArray(f)?f:[]).forEach(x=>{S.optData.underlying[x.symbol]={c:N(x.priceChangePercent),v:N(x.quoteVolume),p:N(x.lastPrice)}});
     buildOptions();
+    if(S.auto&&S.mode==='PAPER')engineOptions();
     if(['options','options-history'].includes(S.tab))render();
   }catch(e){}
   finally{S.optLoading=false}
@@ -314,6 +317,85 @@ function optChainData(u){
   const puts=a.filter(x=>x.side==='PUT').sort((x,y)=>y.k-x.k);
   const strikes=[...new Set(a.map(x=>x.k))].sort((a,b)=>a-b);
   return{calls,puts,strikes,expiry:ex};
+}
+/* Pick a valid option contract for a signal on a given underlying */
+function pickOptionContract(u,signal){
+  const cd=optChainData(u);if(!cd)return null;
+  const u24=S.optData.underlying[u];const spot=N(u24?.p);if(!spot)return null;
+  if(signal==='BUY'){
+    const c=cd.calls.filter(x=>S.optData.marks[x.n]?.p>0).sort((a,b)=>Math.abs(N(S.optData.marks[b.n]?.d)-0.5)-Math.abs(N(S.optData.marks[a.n]?.d)-0.5))[0];
+    if(c&&S.optData.marks[c.n])return{contract:c,mark:S.optData.marks[c.n],type:'CALL'};
+  }else if(signal==='SELL'){
+    const p=cd.puts.filter(x=>S.optData.marks[x.n]?.p>0).sort((a,b)=>Math.abs(N(S.optData.marks[b.n]?.d)+0.5)-Math.abs(N(S.optData.marks[a.n]?.d)+0.5))[0];
+    if(p&&S.optData.marks[p.n])return{contract:p,mark:S.optData.marks[p.n],type:'PUT'};
+  }
+  return null;
+}
+/* Open an option paper trade on a specific set (1..OPT_SETS) */
+function optionOpen(setIdx,u,signal){
+  if(S.mode!=='PAPER')return false;
+  const set=S.optSets[setIdx];if(!set||set.status==='OPEN')return false;
+  const pick=pickOptionContract(u,signal);if(!pick)return false;
+  const mark=pick.mark,contract=pick.contract;
+  const riskAmt=S.eq*OPT_RISK;
+  const qty=Math.max(riskAmt/(mark.p*spot(S.optData.underlying[u])),0.001);
+  const entryFee=mark.p*qty*spot(S.optData.underlying[u])*F;
+  const slipPx=mark.p*S.settings.slippage;
+  const entryPx=mark.p+(signal==='BUY'?slipPx:-slipPx);
+  set.status='OPEN';set.symbol=u;set.side=signal;set.entry=entryPx;set.current=mark.p;set.qty=qty;
+  set.contract=contract.n;set.expiry=contract.ex;set.strike=contract.k;set.pnl=-entryFee;set.entryFee=entryFee;set.opened=Date.now();set.reason=signal+' '+pick.type+' @ K='+contract.k;
+  S.hist.unshift({time:Date.now(),s:u,e:'OPTIONS',side:signal,action:'ENTRY',price:entryPx,qty,fees:entryFee,pnl:0,live:false,mode:'PAPER',reason:set.reason,optSet:setIdx+1,contract:contract.n});
+  save();return true;
+}
+/* Helper: get underlying spot price */
+function spot(u24){return N(u24?.p)}
+/* Manage open option positions: update mark price, check SL/TP/expiry */
+function manageOptions(){
+  if(S.mode!=='PAPER')return;
+  for(const set of S.optSets){
+    if(set.status!=='OPEN')continue;
+    const mk=S.optData.marks[set.contract];
+    if(!mk)continue;
+    set.current=mk.p;
+    const uSpot=N(S.optData.underlying[set.symbol]?.p);
+    const notional=mk.p*set.qty*Math.max(uSpot,1e-9);
+    const exitFee=notional*F;
+    const gross=set.side==='BUY'?(mk.p-set.entry)*set.qty*Math.max(uSpot,1e-9):(set.entry-mk.p)*set.qty*Math.max(uSpot,1e-9);
+    set.pnl=gross-set.entryFee-exitFee;
+    const pnlPct=set.entry>0?(mk.p-set.entry)/set.entry*(set.side==='BUY'?1:-1):0;
+    const hitSL=pnlPct<=-OPT_STOP;
+    const hitTP=pnlPct>=OPT_TP;
+    const expired=set.expiry&&Date.now()>=set.expiry;
+    if(hitSL||hitTP||expired){
+      S.real+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;
+      S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:mk.p,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:'PAPER',reason:expired?'Expiry':(hitSL?'Stop loss':'Take profit'),optSet:set.id,contract:set.contract});
+      set.status='CLOSED';set.closed=Date.now();set.pnl=0;set.entry=0;set.current=0;set.qty=0;set.contract='';set.entryFee=0;
+    }
+  }
+  save();
+}
+/* Engine: evaluate option signals and open trades on available sets */
+function engineOptions(){
+  if(S.mode!=='PAPER'||!S.auto)return;
+  const active=S.optData.rows.filter(x=>x.signal!=='WATCH');
+  if(!active.length)return;
+  for(const row of active){
+    for(let i=0;i<OPT_SETS;i++){
+      const set=S.optSets[i];
+      if(set.status==='OPEN')continue;
+      if(set.status==='SIGNAL'&&set.symbol===row.u)continue;
+      if(Date.now()-N(set.closed)<OPT_COOLDOWN&&set.status==='CLOSED')continue;
+      if(S.pos.some(p=>p.s===row.u&&p.e==='OPTIONS'))continue;
+      const pick=pickOptionContract(row.u,row.signal);
+      if(!pick){set.status='ERROR';set.reason='No valid contract for '+row.u;continue}
+      set.status='SIGNAL';set.symbol=row.u;set.side=row.signal;set.reason='Signal: '+row.signal+' on '+row.u+' ('+P(row.change)+' 24H)';
+      optionOpen(i,row.u,row.signal);
+      break;
+    }
+  }
+  for(const set of S.optSets){
+    if(set.status==='SIGNAL'&&set.status!=='OPEN'){const stillActive=S.optData.rows.find(x=>x.u===set.symbol&&x.signal===set.side);if(!stillActive)set.status='WAITING'}
+  }
 }
 
 /* ===== PNL / Analytics ===== */
@@ -506,9 +588,32 @@ function renderOptions(){
   if(S.optLoading&&!rows.length)return html+'<div class="note">Loading options radar…</div></div>';
   if(!rows.length)return html+'<div class="note">No option data. <button class="btn sm" onclick="DD.scanOptions()">Scan Options</button></div></div>';
   const active=rows.filter(x=>x.signal!=='WATCH');
-  html+='<div class="note info">'+rows.length+' option-enabled underlyings · '+active.length+' with qualifying signal · max '+OC+' paper spreads</div>';
+  html+='<div class="note info">'+rows.length+' option-enabled underlyings · '+active.length+' with qualifying signal · '+OPT_SETS+' independent paper sets</div>';
   const tbl=rows.slice(0,50).map((x,i)=>'<tr><td>'+(i+1)+'</td><td><span class="coin">'+E(x.u)+'</span></td><td>'+x.count+'</td><td class="'+cl(x.change)+'">'+P(x.change)+'</td><td>'+R(x.volume/1e6)+'M</td><td>'+(x.expiry?new Date(x.expiry).toLocaleDateString():'-')+'</td><td>'+(x.signal==='BUY'?'<span class="signal-badge buy">BUY</span>':x.signal==='SELL'?'<span class="signal-badge sell">SELL</span>':'<span class="signal-badge watch">WATCH</span>')+'</td><td><button class="btn sm blue" onclick="DD.optView=\''+E(x.u)+'\';DD.render()">Chain</button></td></tr>').join('');
   html+='<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Underlying</th><th>Contracts</th><th>24H</th><th>Volume</th><th>Expiry</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+tbl+'</tbody></table></div></div>';
+  // Four independent option sets
+  html+='<div class="panel"><div class="panel-header"><div class="panel-title">Option Paper Trading Sets (1–4)</div><div class="panel-sub">Each set trades independently · PAPER mode only · Auto-entries on qualifying signals</div></div>';
+  html+='<div class="opt-set-grid">';
+  for(let i=0;i<OPT_SETS;i++){
+    const set=S.optSets[i];
+    const stCls=set.status==='OPEN'?'open':set.status==='SIGNAL'?'signal':set.status==='ERROR'?'error':set.status==='CLOSED'?'closed':'waiting';
+    let pnlHtml='';
+    if(set.status==='OPEN'){const pnlPct=set.entry>0?((set.current-set.entry)/set.entry*(set.side==='BUY'?1:-1)*100):0;pnlHtml='<div class="pos-pnl '+cl(set.pnl)+'">PNL: ₹'+PNL(set.pnl)+' ('+P(pnlPct)+')</div>'}
+    html+='<div class="opt-set-card '+stCls+'"><div class="opt-set-head"><span class="opt-set-num">Set '+(i+1)+'</span>'+
+      '<span class="opt-set-status '+stCls+'">'+set.status+'</span></div>'+
+      (set.symbol?'<div class="opt-set-info"><span>Symbol:</span> <b>'+E(set.symbol)+'</b></div>':'')+
+      (set.side?'<div class="opt-set-info"><span>Side:</span> <b class="'+(set.side==='BUY'?'buy':'sell')+'">'+set.side+'</b></div>':'')+
+      (set.contract?'<div class="opt-set-info"><span>Contract:</span> '+E(set.contract).slice(0,24)+'</div>':'')+
+      (set.entry?'<div class="opt-set-info"><span>Entry:</span> '+fmtPrice(set.entry)+'</div>':'')+
+      (set.status==='OPEN'?'<div class="opt-set-info"><span>Mark:</span> '+fmtPrice(set.current)+'</div>':'')+
+      (set.strike?'<div class="opt-set-info"><span>Strike:</span> '+fmtPrice(set.strike)+'</div>':'')+
+      (set.expiry?'<div class="opt-set-info"><span>Expiry:</span> '+new Date(set.expiry).toLocaleDateString()+'</div>':'')+
+      (set.reason?'<div class="opt-set-reason">'+E(set.reason)+'</div>':'')+
+      pnlHtml+
+      (set.status==='OPEN'?'<button class="btn sm red" onclick="DD.closeOptSet('+i+')">Close</button>':'')+
+      '</div>';
+  }
+  html+='</div></div>';
   // Options chain
   const viewU=S.optView||active[0]?.u||rows[0]?.u;
   if(viewU){
@@ -590,10 +695,17 @@ function renderPaper(){
 
 function renderTestnet(){
   const ta=S.testnetAccount,st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
+  const ts=S.testnetStatus||{};
+  const restricted=typeof localStorage!=='undefined'&&localStorage.getItem('ddTestnetRestrictedAt')&&(Date.now()-Number(localStorage.getItem('ddTestnetRestrictedAt'))<600000);
+  let statusNote='';
+  if(restricted){statusNote='<div class="note warn"><b>Binance Futures Demo trading is unavailable from this deployment location or account eligibility.</b> Auto trading has been stopped. Paper Trading remains fully functional.</div>'}
+  else if(ts.apiKeyConfigured===false){statusNote='<div class="note info">Testnet API keys are not configured. To enable Testnet trading, add BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET to your environment. Paper Trading works without configuration.</div>'}
+  else if(ts.testnetUnlocked===false){statusNote='<div class="note info">Testnet is locked. Set TESTNET_UNLOCKED=true in your environment to enable Demo orders.</div>'}
+  else{statusNote='<div class="note info">Testnet API: Configured · '+(ts.testnetUnlocked?'Unlocked':'Locked')+' · Base: '+E(ts.baseUrl)+'</div>'}
   return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+
-    (S.testnetStatus?'<div class="note info">Testnet API: '+(S.testnetStatus.apiKeyConfigured?'Configured':'Not configured')+' · '+(S.testnetStatus.testnetUnlocked?'Unlocked':'Locked')+' · Base: '+E(S.testnetStatus.baseUrl)+'</div>':'<div class="note">Loading testnet status…</div>')+
+    statusNote+
     '<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+'')+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button></div>';
+    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>';
 }
 
 function renderLive(){
@@ -711,7 +823,7 @@ window.DD={
     S.mode=m;S.liveAuto=false;
     localStorage.setItem('ddMode',m);
     // Load new mode state
-    load();render();if(m==='LIVE')syncAccount();if(m==='TESTNET'){syncTestnet();checkTestnetStatus()}
+    load();render();if(m==='LIVE')syncAccount();if(m==='TESTNET'){syncTestnet();checkTestnetStatus().then(render)}
   },
   close(sym){
     const p=S.pos.find(x=>x.s===sym);if(!p)return;
@@ -733,6 +845,19 @@ window.DD={
   },
   reconnect(){connectWS()},
   syncAcc(){syncAccount().then(render)},
+  checkTestnet(){checkTestnetStatus().then(()=>{syncTestnet();render()})},
+  closeOptSet(i){
+    const set=S.optSets[i];if(!set||set.status!=='OPEN')return;
+    const mk=S.optData.marks[set.contract];
+    const exitPx=mk?mk.p:set.entry;
+    const uSpot=N(S.optData.underlying[set.symbol]?.p);
+    const notional=exitPx*set.qty*Math.max(uSpot,1e-9);
+    const exitFee=notional*F;
+    const gross=set.side==='BUY'?(exitPx-set.entry)*set.qty*Math.max(uSpot,1e-9):(set.entry-exitPx)*set.qty*Math.max(uSpot,1e-9);
+    set.pnl=gross-set.entryFee-exitFee;S.real+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;
+    S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:exitPx,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:'PAPER',reason:'Manual close',optSet:set.id,contract:set.contract});
+    set.status='CLOSED';set.closed=Date.now();set.pnl=0;set.entry=0;set.current=0;set.qty=0;set.contract='';set.entryFee=0;save();render();
+  },
   updateSetting(k,v){S.settings[k]=v;save();render()},
   resetPaper(){if(confirm('Reset '+S.mode+' trading data? This clears positions and history for this mode.')){S.pos=[];S.hist=[];S.eq=N(S.settings.paperCapital)||10000;S.real=0;S.fees=0;S.lastTrade={};save();render()}},
   exportData(){try{const d=localStorage[storageKey()];const blob=new Blob([d],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='dealdost-'+S.mode.toLowerCase()+'-'+Date.now()+'.json';a.click();URL.revokeObjectURL(url)}catch(e){alert('Export failed: '+e.message)}},
@@ -755,7 +880,7 @@ function boot(){
   // Timers (dedup guarded)
   clearTimers();
   S.scanTimer=setInterval(()=>{scan()},(N(S.settings.scanInterval)||30)*1000);
-  S.manageTimer=setInterval(()=>{managePaper();if(['dashboard','positions'].includes(S.tab))renderThrottled()},3000);
+  S.manageTimer=setInterval(()=>{managePaper();manageOptions();if(['dashboard','positions','options'].includes(S.tab))renderThrottled()},3000);
   S.optTimer=setInterval(()=>{scanOptions()},30000);
 }
 // Start only once

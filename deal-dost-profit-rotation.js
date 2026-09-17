@@ -1,14 +1,16 @@
-/* DealDost Profit Rotation Engine
+/* DealDost Profit Rotation Engine V2
  * PAPER-first: profitable futures/options positions can rotate into a new
  * confirmed Top-Mover signal. Losing positions are never force-closed here;
  * their existing SL/TP/expiry management remains responsible for exits.
  * LIVE order functions are not modified.
+ * V2 makes the UI render idempotent and prevents overlapping rotation scans.
  */
 (()=>{'use strict';
- const CFG={enabled:true,minR:.50,minScore:85,cooldown:15000};
+ const CFG={enabled:true,minR:.50,minScore:85,cooldown:15000,scanMs:5000};
  const N=x=>Number.isFinite(+x)?+x:0;
  const now=()=>Date.now();
  const recent={};
+ let rotating=false,lastPanel='',lastCandidateKey='';
  const candidates=()=>Array.isArray(window.DD_TOP_MOVERS?.candidates)?window.DD_TOP_MOVERS.candidates:[];
  const score=x=>Math.max(N(x?.momentumScore),N(x?.scalpingScore),N(x?.score));
  const side=x=>String(x?.direction||x?.side||'').toUpperCase();
@@ -40,34 +42,40 @@
    }catch{return 0}
  }
  async function rotate(){
-   if(!CFG.enabled||String(localStorage.getItem('ddMode')||'PAPER')!=='PAPER')return;
+   if(rotating||!CFG.enabled||String(localStorage.getItem('ddMode')||'PAPER')!=='PAPER')return;
    const best=strong();if(!best.length)return;
-   for(const p of profitableFutures()){
-     if(now()-N(recent[p.s])<CFG.cooldown)continue;
-     const candidate=best.find(x=>String(x.symbol).toUpperCase()!==String(p.s).toUpperCase());
-     if(!candidate||typeof window.DD?.close!=='function')continue;
-     try{
-       const ok=await Promise.resolve(window.DD.close(p.s));
-       if(ok===false)continue;
-       recent[p.s]=now();
-       await new Promise(r=>setTimeout(r,250));
-       if(typeof window.DD?.manualEntry==='function'){
-         const opened=window.DD.manualEntry(candidate.symbol,side(candidate));
-         if(opened!==false)recent[candidate.symbol]=now();
-       }
-     }catch(e){console.warn('Profit rotation skipped:',e)}
-   }
-   closeOptionProfits(best);
-   try{if(window.DDOptions?.scan)await window.DDOptions.scan()}catch(e){}
+   rotating=true;
+   try{
+     for(const p of profitableFutures()){
+       if(now()-N(recent[p.s])<CFG.cooldown)continue;
+       const candidate=best.find(x=>String(x.symbol).toUpperCase()!==String(p.s).toUpperCase());
+       if(!candidate||typeof window.DD?.close!=='function')continue;
+       try{
+         const ok=await Promise.resolve(window.DD.close(p.s));
+         if(ok===false)continue;
+         recent[p.s]=now();
+         await new Promise(r=>setTimeout(r,250));
+         if(typeof window.DD?.manualEntry==='function'){
+           const opened=window.DD.manualEntry(candidate.symbol,side(candidate));
+           if(opened!==false)recent[candidate.symbol]=now();
+         }
+       }catch(e){console.warn('Profit rotation skipped:',e)}
+     }
+     closeOptionProfits(best);
+     try{if(window.DDOptions?.scan)await window.DDOptions.scan()}catch(e){}
+   }finally{rotating=false}
  }
  function panel(){
    const app=document.querySelector('#app');if(!app)return;
    let el=document.querySelector('#dd-profit-rotation');
    if(!el){el=document.createElement('div');el.id='dd-profit-rotation';const host=app.querySelector('.dashboard-panel,.panel');if(host?.parentNode)host.parentNode.insertBefore(el,host);else app.prepend(el)}
-   const st=strong()[0];
-   el.innerHTML='<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">PROFIT ROTATION</div><div class="panel-sub">Profit ≥ 0.50R → exit · strong confirmed signal ≥ 85 → rotate · losing trades keep SL</div></div><div style="padding:9px;font-size:11px;color:#8ea3b8">'+(st?'Next strong signal: <b>'+String(st.symbol)+'</b> · '+side(st)+' · score '+score(st):'Waiting for strong confirmed signal…')+'</div></div>';
+   const st=strong()[0],key=st?[String(st.symbol),side(st),score(st)].join('|'):'WAIT';
+   const html='<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">PROFIT ROTATION</div><div class="panel-sub">Profit ≥ 0.50R → exit · strong confirmed signal ≥ 85 → rotate · losing trades keep SL</div></div><div style="padding:9px;font-size:11px;color:#8ea3b8">'+(st?'Next strong signal: <b>'+String(st.symbol)+'</b> · '+side(st)+' · score '+score(st):'Waiting for strong confirmed signal…')+'</div></div>';
+   /* Do not replace DOM when nothing changed. This was the source of the
+      visible Profit Rotation loop/flicker on every polling cycle. */
+   if(key!==lastCandidateKey||html!==lastPanel){el.innerHTML=html;lastPanel=html;lastCandidateKey=key}
  }
- function tick(){try{panel();rotate()}catch(e){}}
- setInterval(tick,2500);setTimeout(tick,3000);
+ async function tick(){try{panel();await rotate()}catch(e){console.warn('Profit rotation tick skipped:',e)}}
+ setInterval(tick,CFG.scanMs);setTimeout(tick,3000);
  window.DDProfitRotation={config:CFG,refresh:tick};
 })();

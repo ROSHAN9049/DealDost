@@ -9,7 +9,7 @@
 /* ===== Constants (preserved from scanner-v3) ===== */
 const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade',
   TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',
-  F=.0005,MC=3,SC=3,OC=4,COOLDOWN=5*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01;
+  F=.0005,MC=3,SC=3,OC=4,MOM_COOLDOWN=20*60e3,SCALP_COOLDOWN=10*60e3,COOLDOWN=10*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01;
 const NAV=['dashboard','momentum','momentum-history','scalping','scalping-history','options','options-history','positions','trade-history','pnl','paper','testnet','live','analytics','settings'];
 const NAV_LABELS={'dashboard':'Dashboard','momentum':'Momentum','momentum-history':'Mom History','scalping':'Scalping','scalping-history':'Scalp History','options':'Options','options-history':'Opt History','positions':'Positions','trade-history':'Trade History','pnl':'PNL','paper':'Paper Trading','testnet':'Testnet','live':'Live Trading','analytics':'Analytics','settings':'Settings'};
 const BOTTOM_NAV=['dashboard','momentum','scalping','options','positions','pnl','analytics','settings'];
@@ -87,22 +87,41 @@ function calc(s){
   let mom='WAIT',scalp='WAIT',ms=0,ss=0,atr=ATR(m5),mr=[],sr=[];
   let support=0,resistance=0;
   if(m5.length>=10){const rc=m5.slice(-20);support=Math.min(...rc.map(x=>N(x[3])));resistance=Math.max(...rc.map(x=>N(x[2])))}
-  if(c5.length>=35&&c15.length>=35){
-    const e9=EMA(m5,9),e21=EMA(m5,21),e50=EMA(m15,50),r=RSI(m5),v=VR(m5),
+  if(c5.length>=60&&c15.length>=60){
+    const e9=EMA(m5,9),e21=EMA(m5,21),e20=EMA(m15,20),e50=EMA(m15,50),r=RSI(m5),v=VR(m5),
       d=(c5.at(-1)-c5.at(-2))/Math.max(c5.at(-2),1e-9),
-      bull=c5.at(-1)>e9&&e9>e21&&c15.at(-1)>e50,
-      bear=c5.at(-1)<e9&&e9<e21&&c15.at(-1)<e50;
-    ms=Math.min(100,Math.round((bull||bear?28:0)+(v>=1.15?22:Math.min(v*14,14))+(Math.abs(d)>=.0005?18:Math.min(Math.abs(d)*18000,12))+(r>=52&&r<=74?17:r<=48&&r>=26?17:8)+(Math.abs(t.c)>=.5?15:Math.min(Math.abs(t.c)*10,10))));
-    if(bull&&r>=52&&r<=76&&d>0&&t.c>=0&&v>=1.15){mom='BUY';mr=['15m bullish','5m EMA9>EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
-    if(bear&&r<=48&&r>=24&&d<0&&t.c<=0&&v>=1.15){mom='SELL';mr=['15m bearish','5m EMA9<EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
+      bull=N(c15.at(-1))>e20&&e20>e50&&N(c5.at(-1))>e9&&e9>e21,
+      bear=N(c15.at(-1))<e20&&e20<e50&&N(c5.at(-1))<e9&&e9<e21;
+    let bs=0,rs=0;
+    if(bull)bs+=35;if(bear)rs+=35;
+    if(v>=1.15){bs+=15;rs+=15}
+    if(d>=.0005)bs+=15;if(d<=-.0005)rs+=15;
+    if(r>=53&&r<=70)bs+=20;if(r<=47&&r>=30)rs+=20;
+    if(N(t.c)>=.6)bs+=15;if(N(t.c)<=-.6)rs+=15;
+    ms=Math.min(100,Math.max(bs,rs));
+    if(bs>=80){mom='BUY';mr=['15m EMA20>EMA50','5m EMA9>EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x','24H '+P(t.c)]}
+    if(rs>=80){mom='SELL';mr=['15m EMA20<EMA50','5m EMA9<EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x','24H '+P(t.c)]}
   }
-  if(c1.length>=35&&c5.length>=35){
-    const e1=EMA(m1,9),e12=EMA(m1,21),e5=EMA(m5,9),e52=EMA(m5,21),r=RSI(m1),v=VR(m1),
+  if(c1.length>=70&&c5.length>=70){
+    const e8=EMA(m1,8),e21m=EMA(m1,21),e5=EMA(m5,9),e52=EMA(m5,21),r=RSI(m1),v=VR(m1),
       d=(c1.at(-1)-c1.at(-2))/Math.max(c1.at(-2),1e-9),
-      bull=c5.at(-1)>e5&&e5>e52,bear=c5.at(-1)<e5&&e5<e52;
-    ss=Math.min(100,Math.round((bull||bear?25:0)+(v>=1.1?22:Math.min(v*14,14))+(Math.abs(d)>=.0007?20:Math.min(Math.abs(d)*15000,14))+(r>=51&&r<=82?18:r<=49&&r>=18?18:8)+(Math.abs(t.c)>=.3?15:Math.min(Math.abs(t.c)*12,12))));
-    if(bull&&c1.at(-1)>e1&&e1>e12&&d>0&&r>=51&&r<=84&&v>=1.1&&t.c>=0){scalp='BUY';sr=['5m bullish','1m EMA9>EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
-    if(bear&&c1.at(-1)<e1&&e1<e12&&d<0&&r<=49&&r>=16&&v>=1.1&&t.c<=0){scalp='SELL';sr=['5m bearish','1m EMA9<EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
+      bull5=N(c5.at(-1))>e5&&e5>e52,bear5=N(c5.at(-1))<e5&&e5<e52,
+      px=N(c1.at(-1)),up=px>e8&&e8>e21m,down=px<e8&&e8<e21m,
+      prev=m1.slice(-13,-1),hi=Math.max(...prev.map(x=>N(x[2]))),lo=Math.min(...prev.map(x=>N(x[3]))),
+      breakUp=px>hi,breakDn=px<lo,
+      body=Math.abs(N(m1.at(-1)[4])-N(m1.at(-1)[1]))/Math.max(N(m1.at(-1)[2])-N(m1.at(-1)[3]),1e-9),
+      quality=body>=.35;
+    let bs=0,rs=0;
+    if(bull5)bs+=28;if(bear5)rs+=28;
+    if(up)bs+=22;if(down)rs+=22;
+    if(breakUp)bs+=22;if(breakDn)rs+=22;
+    if(v>=1.30){bs+=16;rs+=16}
+    if(r>=53&&r<=72)bs+=10;if(r<=47&&r>=28)rs+=10;
+    if(N(t.c)>=.35)bs+=8;if(N(t.c)<=-.35)rs+=8;
+    if(quality){bs+=4;rs+=4}
+    ss=Math.min(100,Math.max(bs,rs));
+    if(bs>=82&&px>N(m1.at(-2)[4])){scalp='BUY';sr=['5m EMA9>EMA21','1m EMA8>EMA21','breakout '+fmtPrice(hi),'RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
+    if(rs>=82&&px<N(m1.at(-2)[4])){scalp='SELL';sr=['5m EMA9<EMA21','1m EMA8<EMA21','breakdown '+fmtPrice(lo),'RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
   }
   const trend=mom==='BUY'?'BULLISH':mom==='SELL'?'BEARISH':scalp==='BUY'?'BULLISH':scalp==='SELL'?'BEARISH':'NEUTRAL';
   return{s,p:N(t.p),c:N(t.c),v:N(t.v),m:ms,sc:ss,momentum:mom,scalp,atr,funding:N(t.funding),oi:N(t.oi),support,resistance,trend,
@@ -111,15 +130,19 @@ function calc(s){
 function signal(x,e){return e==='MOMENTUM'?x.momentum:x.scalp}
 function riskModel(x,e,equity){
   const raw=(x.atr||x.p*.006)/Math.max(x.p,1e-9),
-    stop=Math.min(Math.max(raw*(e==='SCALPING'?.8:1.05),e==='SCALPING'?.003:.0045),e==='SCALPING'?.009:.012),
-    risk=Math.max(N(equity)*.005,1),q=risk/Math.max(x.p*stop,1e-9);
+    stop=e==='SCALPING'?Math.min(Math.max(raw,.004),.008):Math.min(Math.max(raw*.95,.0055),.012),
+    risk=Math.max(N(equity)*.004,5),
+    maxNotional=Math.max(N(equity)*.12,100),
+    rawQ=risk/Math.max(x.p*stop,1e-9),
+    q=Math.min(rawQ,maxNotional/Math.max(x.p,1e-9));
   return{stop,risk,q};
 }
 function canOpen(x,e){
   if(!x||!x.p||signal(x,e)==='WAIT')return false;
   if(S.pos.some(p=>p.s===x.s))return false;
   if(S.pos.filter(p=>p.e===e).length>=(e==='MOMENTUM'?MC:SC))return false;
-  return Date.now()-N(S.lastTrade[x.s]||0)>=COOLDOWN;
+  const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
+  return Date.now()-N(S.lastTrade[x.s]||0)>=cd;
 }
 
 /* ===== Paper/Testnet/Live entry (preserved logic) ===== */
@@ -176,17 +199,17 @@ async function liveOpen(x,e){
 /* ===== Engine (preserved, extended for mode dispatch) ===== */
 function engine(){
   if(!S.auto)return;
-  const arr=S.rows.filter(x=>x.m>=65||x.sc>=65).sort((a,b)=>Math.max(b.m,b.sc)-Math.max(a.m,a.sc));
+  const arr=S.rows.filter(x=>x.m>=80||x.sc>=82).sort((a,b)=>Math.max(b.m,b.sc)-Math.max(a.m,a.sc));
   for(const x of arr){
     if(S.mode==='PAPER'){
-      if(x.m>=65&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
-      if(x.sc>=65&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
+      if(x.m>=80&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
+      if(x.sc>=82&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
     }else if(S.mode==='TESTNET'){
-      if(x.m>=65&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)testnetOpen(x,'MOMENTUM');
-      if(x.sc>=65&&S.pos.filter(p=>p.e==='SCALPING').length<SC)testnetOpen(x,'SCALPING');
+      if(x.m>=80&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)testnetOpen(x,'MOMENTUM');
+      if(x.sc>=82&&S.pos.filter(p=>p.e==='SCALPING').length<SC)testnetOpen(x,'SCALPING');
     }else if(S.mode==='LIVE'&&S.liveAuto){
-      if(x.m>=78&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)liveOpen(x,'MOMENTUM');
-      if(x.sc>=78&&S.pos.filter(p=>p.e==='SCALPING').length<SC)liveOpen(x,'SCALPING');
+      if(x.m>=85&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)liveOpen(x,'MOMENTUM');
+      if(x.sc>=85&&S.pos.filter(p=>p.e==='SCALPING').length<SC)liveOpen(x,'SCALPING');
     }
   }
 }
@@ -702,12 +725,27 @@ function renderPaper(){
   const ec=engines.map(e=>{
     const ep=S.pos.filter(p=>p.e===e),eh=S.hist.filter(h=>h.e===e&&h.action==='EXIT'),est=statsFor(eh);
     const ePnl=ep.reduce((a,p)=>a+N(p.pnl),0);
-    return '<div class="acct-card"><h4>'+e+'</h4><div class="acct-row"><span>Capital</span><b>₹'+R(S.eq)+'</b></div><div class="acct-row"><span>Open Positions</span><b>'+ep.length+'</b></div><div class="acct-row"><span>Unrealized PNL</span><b class="'+cl(ePnl)+'">₹'+PNL(ePnl)+'</b></div><div class="acct-row"><span>Realized PNL</span><b class="'+cl(est.netPnl)+'">₹'+PNL(est.netPnl)+'</b></div><div class="acct-row"><span>Fees</span><b>₹'+R(est.totalFees)+'</b></div><div class="acct-row"><span>Trades</span><b>'+est.trades+'</b></div><div class="acct-row"><span>Win Rate</span><b>'+est.winRate.toFixed(1)+'%</b></div></div>';
+    const wl=est.wins+'/'+est.losses;
+    return '<div class="acct-card"><h4>'+e+'</h4><div class="acct-row"><span>Open</span><b>'+ep.length+'</b></div><div class="acct-row"><span>Unrealized</span><b class="'+cl(ePnl)+'">₹'+PNL(ePnl)+'</b></div><div class="acct-row"><span>W / L</span><b>'+wl+'</b></div><div class="acct-row"><span>Realized</span><b class="'+cl(est.netPnl)+'">₹'+PNL(est.netPnl)+'</b></div><div class="acct-row"><span>Fees</span><b>₹'+R(est.totalFees)+'</b></div><div class="acct-row"><span>Win Rate</span><b>'+est.winRate.toFixed(1)+'%</b></div></div>';
   }).join('');
-  return '<div class="mode-banner paper"><b>PAPER TRADING</b> — Local simulation · Real orders OFF</div>'+
+  const optSetHtml=S.optSets.map(set=>{
+    const stCls=set.status==='OPEN'?'buy':set.status==='SIGNAL'?'watch':set.status==='ERROR'?'sell':'neutral-text';
+    let detail='';
+    if(set.status==='OPEN'&&set.contract){
+      const mk=S.optData.marks[set.contract];
+      const pnlPct=set.entry>0?((mk?mk.p:set.current)-set.entry)/set.entry*(set.side==='BUY'?1:-1)*100:0;
+      detail='<div class="acct-row"><span>Contract</span><b style="font-size:10px">'+E(set.contract)+'</b></div><div class="acct-row"><span>Mark</span><b>'+fmtPrice(mk?mk.p:set.current)+'</b></div><div class="acct-row"><span>PNL</span><b class="'+cl(pnlPct)+'">'+P(pnlPct)+'</b></div>';
+    }else if(set.reason){
+      detail='<div class="acct-row"><span>Note</span><b style="font-size:10px">'+E(set.reason)+'</b></div>';
+    }
+    const closeBtn=set.status==='OPEN'?'<button class="btn sm red" onclick="DD.closeOptSet('+set.id+')">Close</button>':'';
+    return '<div class="acct-card"><h4>Set '+set.id+'</h4><div class="acct-row"><span>Status</span><b class="'+stCls+'">'+set.status+'</b></div>'+(set.symbol?'<div class="acct-row"><span>Symbol</span><b>'+E(set.symbol)+'</b></div>':'')+(set.side?'<div class="acct-row"><span>Side</span><b class="'+(set.side==='BUY'?'buy':'sell')+'">'+set.side+'</b></div>':'')+detail+closeBtn+'</div>';
+  }).join('');
+  return '<div class="mode-banner paper"><b>PAPER TRADING</b> — Local simulation · Real orders OFF · Risk-controlled entries</div>'+
     '<div class="kpi-grid">'+kpiCard('Virtual Capital','₹'+R(S.settings.paperCapital),'acc')+kpiCard('Available Balance','₹'+R(S.eq),'acc')+kpiCard('Used Margin','₹'+R(usedMargin))+kpiCard('Current Exposure','₹'+R(exposure))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Unrealized PNL','₹'+PNL(unreal),pnlClass(unreal))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
-    '<div class="panel"><div class="panel-header"><div class="panel-title">Per-Engine Accounts</div></div><div class="acct-grid">'+ec+'</div></div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn green sm" onclick="DD.toggleAuto()">Auto Trading: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm" onclick="DD.resetPaper()">Reset Paper</button></div>';
+    '<div class="panel"><div class="panel-header"><div class="panel-title">Per-Engine Accounts</div><div class="panel-sub">Selective entries · closed candles · equity-based sizing</div></div><div class="acct-grid">'+ec+'</div></div>'+
+    '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">Option Sets (4 Independent)</div><div class="panel-sub">Cooldown '+OPT_COOLDOWN/60e3+'m · Stop '+OPT_STOP*100+'% · Target '+OPT_TP*100+'%</div></div><div class="acct-grid">'+optSetHtml+'</div></div>'+
+    '<div class="btn-row" style="margin-top:8px"><button class="btn green sm" onclick="DD.toggleAuto()">Auto Trading: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan Now</button><button class="btn sm" onclick="DD.resetPaper()">Reset Paper</button></div>';
 }
 
 function renderTestnet(){

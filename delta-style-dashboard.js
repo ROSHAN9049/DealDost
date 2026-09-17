@@ -13,7 +13,7 @@
   const state=()=>{try{return JSON.parse(localStorage.getItem('ddv5_'+mode())||'{}')}catch{return {}}};
   function getStableUniverse(){try{const a=JSON.parse(localStorage.getItem(UNIVERSE_KEY)||'[]');return Array.isArray(a)?a.filter(x=>typeof x==='string'&&x):[]}catch{return[]}}
   function setStableUniverse(a){try{localStorage.setItem(UNIVERSE_KEY,JSON.stringify([...new Set(a)].slice(0,50)))}catch(e){}}
-  function rememberUniverse(scanner){if(getStableUniverse().length)return;const coins=[...scanner.querySelectorAll('tbody tr')].map(tr=>tr.querySelectorAll('td')[1]?.textContent?.trim()).filter(x=>/USDT$/i.test(x));if(coins.length)setStableUniverse(coins)}
+  function rememberUniverse(scanner){if(getStableUniverse().length)return;const coins=[...scanner.querySelectorAll('tbody tr')].map(tr=>{const cells=tr.querySelectorAll('td');return [...cells].map(td=>td.textContent.trim()).find(x=>/^[A-Z0-9._\-\u4e00-\u9fff]+USDT$/i.test(x))}).filter(Boolean);if(coins.length)setStableUniverse(coins)}
   function installStableFetch(){
     if(window.__DD_STABLE_FETCH_INSTALLED)return;
     const originalFetch=window.fetch;
@@ -26,6 +26,8 @@
     };
     window.__DD_STABLE_FETCH_INSTALLED=true;
   }
+  function getRows(){try{if(window.DD&&typeof window.DD.getRows==='function'){const r=window.DD.getRows();if(Array.isArray(r))return r}const r=window.__DD_SCANNER_ROWS;return Array.isArray(r)?r:[]}catch{return[]}}
+  function getKlines(){try{if(window.DD&&typeof window.DD.getKlines==='function'){const k=window.DD.getKlines();if(k&&typeof k==='object')return k}return window.__DD_KLINES||{}}catch{return{}}}
   function activeTrades(){
     const q=state(),out=[];
     (Array.isArray(q.pos)?q.pos:[]).forEach(p=>out.push({engine:p.e||'TRADE',symbol:p.s||'',side:p.side||'',entry:num(p.entry),current:num(p.current),qty:num(p.q),sl:num(p.sl),tp:num(p.tp),pnl:num(p.pnl)}));
@@ -35,7 +37,7 @@
   function positionPanel(){const ps=activeTrades();const rows=ps.map(p=>'<tr><td><b>'+esc(p.symbol)+'</b></td><td>'+esc(p.engine)+'</td><td class="'+(p.side==='BUY'?'buy':'sell')+'">'+esc(p.side)+'</td><td>'+price(p.entry)+'</td><td>'+price(p.current)+'</td><td>'+price(p.qty)+'</td><td>'+price(p.sl)+'</td><td>'+price(p.tp)+'</td><td class="'+(p.pnl>=0?'buy':'sell')+'">'+money(p.pnl)+'</td></tr>').join('');return '<section id="dd-delta-position-panel" class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">📌 POSITION DASHBOARD</div><div class="panel-sub">'+ps.length+' ACTIVE · '+esc(mode())+' MODE</div></div><div class="table-scroll"><table class="term"><thead><tr><th>Coin</th><th>Engine</th><th>Side</th><th>Entry</th><th>Current</th><th>Qty</th><th>SL</th><th>TP</th><th>P&amp;L</th></tr></thead><tbody>'+(rows||'<tr><td colspan="9" class="empty">No open positions</td></tr>')+'</tbody></table></div></section>'}
   function rulesPanel(){return '<section id="dd-delta-rules" class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">⚙️ AUTO ENGINE — ACTIVE RULES &amp; SAFETY</div><div class="panel-sub">Real orders remain controlled by selected mode</div></div><div class="note info">🌐 Live Binance feed · 📊 24H change + volume · 🕐 1m/5m/15m confirmation · 🎯 ATR-based SL/TP · 🛡️ Max 3 Momentum + 3 Scalping slots · 🧪 PAPER simulation only · 🔴 LIVE AUTO separately controlled</div></section>'}
   function direction(x){const m=x.momentum,sc=x.scalp;if(m==='BUY'&&sc==='BUY')return'BUY';if(m==='SELL'&&sc==='SELL')return'SELL';return m!=='WAIT'?m:sc!=='WAIT'?sc:'NEUTRAL'}
-  function radarRows(){const rows=(window.DD&&window.DD._rows)||[];return rows}
+  function radarRows(){return getRows()}
   function marketRadar(){
     const rows=radarRows();
     if(!rows.length)return '<section id="dd-market-radar" class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">📡 MARKET RADAR</div><div class="panel-sub">Waiting for scanner data…</div></div></section>';
@@ -52,7 +54,7 @@
     return '<section id="dd-market-radar" class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">📡 MARKET RADAR</div><div class="panel-sub">Stable universe · 24H momentum · volume spike · 1m/5m/15m confirmation</div></div><div class="acct-grid">'+pumpHtml+dumpHtml+volHtml+sigHtml+'</div></section>';
   }
   function refreshPanels(){
-    const app=document.getElementById('app');if(!app||DD.tab!=='dashboard')return;
+    const app=document.getElementById('app');if(!app||!window.DD||DD.tab!=='dashboard')return;
     const scanner=[...app.querySelectorAll('.panel')].find(p=>/TOP LIVE MARKET|Live Scanner/i.test(p.textContent||''));
     if(!scanner)return;
     rememberUniverse(scanner);
@@ -63,9 +65,8 @@
     const stable=getStableUniverse();const title=scanner.querySelector('.panel-title');if(title)title.innerHTML='🌈 TOP LIVE MARKET · STABLE '+(stable.length||50);const sub=scanner.querySelector('.panel-sub');if(sub)sub.innerHTML='Fixed coin universe · Live prices · 24H change · volume · Momentum · Scalping · signal';
   }
   function enhance(){if(!window.DD||DD.tab!=='dashboard')return;const app=document.getElementById('app');if(!app)return;const panels=[...app.querySelectorAll('.panel')];const scanner=panels.find(p=>/Live Scanner/i.test(p.textContent||''));if(!scanner)return;rememberUniverse(scanner);if(!app.querySelector('#dd-delta-rules'))scanner.insertAdjacentHTML('beforebegin',rulesPanel());if(!app.querySelector('#dd-delta-position-panel'))scanner.insertAdjacentHTML('beforebegin',positionPanel());refreshPanels()}
-  function install(){installStableFetch();if(!window.DD||window.__DD_DELTA_STYLE_INSTALLED)return false;window.__DD_DELTA_STYLE_INSTALLED=true;window.DD._rows=[];const original=DD.render;DD.render=function(){const r=original.apply(this,arguments);try{DD._rows=window.__DD_SCANNER_ROWS||DD._rows;enhance()}catch(e){}return r};setTimeout(enhance,50);return true}
+  function install(){installStableFetch();if(!window.DD||window.__DD_DELTA_STYLE_INSTALLED)return false;window.__DD_DELTA_STYLE_INSTALLED=true;window.DD._rows=[];const original=DD.render;DD.render=function(){const r=original.apply(this,arguments);try{DD._rows=getRows();enhance()}catch(e){}return r};setTimeout(enhance,50);return true}
   window.__DD_SCANNER_ROWS=[];
-  window.__DD_GET_VOL_SPIKE=s=>{try{const r=(window.DD&&window.DD._rows||[]).find(x=>x.s===s);if(!r)return 1;const a=window.__DD_KLINES?.[s]?.m5;return a&&a.length>11?num(a.at(-1)[5])/Math.max(a.slice(-11,-1).reduce((z,k)=>z+num(k[5]),0)/10,1e-9):1}catch(e){return 1}};
-  const bridge=setInterval(()=>{if(window.S&&S.rows){window.__DD_SCANNER_ROWS=S.rows;window.__DD_KLINES=S.k||{};if(window.DD)DD._rows=S.rows}},500);
+  window.__DD_GET_VOL_SPIKE=s=>{try{const r=getRows().find(x=>x.s===s);if(!r)return 1;const a=getKlines()?.[s]?.m5;return a&&a.length>11?num(a.at(-1)[5])/Math.max(a.slice(-11,-1).reduce((z,k)=>z+num(k[5]),0)/10,1e-9):1}catch(e){return 1}};
   const timer=setInterval(()=>{if(install())clearInterval(timer)},100);
 })();

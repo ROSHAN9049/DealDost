@@ -81,7 +81,7 @@ function load(){
     S.eq=N(q.eq)||(S.mode==='PAPER'?N(S.settings.paperCapital)||10000:10000);
     S.real=N(q.real);S.fees=N(q.fees);S.optReal=N(q.optReal);S.optFees=N(q.optFees);S.lastTrade=q.lastTrade||{};
     if(q.optSets&&Array.isArray(q.optSets)&&q.optSets.length===OPT_SETS)S.optSets=q.optSets;
-    S.dailyRiskUsed=N(q.dailyRiskUsed);S.dailyRiskDate=q.dailyRiskDate||'';
+    S.dailyRiskUsed=S.mode==='LIVE'?N(q.dailyRiskUsed):0;S.dailyRiskDate=S.mode==='LIVE'?(q.dailyRiskDate||''):'';
     S.rotation.events=N(q.rotationEvents);S.rotation.enabled=q.rotationEnabled!==false;if(q.rotation&&typeof q.rotation==='object')S.rotation={...S.rotation,...q.rotation};
     // Migration guard: older builds could record a close/open snapshot even when
     // replacement was blocked by the daily-risk gate. Never display that as a
@@ -190,9 +190,15 @@ function dailyRiskReset(){
   const today=new Date().toDateString();
   if(S.dailyRiskDate!==today){S.dailyRiskDate=today;S.dailyRiskUsed=0}
 }
+function dailyRiskEnabled(){return S.mode==='LIVE'}
 function dailyRiskOK(){
   dailyRiskReset();
-  return S.dailyRiskUsed<DAILY_RISK_LIMIT;
+  // Daily risk limit is a LIVE-only safety gate. PAPER/TESTNET must not
+  // stop entries or profit rotation because of the LIVE risk budget.
+  return !dailyRiskEnabled()||S.dailyRiskUsed<DAILY_RISK_LIMIT;
+}
+function recordDailyRisk(risk,equity){
+  if(dailyRiskEnabled())S.dailyRiskUsed+=N(risk)/Math.max(N(equity),1);
 }
 
 /* ===== Paper/Testnet/Live entry (preserved logic) ===== */
@@ -205,7 +211,7 @@ function paperOpen(x,e){
   S.pos.push({id:Date.now()+Math.random(),s:x.s,e,side:z,entry:entryPx,current:x.p,q:r.q,
     sl:z==='BUY'?entryPx*(1-r.stop):entryPx*(1+r.stop),tp:z==='BUY'?entryPx*(1+2*r.stop):entryPx*(1-2*r.stop),
     entryFee:ef,pnl:-ef,feeRate:F,mode:S.mode,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore});
-  S.dailyRiskUsed+=r.risk/Math.max(S.eq,1);
+  recordDailyRisk(r.risk,S.eq);
   S.lastTrade[x.s]=Date.now();
   S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:S.mode==='LIVE',mode:S.mode,reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
   save();return true;
@@ -229,7 +235,7 @@ async function testnetOpen(x,e){
     S.pos.push({id:'tn-'+Date.now(),s:x.s,e,side:z,entry:fillPx,current:fillPx,q:N(j.quantity)||r.q,
       sl:z==='BUY'?fillPx*(1-r.stop):fillPx*(1+r.stop),tp:z==='BUY'?fillPx*(1+2*r.stop):fillPx*(1-2*r.stop),
       entryFee:0,pnl:0,feeRate:F,mode:'TESTNET',orderId:ent.orderId,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore});
-    S.dailyRiskUsed+=r.risk/Math.max(S.eq,1);
+    recordDailyRisk(r.risk,S.eq);
     S.lastTrade[x.s]=Date.now();
     S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:fillPx,qty:N(j.quantity)||r.q,pnl:0,fees:0,live:true,mode:'TESTNET',reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
     await syncTestnet();save();return true;
@@ -243,7 +249,7 @@ async function liveOpen(x,e){
     const resp=await fetch(TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'order',symbol:x.s,side:z==='BUY'?'BUY':'SELL',quantity:r.q,type:'MARKET',price:x.p,stopPct:r.stop})});
     const j=await resp.json();if(!resp.ok)throw Error(j.error||'Live order failed');
     const ent=j.entry||j;
-    S.dailyRiskUsed+=r.risk/Math.max(S.eq,1);
+    recordDailyRisk(r.risk,S.eq);
     S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',orderId:ent.orderId,price:N(ent.avgPrice)||x.p,qty:r.q,pnl:0,fees:0,live:true,mode:'LIVE',reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
     S.lastTrade[x.s]=Date.now();await syncAccount();save();return true;
   }catch(err){S.err='LIVE: '+err.message;return false}
@@ -820,7 +826,7 @@ function renderDashboard(){
     '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">'+
     '<div class="kpi-card"><div class="kpi-label">Confirmed Signal</div><div class="kpi-value" style="font-size:14px;color:'+(hasConfirmed?'var(--green)':'var(--muted)')+'">'+(hasConfirmed?'YES':'NO')+'</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">Risk Gate</div><div class="kpi-value" style="font-size:14px;color:'+(riskOK?'var(--green)':'var(--red)')+'">'+(riskOK?'PASS':'FAIL')+'</div></div>'+
-    '<div class="kpi-card"><div class="kpi-label">Daily Risk</div><div class="kpi-value" style="font-size:14px">'+(S.dailyRiskUsed*100).toFixed(1)+'% / '+(DAILY_RISK_LIMIT*100)+'%</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Daily Risk</div><div class="kpi-value" style="font-size:14px">`+(dailyRiskEnabled()?(S.dailyRiskUsed*100).toFixed(1)+'% / '+(DAILY_RISK_LIMIT*100)+'%':'OFF — LIVE only')+`</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">Emergency Stop</div><div class="kpi-value" style="font-size:14px;color:'+(S.emergencyStop?'var(--red)':'var(--green)')+'">'+(S.emergencyStop?'ACTIVE':'OFF')+'</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">Paper</div><div class="kpi-value" style="font-size:14px;color:'+(S.mode==='PAPER'?'var(--green)':'var(--muted)')+'">'+(S.mode==='PAPER'?'ACTIVE':'OFF')+'</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">Testnet</div><div class="kpi-value" style="font-size:14px;color:'+(S.mode==='TESTNET'?'var(--cyan)':'var(--muted)')+'">'+(S.mode==='TESTNET'?'ACTIVE':'OFF')+'</div></div>'+

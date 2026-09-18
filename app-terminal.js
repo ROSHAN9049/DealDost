@@ -9,7 +9,8 @@
 /* ===== Constants (preserved from scanner-v3) ===== */
 const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade',
   TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',
-  F=.0005,MC=3,SC=3,OC=4,MOM_COOLDOWN=20*60e3,SCALP_COOLDOWN=10*60e3,COOLDOWN=10*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01;
+  F=.0005,MC=3,SC=3,OC=4,MOM_COOLDOWN=20*60e3,SCALP_COOLDOWN=10*60e3,COOLDOWN=10*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01,DAILY_RISK_LIMIT=0.06;
+  const CONF_MOM=80,CONF_SCALP=82,VOL_FILTER=1.15,QUALITY_MIN=70;
 const NAV=['dashboard','momentum','momentum-history','scalping','scalping-history','options','options-history','positions','trade-history','pnl','paper','testnet','live','analytics','settings'];
 const NAV_LABELS={'dashboard':'Dashboard','momentum':'Momentum','momentum-history':'Mom History','scalping':'Scalping','scalping-history':'Scalp History','options':'Options','options-history':'Opt History','positions':'Positions','trade-history':'Trade History','pnl':'PNL','paper':'Paper Trading','testnet':'Testnet','live':'Live Trading','analytics':'Analytics','settings':'Settings'};
 const BOTTOM_NAV=['dashboard','momentum','scalping','options','positions','pnl','analytics','settings'];
@@ -18,11 +19,14 @@ const BN_ICONS={'dashboard':'⌂','momentum':'M','scalping':'S','options':'O','p
 /* ===== State ===== */
 const S={
   mode:(localStorage.getItem('ddMode')||'PAPER'),
-  auto:true,liveAuto:false,
+  auto:true,liveAuto:false,liveTrading:false,
+  emergencyStop:false,
+  rotation:{enabled:true,lastRotation:0,events:0,lastEngine:'',lastClosed:'',lastOpened:'',lastReason:'',lastResult:''},
   tab:'dashboard',
   wsStatus:'connecting',ws:null,wsTimer:null,
   t:{},rows:[],k:{},universe:[],stableUniverse:[],
   pos:[],hist:[],eq:10000,real:0,fees:0,
+  dailyRiskUsed:0,dailyRiskDate:'',rotationId:0,
   account:null,testnetAccount:null,testnetStatus:null,testnetRestricted:false,
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
@@ -66,7 +70,7 @@ async function api(base,path){
 function storageKey(){return 'ddv5_'+S.mode}
 function save(){
   try{
-    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets});
+    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled});
     localStorage.setItem('ddSettings',JSON.stringify(S.settings));
   }catch(e){}
 }
@@ -77,6 +81,8 @@ function load(){
     S.eq=N(q.eq)||(S.mode==='PAPER'?N(S.settings.paperCapital)||10000:10000);
     S.real=N(q.real);S.fees=N(q.fees);S.lastTrade=q.lastTrade||{};
     if(q.optSets&&Array.isArray(q.optSets)&&q.optSets.length===OPT_SETS)S.optSets=q.optSets;
+    S.dailyRiskUsed=N(q.dailyRiskUsed);S.dailyRiskDate=q.dailyRiskDate||'';
+    S.rotation.events=N(q.rotationEvents);S.rotation.enabled=q.rotationEnabled!==false;
     try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
   }catch(e){}
 }
@@ -125,7 +131,26 @@ function calc(s){
     if(rs>=82&&px<N(m1.at(-2)[4])){scalp='SELL';sr=['5m EMA9<EMA21','1m EMA8<EMA21','breakdown '+fmtPrice(lo),'RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
   }
   const trend=mom==='BUY'?'BULLISH':mom==='SELL'?'BEARISH':scalp==='BUY'?'BULLISH':scalp==='SELL'?'BEARISH':'NEUTRAL';
+  /* Confirmed Signal Pipeline: STABLE50 -> 24H MOMENTUM -> VOLUME FILTER -> 1M -> 5M -> 15M -> QUALITY SCORE -> stage */
+  let stage='WATCH',confirmed=false,qualityScore=0,confirmReasons=[];
+  const has24h=Math.abs(N(t.c))>=0.35;
+  const hasVol=v>=VOL_FILTER;
+  const m1Confirm=scalp!=='WAIT';
+  const m5Confirm=mom!=='WAIT';
+  const m15Bull=N(c15.at(-1))>e20&&e20>e50;
+  const m15Bear=N(c15.at(-1))<e20&&e20<e50;
+  const m15Confirm=m15Bull||m15Bear;
+  if(has24h){confirmReasons.push('24H '+P(t.c))}
+  if(hasVol){confirmReasons.push('Vol '+v.toFixed(2)+'x')}
+  if(m1Confirm){confirmReasons.push('1M '+scalp)}
+  if(m5Confirm){confirmReasons.push('5M '+mom)}
+  if(m15Confirm){confirmReasons.push('15m '+(m15Bull?'BULL':'BEAR'))}
+  const sigDir=mom==='BUY'||scalp==='BUY'?'BUY':mom==='SELL'||scalp==='SELL'?'SELL':'NONE';
+  qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(m1Confirm?25:0)+(m5Confirm?25:0)+(m15Confirm?15:0)+(quality?10:0)));
+  if(has24h&&hasVol&&(m1Confirm||m5Confirm)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
+  if(stage==='SETUP'&&qualityScore>=QUALITY_MIN&&m15Confirm){stage='CONFIRMED';confirmed=true;confirmReasons.push('CONFIRMED')}
   return{s,p:N(t.p),c:N(t.c),v:N(t.v),m:ms,sc:ss,momentum:mom,scalp,atr,funding:N(t.funding),oi:N(t.oi),support,resistance,trend,
+    stage,confirmed,qualityScore,confirmReasons:confirmReasons.join(' · '),
     reasons:(mr.length?mr:sr.length?sr:['Waiting for closed-candle confirmation']).join(' · ')};
 }
 function signal(x,e){return e==='MOMENTUM'?x.momentum:x.scalp}
@@ -140,10 +165,21 @@ function riskModel(x,e,equity){
 }
 function canOpen(x,e){
   if(!x||!x.p||signal(x,e)==='WAIT')return false;
+  if(!x.confirmed)return false;
+  if(S.emergencyStop)return false;
   if(S.pos.some(p=>p.s===x.s))return false;
-  if(S.pos.filter(p=>p.e===e).length>=(e==='MOMENTUM'?MC:SC))return false;
+  if(S.pos.filter(p=>p.e===e).length>=(e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC))return false;
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
-  return Date.now()-N(S.lastTrade[x.s]||0)>=cd;
+  if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return false;
+  return true;
+}
+function dailyRiskReset(){
+  const today=new Date().toDateString();
+  if(S.dailyRiskDate!==today){S.dailyRiskDate=today;S.dailyRiskUsed=0}
+}
+function dailyRiskOK(){
+  dailyRiskReset();
+  return S.dailyRiskUsed<DAILY_RISK_LIMIT;
 }
 
 /* ===== Paper/Testnet/Live entry (preserved logic) ===== */
@@ -155,9 +191,10 @@ function paperOpen(x,e){
   const entryPx=x.p+(z==='BUY'?slip:-slip);
   S.pos.push({id:Date.now()+Math.random(),s:x.s,e,side:z,entry:entryPx,current:x.p,q:r.q,
     sl:z==='BUY'?entryPx*(1-r.stop):entryPx*(1+r.stop),tp:z==='BUY'?entryPx*(1+2*r.stop):entryPx*(1-2*r.stop),
-    entryFee:ef,pnl:-ef,feeRate:F,mode:S.mode,reason:x.reasons,opened:Date.now()});
+    entryFee:ef,pnl:-ef,feeRate:F,mode:S.mode,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore});
+  S.dailyRiskUsed+=r.risk/Math.max(S.eq,1);
   S.lastTrade[x.s]=Date.now();
-  S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:S.mode==='LIVE',mode:S.mode,reason:x.reasons});
+  S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:S.mode==='LIVE',mode:S.mode,reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
   save();return true;
 }
 async function testnetOpen(x,e){
@@ -178,9 +215,10 @@ async function testnetOpen(x,e){
     const ent=j.entry||j,fillPx=N(ent.avgPrice)||x.p;
     S.pos.push({id:'tn-'+Date.now(),s:x.s,e,side:z,entry:fillPx,current:fillPx,q:N(j.quantity)||r.q,
       sl:z==='BUY'?fillPx*(1-r.stop):fillPx*(1+r.stop),tp:z==='BUY'?fillPx*(1+2*r.stop):fillPx*(1-2*r.stop),
-      entryFee:0,pnl:0,feeRate:F,mode:'TESTNET',orderId:ent.orderId,reason:x.reasons,opened:Date.now()});
+      entryFee:0,pnl:0,feeRate:F,mode:'TESTNET',orderId:ent.orderId,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore});
+    S.dailyRiskUsed+=r.risk/Math.max(S.eq,1);
     S.lastTrade[x.s]=Date.now();
-    S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:fillPx,qty:N(j.quantity)||r.q,pnl:0,fees:0,live:true,mode:'TESTNET',reason:x.reasons});
+    S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:fillPx,qty:N(j.quantity)||r.q,pnl:0,fees:0,live:true,mode:'TESTNET',reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
     await syncTestnet();save();return true;
   }catch(err){S.err='TESTNET: '+err.message;return false}
 }
@@ -192,27 +230,111 @@ async function liveOpen(x,e){
     const resp=await fetch(TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'order',symbol:x.s,side:z==='BUY'?'BUY':'SELL',quantity:r.q,type:'MARKET',price:x.p,stopPct:r.stop})});
     const j=await resp.json();if(!resp.ok)throw Error(j.error||'Live order failed');
     const ent=j.entry||j;
-    S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',orderId:ent.orderId,price:N(ent.avgPrice)||x.p,qty:r.q,pnl:0,fees:0,live:true,mode:'LIVE',reason:x.reasons});
+    S.dailyRiskUsed+=r.risk/Math.max(S.eq,1);
+    S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',orderId:ent.orderId,price:N(ent.avgPrice)||x.p,qty:r.q,pnl:0,fees:0,live:true,mode:'LIVE',reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
     S.lastTrade[x.s]=Date.now();await syncAccount();save();return true;
   }catch(err){S.err='LIVE: '+err.message;return false}
 }
 
-/* ===== Engine (preserved, extended for mode dispatch) ===== */
+/* ===== Engine (confirmed-only entries + emergency stop + daily risk) ===== */
 function engine(){
-  if(!S.auto)return;
-  const arr=S.rows.filter(x=>x.m>=80||x.sc>=82).sort((a,b)=>Math.max(b.m,b.sc)-Math.max(a.m,a.sc));
+  if(!S.auto||S.emergencyStop)return;
+  dailyRiskReset();
+  const arr=S.rows.filter(x=>x.confirmed).sort((a,b)=>b.qualityScore-a.qualityScore);
   for(const x of arr){
+    if(!dailyRiskOK())break;
     if(S.mode==='PAPER'){
-      if(x.m>=80&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
-      if(x.sc>=82&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
+      if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
+      if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
     }else if(S.mode==='TESTNET'){
-      if(x.m>=80&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)testnetOpen(x,'MOMENTUM');
-      if(x.sc>=82&&S.pos.filter(p=>p.e==='SCALPING').length<SC)testnetOpen(x,'SCALPING');
-    }else if(S.mode==='LIVE'&&S.liveAuto){
-      if(x.m>=85&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)liveOpen(x,'MOMENTUM');
-      if(x.sc>=85&&S.pos.filter(p=>p.e==='SCALPING').length<SC)liveOpen(x,'SCALPING');
+      if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)testnetOpen(x,'MOMENTUM');
+      if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)testnetOpen(x,'SCALPING');
+    }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
+      if(liveGates(x,'MOMENTUM').pass&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)liveOpen(x,'MOMENTUM');
+      if(liveGates(x,'SCALPING').pass&&S.pos.filter(p=>p.e==='SCALPING').length<SC)liveOpen(x,'SCALPING');
     }
   }
+  if(S.rotation.enabled&&!S.emergencyStop)profitRotation();
+}
+
+/* ===== 16-Gate LIVE validation ===== */
+function liveGates(x,e){
+  const gates=[];
+  const g=(id,pass,reason)=>gates.push({id,pass,reason:pass?'':reason});
+  g(1,S.mode==='LIVE','Mode is not LIVE');
+  g(2,S.liveTrading,'LIVE Trading is OFF');
+  g(3,S.liveAuto,'LIVE AUTO is OFF');
+  g(4,Boolean(process.env.BINANCE_API_KEY||S.account),'Server credentials missing');
+  g(5,S.account&&S.account.availableBalance>0,'API permission invalid or no balance');
+  g(6,x&&x.s&&/^[A-Z0-9_]{5,30}$/.test(x.s),'Symbol invalid');
+  g(7,N(x.p)>0,'Price invalid');
+  g(8,signal(x,e)!=='WAIT','No valid signal');
+  const r=riskModel(x,e,S.account?.availableBalance||0);
+  g(9,Number.isFinite(r.q)&&r.q>0,'Risk invalid');
+  const limit=e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC;
+  g(10,S.pos.filter(p=>p.e===e).length<limit,'Position limit reached');
+  g(11,!S.pos.some(p=>p.s===x.s),'Duplicate symbol');
+  const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
+  g(12,Date.now()-N(S.lastTrade[x.s]||0)>=cd,'Cooldown active');
+  g(13,x.confirmed,'No confirmed signal');
+  g(14,dailyRiskOK(),'Daily risk limit exceeded');
+  g(15,!S.emergencyStop,'Emergency Stop is ACTIVE');
+  g(16,signal(x,e)==='BUY'||signal(x,e)==='SELL','Invalid side');
+  const failed=gates.filter(g=>!g.pass);
+  return{pass:!failed.length,gates,failed:failed.map(g=>g.id+': '+g.reason)};
+}
+
+/* ===== Profit Rotation ===== */
+function profitRotation(){
+  if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
+  const confirmed=S.rows.filter(x=>x.confirmed).sort((a,b)=>b.qualityScore-a.qualityScore);
+  if(!confirmed.length)return;
+  const x=confirmed[0];
+  const e=x.momentum!=='WAIT'?'MOMENTUM':x.scalp!=='WAIT'?'SCALPING':'MOMENTUM';
+  const limit=e==='MOMENTUM'?MC:SC;
+  const inEngine=S.pos.filter(p=>p.e===e);
+  if(inEngine.length<limit)return; // slot available, no rotation needed
+  if(!dailyRiskOK())return;
+  if(S.pos.some(p=>p.s===x.s))return; // duplicate
+  const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
+  if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return; // cooldown
+  S.rotationId++;
+  const rotId=S.rotationId;
+  let closedPos=null,reason='';
+  const profitable=S.pos.filter(p=>p.e===e&&N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
+  if(profitable.length){
+    closedPos=profitable[0];reason='PROFIT ROTATION';
+  }else{
+    const losers=S.pos.filter(p=>p.e===e&&N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
+    if(losers.length){closedPos=losers[0];reason='WORST LOSS ROTATION'}
+  }
+  if(!closedPos){
+    S.rotation.lastResult='BLOCKED';S.rotation.lastReason='No position to rotate';return;
+  }
+  // Close one position
+  const px=N(S.t[closedPos.s]?.p);if(!px){S.rotation.lastResult='FAILED';return}
+  const gross=closedPos.side==='BUY'?(px-closedPos.entry)*closedPos.q:(closedPos.entry-px)*closedPos.q;
+  const ef=px*closedPos.q*F;
+  closedPos.pnl=gross-closedPos.entryFee-ef;
+  S.real+=closedPos.pnl;S.eq+=closedPos.pnl;S.fees+=closedPos.entryFee+ef;
+  S.dailyRiskUsed+=Math.abs(closedPos.pnl)/Math.max(S.eq,1);
+  S.hist.unshift({time:Date.now(),s:closedPos.s,e,side:closedPos.side,action:'EXIT',entry:closedPos.entry,exit:px,pnl:closedPos.pnl,fees:closedPos.entryFee+ef,live:closedPos.mode==='LIVE',mode:closedPos.mode,reason,rotationId:rotId,signalStage:'CONFIRMED',qualityScore:x.qualityScore});
+  S.pos=S.pos.filter(q=>q.id!==closedPos.id);
+  S.lastTrade[closedPos.s]=Date.now();
+  // Open new confirmed signal
+  let opened=false;
+  if(S.mode==='PAPER')opened=paperOpen(x,e);
+  else if(S.mode==='TESTNET')opened=testnetOpen(x,e);
+  else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading)opened=liveOpen(x,e);
+  if(opened){
+    const newHist=S.hist[0];if(newHist)newHist.rotationId=rotId;
+    S.rotation.lastRotation=Date.now();S.rotation.events++;
+    S.rotation.lastEngine=e;S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);
+    S.rotation.lastOpened=x.s;S.rotation.lastReason=reason;S.rotation.lastResult='SUCCESS';
+  }else{
+    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — entry blocked';
+  }
+  save();
 }
 
 /* ===== Position management (preserved) ===== */
@@ -227,7 +349,7 @@ function managePaper(){
     const hit=p.side==='BUY'?(x<=p.sl||x>=p.tp):(x>=p.sl||x<=p.tp);
     if(hit){
       S.real+=p.pnl;S.eq+=p.pnl;S.fees+=p.entryFee+ef;
-      S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:x,pnl:p.pnl,fees:p.entryFee+ef,live:p.mode==='LIVE',mode:p.mode,reason:p.reason});
+      S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:x,pnl:p.pnl,fees:p.entryFee+ef,live:p.mode==='LIVE',mode:p.mode,reason:p.reason,signalStage:p.signalStage||'',qualityScore:N(p.qualityScore)});
       S.lastTrade[p.s]=Date.now();S.pos=S.pos.filter(q=>q.id!==p.id);save();
     }
   }
@@ -516,17 +638,19 @@ function scannerTable(mode){
   const rows=a.slice(0,50).map((x,i)=>{
     const z=mode==='M'?x.momentum:mode==='S'?x.scalp:(x.momentum!=='WAIT'?x.momentum:x.scalp);
     const volSpike=VR(S.k[x.s]?.m5||[]);
+    const stageCls=x.stage==='CONFIRMED'?'buy':x.stage==='SETUP'?'watch':'neutral-text';
     return '<tr><td>'+(i+1)+'</td><td><span class="coin">'+E(x.s)+'</span></td><td>'+fmtPrice(x.p)+'</td>'+
       '<td class="'+cl(x.c)+'">'+P(x.c)+'</td><td>'+R(x.v/1e6)+'M</td><td>'+volSpike.toFixed(2)+'x</td>'+
       '<td class="'+(x.momentum==='BUY'?'buy':x.momentum==='SELL'?'sell':'neutral-text')+'">'+x.momentum+'</td><td>'+x.m+'</td>'+
       '<td class="'+(x.scalp==='BUY'?'buy':x.scalp==='SELL'?'sell':'neutral-text')+'">'+x.scalp+'</td><td>'+x.sc+'</td>'+
+      '<td class="'+stageCls+'">'+E(x.stage||'WATCH')+'</td><td>'+(x.qualityScore||0)+'</td>'+
       '<td class="'+(x.trend==='BULLISH'?'buy':x.trend==='BEARISH'?'sell':'neutral-text')+'">'+x.trend+'</td>'+
-      '<td>'+fmtPrice(x.support)+'</td><td>'+fmtPrice(x.resistance)+'</td>'+
+      '<td style="font-size:9px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis">'+E(x.confirmReasons||x.reasons)+'</td>'+
       '<td>'+signalBadge(z==='WAIT'?'NEUTRAL':z)+'</td>'+
       '<td><button class="btn sm blue" onclick="DD.manualEntry(\''+E(x.s)+'\',\''+E(z)+'\')">Trade</button></td></tr>';
   }).join('');
   const fb='<div class="filters"><span class="filter-label">Search:</span><input class="filter-input" id="filter-coin-scan" placeholder="Coin name…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()"></div>';
-  return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Coin</th><th>Price</th><th>24H</th><th>24H Vol</th><th>Vol Spike</th><th>Mom</th><th>Mom Score</th><th>Scalp</th><th>Scalp Score</th><th>Trend</th><th>Support</th><th>Resistance</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Coin</th><th>Price</th><th>24H</th><th>24H Vol</th><th>Vol Spike</th><th>Mom</th><th>Mom Score</th><th>Scalp</th><th>Scalp Score</th><th>Stage</th><th>Quality</th><th>Trend</th><th>Confirmations</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
 /* ===== History Table ===== */
@@ -600,15 +724,62 @@ function renderDashboard(){
     {l:'Win Rate',v:st.winRate.toFixed(1)+'%',c:''},{l:"Today's PNL",v:'₹'+PNL(todayPnl),c:pnlClass(todayPnl)}
   ];
   const cards='<div class="kpi-grid">'+kpis.map(k=>'<div class="kpi-card '+(k.c||'')+'"><div class="kpi-label">'+k.l+'</div><div class="kpi-value">'+k.v+'</div></div>').join('')+'</div>';
-  const banner=S.mode==='LIVE'?'<div class="mode-banner live"><b>LIVE TRADING ACTIVE</b> — Real Binance orders. Trade carefully.</div>'
+  const banner=S.mode==='LIVE'?'<div class="mode-banner live"><b>LIVE TRADING '+(S.liveTrading?'ACTIVE':'OFF')+'</b> — Real Binance orders. Trade carefully.</div>'
     :S.mode==='TESTNET'?'<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo (simulated funds)</div>'
     :'<div class="mode-banner paper"><b>PAPER TRADING</b> — Local simulation · Real orders OFF</div>';
   const autoRow='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
     '<div class="auto-toggle '+(S.auto?'on':'')+'" onclick="DD.toggleAuto()"><div class="sw"></div><span class="lbl">AUTO '+(S.auto?'ON':'OFF')+'</span></div>'+
-    (S.mode==='LIVE'?'<div class="auto-toggle '+(S.liveAuto?'on':'')+'" onclick="DD.toggleLiveAuto()"><div class="sw"></div><span class="lbl">LIVE AUTO '+(S.liveAuto?'ON':'OFF')+'</span></div>':'')+
+    (S.mode==='LIVE'?'<div class="auto-toggle '+(S.liveTrading?'on':'')+'" onclick="DD.toggleLiveTrading()"><div class="sw"></div><span class="lbl">LIVE TRADING '+(S.liveTrading?'ON':'OFF')+'</span></div>'+
+    '<div class="auto-toggle '+(S.liveAuto?'on':'')+'" onclick="DD.toggleLiveAuto()"><div class="sw"></div><span class="lbl">LIVE AUTO '+(S.liveAuto?'ON':'OFF')+'</span></div>':'')+
+    '<div class="auto-toggle '+(S.emergencyStop?'on':'')+'" onclick="DD.toggleEmergency()" style="'+(S.emergencyStop?'border-color:var(--red)':'')+'"><div class="sw" style="'+(S.emergencyStop?'background:var(--red)':'')+'"></div><span class="lbl" style="'+(S.emergencyStop?'color:var(--red)':'')+'">EMERGENCY '+(S.emergencyStop?'ACTIVE':'OFF')+'</span></div>'+
     '<button class="btn blue sm" onclick="DD.scan()">Refresh Scanner</button>'+
     '<button class="btn sm" onclick="DD.reconnect()">Reconnect WS</button></div>';
-  return banner+autoRow+cards+'<div class="panel"><div class="panel-header"><div class="panel-title">Live Scanner — STABLE '+(S.stableUniverse.length||S.settings.coinCount||50)+' · Top '+(S.rows.length||0)+' by 24H Change</div><div class="panel-sub">Last scan: '+(S.lastScan?new Date(S.lastScan).toLocaleTimeString('en-IN'):'—')+'</div></div>'+scannerTable()+'</div>';
+  /* System Status Panel */
+  const momCount=S.pos.filter(p=>p.e==='MOMENTUM').length;
+  const scalpCount=S.pos.filter(p=>p.e==='SCALPING').length;
+  const optCount=S.optSets.filter(s=>s.status==='OPEN').length;
+  const momStatus=momCount>=MC?'FULL':S.emergencyStop?'BLOCKED':'READY';
+  const scalpStatus=scalpCount>=SC?'FULL':S.emergencyStop?'BLOCKED':'READY';
+  const optStatus=optCount>=OPT_SETS?'FULL':S.emergencyStop?'BLOCKED':'READY';
+  const hasConfirmed=S.rows.some(x=>x.confirmed);
+  const riskOK=dailyRiskOK();
+  const sysPanel='<div class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">System Status</div></div>'+
+    '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">'+
+    '<div class="stat-badge '+(S.lastScan?'online':'offline')+'"><div class="dot"></div><span>Market Feed</span></div>'+
+    '<div class="stat-badge '+(S.lastScan?'online':'offline')+'"><div class="dot"></div><span>Scanner</span></div>'+
+    '<div class="stat-badge online"><div class="dot"></div><span>Signal Engine</span></div>'+
+    '<div class="stat-badge '+(S.wsStatus==='online'?'online':'connecting')+'"><div class="dot"></div><span>WebSocket '+E(S.wsStatus.toUpperCase())+'</span></div>'+
+    '<div class="stat-badge online"><div class="dot"></div><span>Render Loop</span></div>'+
+    '</div></div>';
+  const enginePanel='<div class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">Trading Engines</div></div>'+
+    '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">'+
+    '<div class="kpi-card"><div class="kpi-label">MOMENTUM</div><div class="kpi-value" style="font-size:14px">'+momCount+'/'+MC+' '+momStatus+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">SCALPING</div><div class="kpi-value" style="font-size:14px">'+scalpCount+'/'+SC+' '+scalpStatus+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">OPTIONS</div><div class="kpi-value" style="font-size:14px">'+optCount+'/'+OPT_SETS+' '+optStatus+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">PROFIT ROTATION</div><div class="kpi-value" style="font-size:14px;color:'+(S.rotation.enabled?'var(--green)':'var(--muted)')+'">'+(S.rotation.enabled?'ON':'OFF')+'</div><div class="kpi-sub">Events: '+S.rotation.events+'</div></div>'+
+    '</div></div>';
+  const riskPanel='<div class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">Risk & Mode</div></div>'+
+    '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">'+
+    '<div class="kpi-card"><div class="kpi-label">Confirmed Signal</div><div class="kpi-value" style="font-size:14px;color:'+(hasConfirmed?'var(--green)':'var(--muted)')+'">'+(hasConfirmed?'YES':'NO')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Risk Gate</div><div class="kpi-value" style="font-size:14px;color:'+(riskOK?'var(--green)':'var(--red)')+'">'+(riskOK?'PASS':'FAIL')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Daily Risk</div><div class="kpi-value" style="font-size:14px">'+(S.dailyRiskUsed*100).toFixed(1)+'% / '+(DAILY_RISK_LIMIT*100)+'%</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Emergency Stop</div><div class="kpi-value" style="font-size:14px;color:'+(S.emergencyStop?'var(--red)':'var(--green)')+'">'+(S.emergencyStop?'ACTIVE':'OFF')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Paper</div><div class="kpi-value" style="font-size:14px;color:'+(S.mode==='PAPER'?'var(--green)':'var(--muted)')+'">'+(S.mode==='PAPER'?'ACTIVE':'OFF')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Testnet</div><div class="kpi-value" style="font-size:14px;color:'+(S.mode==='TESTNET'?'var(--cyan)':'var(--muted)')+'">'+(S.mode==='TESTNET'?'ACTIVE':'OFF')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Live Trading</div><div class="kpi-value" style="font-size:14px;color:'+(S.liveTrading?'var(--red)':'var(--muted)')+'">'+(S.liveTrading?'ON':'OFF')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Live Auto</div><div class="kpi-value" style="font-size:14px;color:'+(S.liveAuto?'var(--red)':'var(--muted)')+'">'+(S.liveAuto?'ON':'OFF')+'</div></div>'+
+    '</div></div>';
+  /* Rotation Panel */
+  const rotPanel='<div class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">Profit Rotation</div><div class="panel-sub">'+(S.rotation.enabled?'ON':'OFF')+' · Events Today: '+S.rotation.events+'</div></div>'+
+    '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">'+
+    '<div class="kpi-card"><div class="kpi-label">Last Rotation</div><div class="kpi-value" style="font-size:12px">'+(S.rotation.lastRotation?new Date(S.rotation.lastRotation).toLocaleTimeString('en-IN'):'—')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Engine</div><div class="kpi-value" style="font-size:12px">'+E(S.rotation.lastEngine||'—')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Closed</div><div class="kpi-value" style="font-size:12px">'+E(S.rotation.lastClosed||'—')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Opened</div><div class="kpi-value" style="font-size:12px">'+E(S.rotation.lastOpened||'—')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Reason</div><div class="kpi-value" style="font-size:12px">'+E(S.rotation.lastReason||'—')+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">Result</div><div class="kpi-value" style="font-size:12px;color:'+(S.rotation.lastResult==='SUCCESS'?'var(--green)':S.rotation.lastResult==='FAILED'?'var(--red)':'var(--muted)')+'">'+E(S.rotation.lastResult||'—')+'</div></div>'+
+    '</div></div>';
+  return banner+autoRow+sysPanel+enginePanel+riskPanel+rotPanel+cards+'<div class="panel"><div class="panel-header"><div class="panel-title">Live Scanner — STABLE '+(S.stableUniverse.length||S.settings.coinCount||50)+' · Top '+(S.rows.length||0)+' by 24H Change</div><div class="panel-sub">Last scan: '+(S.lastScan?new Date(S.lastScan).toLocaleTimeString('en-IN'):'—')+'</div></div>'+scannerTable()+'</div>';
 }
 
 function renderMomentum(){
@@ -689,13 +860,22 @@ function renderOptionsHistory(){
 
 function renderPositions(){
   if(!S.pos.length)return '<div class="panel"><div class="empty"><div class="icon">📊</div>No open positions.</div></div>';
-  const cards=S.pos.map(p=>{
-    const pnl=N(p.pnl),pnlPct=p.entry&&p.current?((p.current-p.entry)/p.entry*100*(p.side==='SELL'?-1:1)):0;
-    return '<div class="pos-card '+(p.side==='SELL'?'sell-side':'')+'"><div class="pos-head"><span class="pos-coin">'+E(p.s)+'</span><span class="pos-tag">'+E(p.e)+'</span><span class="pos-tag">'+E(p.side)+'</span><span class="pos-tag">'+E(p.mode||'PAPER')+'</span>'+(p.sl?'<button class="btn sm red" onclick="DD.close(\''+E(p.s)+'\')">Close</button>':'')+'</div>'+
-      '<div class="pos-grid">'+posField('Entry',fmtPrice(p.entry))+posField('Mark',fmtPrice(p.current))+posField('Qty',fmtQty(p.q))+posField('SL',fmtPrice(p.sl))+posField('TP',fmtPrice(p.tp))+posField('Fees','₹'+R(p.entryFee))+posField('Open Time',new Date(N(p.opened)).toLocaleString('en-IN'))+'</div>'+
-      '<div class="pos-pnl '+cl(pnl)+'">Net PNL: ₹'+PNL(p.pnl)+' ('+P(pnlPct)+')</div></div>';
-  }).join('');
-  return '<div class="panel"><div class="panel-header"><div class="panel-title">Open Positions</div><div class="panel-sub">'+S.pos.length+' position(s) · Mode: '+S.mode+'</div></div><div class="pos-list">'+cards+'</div></div>';
+  const engines=['MOMENTUM','SCALPING','OPTIONS','LIVE'];
+  let html='<div class="panel"><div class="panel-header"><div class="panel-title">Open Positions</div><div class="panel-sub">'+S.pos.length+' position(s) · Mode: '+S.mode+'</div></div>';
+  for(const eng of engines){
+    const ep=S.pos.filter(p=>p.e===eng);
+    if(!ep.length)continue;
+    html+='<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:900;color:var(--blue);margin-bottom:6px;letter-spacing:.05em">'+eng+' ('+ep.length+')</div><div class="pos-list">';
+    html+=ep.map(p=>{
+      const pnl=N(p.pnl),pnlPct=p.entry&&p.current?((p.current-p.entry)/p.entry*100*(p.side==='SELL'?-1:1)):0;
+      const age=p.opened?Math.round((Date.now()-p.opened)/60000)+'m':'—';
+      return '<div class="pos-card '+(p.side==='SELL'?'sell-side':'')+'"><div class="pos-head"><span class="pos-coin">'+E(p.s)+'</span><span class="pos-tag">'+E(p.e)+'</span><span class="pos-tag">'+E(p.side)+'</span><span class="pos-tag">'+E(p.mode||'PAPER')+'</span>'+(p.signalStage?'<span class="pos-tag">'+E(p.signalStage)+'</span>':'')+(p.sl?'<button class="btn sm red" onclick="DD.close(\''+E(p.s)+'\')">Close</button>':'')+'</div>'+
+        '<div class="pos-grid">'+posField('Entry',fmtPrice(p.entry))+posField('Mark',fmtPrice(p.current))+posField('Qty',fmtQty(p.q))+posField('SL',fmtPrice(p.sl))+posField('TP',fmtPrice(p.tp))+posField('Fees','₹'+R(p.entryFee))+posField('Age',age)+posField('Quality',N(p.qualityScore)||'—')+'</div>'+
+        '<div class="pos-pnl '+cl(pnl)+'">Net PNL: ₹'+PNL(p.pnl)+' ('+P(pnlPct)+')</div></div>';
+    }).join('');
+    html+='</div></div>';
+  }
+  return html+'</div>';
 }
 
 function renderTradeHistory(){

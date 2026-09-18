@@ -423,26 +423,34 @@ async function scan(){
       S.stableUniverse=[...syms].sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c))).slice(0,count);
       try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
     }
-    const top=S.stableUniverse.filter(s=>syms.has(s));
+    const top=S.stableUniverse.filter(s=>syms.has(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
     S.universe=top;
     S.rows=top.map(s=>({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,reasons:'Loading'}));
-    await Promise.all(top.map(async s=>{
-      try{
-        const [m5,m15,m1,fr,oi]=await Promise.all([
-          api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=5m&limit=100'),
-          api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=15m&limit=100'),
-          api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=1m&limit=100'),
-          api(PUB,'/fapi/v1/premiumIndex?symbol='+s).catch(()=>({})),
-          api(PUB,'/fapi/v1/openInterest?symbol='+s).catch(()=>({}))
-        ]);
-        S.k[s]={m5,m15,m1};
-        if(S.t[s]){S.t[s].funding=N(fr.lastFundingRate)*100;S.t[s].oi=N(oi.openInterest)}
-        const r=calc(s),i=S.rows.findIndex(x=>x.s===s);if(i>=0)S.rows[i]=r;
-      }catch(e){const i=S.rows.findIndex(x=>x.s===s);if(i>=0)S.rows[i].reasons='Feed unavailable'}
-    }));
+    // Keep Binance requests below burst/rate limits: process the stable universe in small batches.
+    const batchSize=8;
+    for(let b=0;b<top.length;b+=batchSize){
+      const batch=top.slice(b,b+batchSize);
+      await Promise.all(batch.map(async s=>{
+        try{
+          const [m5,m15,m1,fr,oi]=await Promise.all([
+            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=5m&limit=100'),
+            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=15m&limit=100'),
+            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=1m&limit=100'),
+            api(PUB,'/fapi/v1/premiumIndex?symbol='+s).catch(()=>({})),
+            api(PUB,'/fapi/v1/openInterest?symbol='+s).catch(()=>({}))
+          ]);
+          S.k[s]={m5,m15,m1};
+          if(S.t[s]){S.t[s].funding=N(fr.lastFundingRate)*100;S.t[s].oi=N(oi.openInterest)}
+          const r=calc(s),i=S.rows.findIndex(x=>x.s===s);if(i>=0)S.rows[i]=r;
+        }catch(e){
+          const i=S.rows.findIndex(x=>x.s===s);
+          if(i>=0)S.rows[i].reasons='Feed unavailable: '+String(e.message||'request failed').slice(0,80);
+        }
+      }));
+    }
     S.lastScan=Date.now();S.err='';
     await syncAccount();await syncTestnet();
-    managePaper();await engine();render();
+    await managePaper();await engine();render();
   }catch(e){S.err='Market scan: '+e.message;render()}
   finally{S.busy=false}
 }
@@ -593,15 +601,20 @@ function engineOptions(){
 
 /* ===== PNL / Analytics ===== */
 function statsFor(histArr){
+  // Every completed trade is represented by exactly one EXIT record.
+  // ENTRY records are intentionally excluded so dashboard W/L counts cannot
+  // disagree with the number of completed trades.
   const exits=histArr.filter(h=>h.action==='EXIT');
   const wins=exits.filter(h=>N(h.pnl)>0),losses=exits.filter(h=>N(h.pnl)<0);
   const totalPnl=exits.reduce((s,h)=>s+N(h.pnl),0),totalFees=exits.reduce((s,h)=>s+N(h.fees),0);
   const winRate=exits.length?wins.length/exits.length*100:0;
   const avgWin=wins.length?wins.reduce((s,h)=>s+N(h.pnl),0)/wins.length:0;
   const avgLoss=losses.length?losses.reduce((s,h)=>s+N(h.pnl),0)/losses.length:0;
-  const profitFactor=avgLoss?Math.abs(avgWin*wins.length/(avgLoss*losses.length)):0;
+  const grossProfit=wins.reduce((s,h)=>s+N(h.pnl),0);
+  const grossLoss=Math.abs(losses.reduce((s,h)=>s+N(h.pnl),0));
+  const profitFactor=grossLoss?grossProfit/grossLoss:0;
   let peak=0,dd=0,cum=0;
-  exits.forEach(h=>{cum+=N(h.pnl);peak=Math.max(peak,cum);dd=Math.max(dd,peak-cum)});
+  exits.slice().reverse().forEach(h=>{cum+=N(h.pnl)-N(h.fees);peak=Math.max(peak,cum);dd=Math.max(dd,peak-cum)});
   return{trades:exits.length,wins:wins.length,losses:losses.length,winRate,totalPnl,totalFees,netPnl:totalPnl-totalFees,avgWin,avgLoss,profitFactor,maxDD:dd};
 }
 function dailyPnl(histArr){

@@ -147,7 +147,7 @@ function calc(s){
   const m15Bear=c15.length>=50&&N(c15.at(-1))<pipelineE20&&pipelineE20<pipelineE50;
   const m15Confirm=m15Bull||m15Bear;
   if(has24h){confirmReasons.push('24H '+P(t.c))}
-  if(hasVol){confirmReasons.push('Vol '+v.toFixed(2)+'x')}
+  if(hasVol){confirmReasons.push('Vol '+pipelineVol.toFixed(2)+'x')}
   if(m1Confirm){confirmReasons.push('1M '+scalp)}
   if(m5Confirm){confirmReasons.push('5M '+mom)}
   if(m15Confirm){confirmReasons.push('15m '+(m15Bull?'BULL':'BEAR'))}
@@ -423,7 +423,15 @@ async function scan(){
       S.stableUniverse=[...syms].sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c))).slice(0,count);
       try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
     }
-    const top=S.stableUniverse.filter(s=>syms.has(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
+    const validStable=S.stableUniverse.filter(s=>syms.has(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
+    if(validStable.length<count){
+      const extras=[...syms].filter(s=>/^[A-Z0-9_]{1,30}$/.test(s)&&!validStable.includes(s))
+        .sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c)));
+      validStable.push(...extras.slice(0,count-validStable.length));
+      S.stableUniverse=validStable.slice(0,count);
+      try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
+    }
+    const top=validStable.slice(0,count);
     S.universe=top;
     S.rows=top.map(s=>({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,reasons:'Loading'}));
     // Keep Binance requests below burst/rate limits: process the stable universe in small batches.

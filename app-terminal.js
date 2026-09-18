@@ -70,7 +70,7 @@ async function api(base,path){
 function storageKey(){return 'ddv5_'+S.mode}
 function save(){
   try{
-    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,liveTrading:false,liveAuto:false,emergencyStop:false});
+    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop});
     localStorage.setItem('ddSettings',JSON.stringify(S.settings));
   }catch(e){}
 }
@@ -82,7 +82,7 @@ function load(){
     S.real=N(q.real);S.fees=N(q.fees);S.lastTrade=q.lastTrade||{};
     if(q.optSets&&Array.isArray(q.optSets)&&q.optSets.length===OPT_SETS)S.optSets=q.optSets;
     S.dailyRiskUsed=N(q.dailyRiskUsed);S.dailyRiskDate=q.dailyRiskDate||'';
-    S.rotation.events=N(q.rotationEvents);S.rotation.enabled=q.rotationEnabled!==false;if(q.rotation&&typeof q.rotation==='object')S.rotation={...S.rotation,...q.rotation};S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=false;
+    S.rotation.events=N(q.rotationEvents);S.rotation.enabled=q.rotationEnabled!==false;if(q.rotation&&typeof q.rotation==='object')S.rotation={...S.rotation,...q.rotation};S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
     try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
   }catch(e){}
 }
@@ -1057,7 +1057,7 @@ window.DD={
   get err(){return S.err},set err(v){S.err=v},
   render,scan,scanOptions,connectWS,
   toggleAuto(){S.auto=!S.auto;render();if(S.auto)engine()},
-  toggleLiveAuto(){if(S.mode!=='LIVE'||!S.liveTrading){S.liveAuto=false;S.err='LIVE AUTO blocked: LIVE Trading must be ON first.';render();return}if(!S.liveAuto){if(!confirm('Enable LIVE AUTO trading? This will place REAL orders on Binance automatically.'))return}S.liveAuto=!S.liveAuto;render()},toggleLiveTrading(){if(S.mode!=='LIVE'){S.liveTrading=false;render();return}if(!S.liveTrading&&!confirm('Enable LIVE TRADING? Real Binance orders may be placed only when all safety gates pass.'))return;S.liveTrading=!S.liveTrading;if(!S.liveTrading)S.liveAuto=false;render()},toggleEmergency(){S.emergencyStop=!S.emergencyStop;save();render()},
+  toggleLiveAuto(){if(S.mode!=='LIVE'||!S.liveTrading){S.liveAuto=false;S.err='LIVE AUTO blocked: LIVE Trading must be ON first.';render();return}if(!S.liveAuto){if(!confirm('Enable LIVE AUTO trading? This will place REAL orders on Binance automatically.'))return}S.liveAuto=!S.liveAuto;render()},toggleLiveTrading(){if(S.mode!=='LIVE'){S.liveTrading=false;render();return}if(!S.liveTrading&&!confirm('Enable LIVE TRADING? Real Binance orders may be placed only when all safety gates pass.'))return;S.liveTrading=!S.liveTrading;if(!S.liveTrading)S.liveAuto=false;render()},toggleEmergency(){S.emergencyStop=!S.emergencyStop;if(S.emergencyStop){S.liveAuto=false;S.auto=false}save();render()},
   setMode(m){
     if(m===S.mode)return;
     if(m==='LIVE'&&!confirm('Switch to LIVE mode? Real Binance orders will be possible. Live Auto stays OFF until you enable it separately.'))return;

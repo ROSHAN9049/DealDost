@@ -70,7 +70,7 @@ async function api(base,path){
 function storageKey(){return 'ddv5_'+S.mode}
 function save(){
   try{
-    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop});
+    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop,optReal:S.optReal,optFees:S.optFees});
     localStorage.setItem('ddSettings',JSON.stringify(S.settings));
   }catch(e){}
 }

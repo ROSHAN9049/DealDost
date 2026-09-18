@@ -134,11 +134,17 @@ function calc(s){
   /* Confirmed Signal Pipeline: STABLE50 -> 24H MOMENTUM -> VOLUME FILTER -> 1M -> 5M -> 15M -> QUALITY SCORE -> stage */
   let stage='WATCH',confirmed=false,qualityScore=0,confirmReasons=[];
   const has24h=Math.abs(N(t.c))>=0.35;
-  const hasVol=v>=VOL_FILTER;
+  // Recompute pipeline inputs here so confirmation never depends on block-scoped variables above.
+  const pipelineVol=VR(m5);
+  const pipelineE20=EMA(m15,20);
+  const pipelineE50=EMA(m15,50);
+  const lastM1=m1.at(-1);
+  const pipelineQuality=lastM1?Math.abs(N(lastM1[4])-N(lastM1[1]))/Math.max(N(lastM1[2])-N(lastM1[3]),1e-9)>=.35:false;
+  const hasVol=pipelineVol>=VOL_FILTER;
   const m1Confirm=scalp!=='WAIT';
   const m5Confirm=mom!=='WAIT';
-  const m15Bull=N(c15.at(-1))>e20&&e20>e50;
-  const m15Bear=N(c15.at(-1))<e20&&e20<e50;
+  const m15Bull=c15.length>=50&&N(c15.at(-1))>pipelineE20&&pipelineE20>pipelineE50;
+  const m15Bear=c15.length>=50&&N(c15.at(-1))<pipelineE20&&pipelineE20<pipelineE50;
   const m15Confirm=m15Bull||m15Bear;
   if(has24h){confirmReasons.push('24H '+P(t.c))}
   if(hasVol){confirmReasons.push('Vol '+v.toFixed(2)+'x')}
@@ -146,7 +152,7 @@ function calc(s){
   if(m5Confirm){confirmReasons.push('5M '+mom)}
   if(m15Confirm){confirmReasons.push('15m '+(m15Bull?'BULL':'BEAR'))}
   const sigDir=mom==='BUY'||scalp==='BUY'?'BUY':mom==='SELL'||scalp==='SELL'?'SELL':'NONE';
-  qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(m1Confirm?25:0)+(m5Confirm?25:0)+(m15Confirm?15:0)+(quality?10:0)));
+  qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(m1Confirm?25:0)+(m5Confirm?25:0)+(m15Confirm?15:0)+(pipelineQuality?10:0)));
   if(has24h&&hasVol&&(m1Confirm||m5Confirm)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
   if(stage==='SETUP'&&qualityScore>=QUALITY_MIN&&m15Confirm){stage='CONFIRMED';confirmed=true;confirmReasons.push('CONFIRMED')}
   return{s,p:N(t.p),c:N(t.c),v:N(t.v),m:ms,sc:ss,momentum:mom,scalp,atr,funding:N(t.funding),oi:N(t.oi),support,resistance,trend,

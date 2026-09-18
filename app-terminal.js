@@ -25,7 +25,7 @@ const S={
   tab:'dashboard',
   wsStatus:'connecting',ws:null,wsTimer:null,
   t:{},rows:[],k:{},universe:[],stableUniverse:[],
-  pos:[],hist:[],eq:10000,real:0,fees:0,
+  pos:[],hist:[],eq:10000,real:0,fees:0,optReal:0,optFees:0,
   dailyRiskUsed:0,dailyRiskDate:'',rotationId:0,
   account:null,testnetAccount:null,testnetStatus:null,testnetRestricted:false,
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
@@ -79,7 +79,7 @@ function load(){
     const q=JSON.parse(localStorage[storageKey()]||'{}');
     S.pos=q.pos||[];S.hist=q.hist||[];
     S.eq=N(q.eq)||(S.mode==='PAPER'?N(S.settings.paperCapital)||10000:10000);
-    S.real=N(q.real);S.fees=N(q.fees);S.lastTrade=q.lastTrade||{};
+    S.real=N(q.real);S.fees=N(q.fees);S.optReal=N(q.optReal);S.optFees=N(q.optFees);S.lastTrade=q.lastTrade||{};
     if(q.optSets&&Array.isArray(q.optSets)&&q.optSets.length===OPT_SETS)S.optSets=q.optSets;
     S.dailyRiskUsed=N(q.dailyRiskUsed);S.dailyRiskDate=q.dailyRiskDate||'';
     S.rotation.events=N(q.rotationEvents);S.rotation.enabled=q.rotationEnabled!==false;if(q.rotation&&typeof q.rotation==='object')S.rotation={...S.rotation,...q.rotation};S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
@@ -536,7 +536,7 @@ function manageOptions(){
     const hitTP=pnlPct>=OPT_TP;
     const expired=set.expiry&&Date.now()>=set.expiry;
     if(hitSL||hitTP||expired){
-      S.real+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;
+      S.real+=set.pnl;S.optReal+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;S.optFees+=set.entryFee+exitFee;
       S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:mk.p,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:'PAPER',reason:expired?'Expiry':(hitSL?'Stop loss':'Take profit'),optSet:set.id,contract:set.contract,signalStage:'CONFIRMED',qualityScore:N((S.rows.find(r=>r.s===set.symbol)||{}).qualityScore)});
       set.status='CLOSED';set.closed=Date.now();set.pnl=0;set.entry=0;set.current=0;set.qty=0;set.contract='';set.entryFee=0;
     }
@@ -802,7 +802,12 @@ function renderScalpingHistory(){
 
 function renderOptions(){
   const rows=S.optData.rows||[];
+  const optOpen=S.optSets.filter(s=>s.status==='OPEN').length;
+  const optUnreal=S.optSets.filter(s=>s.status==='OPEN').reduce((a,s)=>a+N(s.pnl),0);
+  const optClosed=S.hist.filter(h=>h.e==='OPTIONS'&&h.action==='EXIT').length;
+  const optMetrics='<div class="kpi-grid">'+kpiCard('Options Open',optOpen+'/'+OPT_SETS)+kpiCard('Options Closed',optClosed)+kpiCard('Options Realized PNL','₹'+PNL(S.optReal),pnlClass(S.optReal))+kpiCard('Options Unrealized PNL','₹'+PNL(optUnreal),pnlClass(optUnreal))+kpiCard('Options Fees','₹'+R(S.optFees))+kpiCard('Net Contribution','₹'+PNL(S.optReal+optUnreal-S.optFees),pnlClass(S.optReal+optUnreal-S.optFees))+'</div>';
   let html='<div class="panel"><div class="panel-header"><div class="panel-title">Binance Options Radar</div><div class="panel-sub">All underlyings · defined-risk spreads · naked selling OFF</div></div>';
+  html=optMetrics+html;
   if(S.optLoading&&!rows.length)return html+'<div class="note">Loading options radar…</div></div>';
   if(!rows.length)return html+'<div class="note">No option data. <button class="btn sm" onclick="DD.scanOptions()">Scan Options</button></div></div>';
   const active=rows.filter(x=>x.signal!=='WATCH');
@@ -860,7 +865,8 @@ function renderOptionsHistory(){
 }
 
 function renderPositions(){
-  if(!S.pos.length)return '<div class="panel"><div class="empty"><div class="icon">📊</div>No open positions.</div></div>';
+  const openOpts=S.optSets.filter(s=>s.status==='OPEN');
+  if(!S.pos.length&&!openOpts.length)return '<div class="panel"><div class="empty"><div class="icon">📊</div>No open positions.</div></div>';
   const engines=['MOMENTUM','SCALPING','OPTIONS','LIVE'];
   let html='<div class="panel"><div class="panel-header"><div class="panel-title">Open Positions</div><div class="panel-sub">'+S.pos.length+' position(s) · Mode: '+S.mode+'</div></div>';
   for(const eng of engines){
@@ -1102,12 +1108,12 @@ window.DD={
     const notional=exitPx*set.qty*Math.max(uSpot,1e-9);
     const exitFee=notional*F;
     const gross=set.side==='BUY'?(exitPx-set.entry)*set.qty*Math.max(uSpot,1e-9):(set.entry-exitPx)*set.qty*Math.max(uSpot,1e-9);
-    set.pnl=gross-set.entryFee-exitFee;S.real+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;
+    set.pnl=gross-set.entryFee-exitFee;S.real+=set.pnl;S.optReal+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;S.optFees+=set.entryFee+exitFee;
     S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:exitPx,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:'PAPER',reason:'Manual close',optSet:set.id,contract:set.contract});
     set.status='CLOSED';set.closed=Date.now();set.pnl=0;set.entry=0;set.current=0;set.qty=0;set.contract='';set.entryFee=0;save();render();
   },
   updateSetting(k,v){S.settings[k]=v;save();render()},
-  resetPaper(){if(confirm('Reset '+S.mode+' trading data? This clears positions and history for this mode.')){S.pos=[];S.hist=[];S.eq=N(S.settings.paperCapital)||10000;S.real=0;S.fees=0;S.lastTrade={};S.optSets=Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''}));save();render()}},
+  resetPaper(){if(confirm('Reset '+S.mode+' trading data? This clears positions and history for this mode.')){S.pos=[];S.hist=[];S.eq=N(S.settings.paperCapital)||10000;S.real=0;S.fees=0;S.optReal=0;S.optFees=0;S.lastTrade={};S.optSets=Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''}));save();render()}},
   exportData(){try{const d=localStorage[storageKey()];const blob=new Blob([d],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='dealdost-'+S.mode.toLowerCase()+'-'+Date.now()+'.json';a.click();URL.revokeObjectURL(url)}catch(e){alert('Export failed: '+e.message)}},
   drawLine,drawBar,
   resetUniverse(){S.stableUniverse=[];try{localStorage.removeItem('dd_stable_universe_v1')}catch(e){}render();scan()}

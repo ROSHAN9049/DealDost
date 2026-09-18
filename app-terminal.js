@@ -888,15 +888,19 @@ window.DD={
     S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:x,pnl:p.pnl,fees:p.entryFee+ef,live:p.mode==='LIVE',mode:p.mode,reason:'Manual close'});
     S.pos=S.pos.filter(q=>q.id!==p.id);S.lastTrade[sym]=Date.now();save();render();
   },
+  openEngine(sym,e){
+    if(!['MOMENTUM','SCALPING'].includes(e))return false;
+    if(!['PAPER','TESTNET'].includes(S.mode))return false;
+    const x=S.rows.find(r=>r.s===sym);if(!x||!canOpen(x,e))return false;
+    if(S.mode==='PAPER')return paperOpen(x,e);
+    return testnetOpen(x,e);
+  },
   manualEntry(sym,side){
-    if(side==='WAIT'||!side)return;
-    if(!['PAPER','TESTNET'].includes(S.mode)){alert('Manual entry is available in PAPER and TESTNET modes only.');return}
-    const x=S.rows.find(r=>r.s===sym);if(!x)return;
-    const r=riskModel(x,side==='BUY'?'MOMENTUM':'MOMENTUM',S.eq),ef=x.p*r.q*F;
-    const slip=x.p*S.settings.slippage,entryPx=x.p+(side==='BUY'?slip:-slip);
-    S.pos.push({id:Date.now()+Math.random(),s:sym,e:'MOMENTUM',side,entry:entryPx,current:x.p,q:r.q,sl:side==='BUY'?entryPx*(1-r.stop):entryPx*(1+r.stop),tp:side==='BUY'?entryPx*(1+2*r.stop):entryPx*(1-2*r.stop),entryFee:ef,pnl:-ef,feeRate:F,mode:S.mode,reason:'Manual entry',opened:Date.now()});
-    S.hist.unshift({time:Date.now(),s:sym,e:'MOMENTUM',side,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:false,mode:S.mode,reason:'Manual entry'});
-    save();render();
+    if(side==='WAIT'||!side)return false;
+    if(!['PAPER','TESTNET'].includes(S.mode)){alert('Manual entry is available in PAPER and TESTNET modes only.');return false}
+    const x=S.rows.find(r=>r.s===sym);if(!x)return false;
+    const e=x.momentum===side?'MOMENTUM':x.scalp===side?'SCALPING':'MOMENTUM';
+    return this.openEngine(sym,e);
   },
   reconnect(){connectWS()},
   syncAcc(){syncAccount().then(render)},

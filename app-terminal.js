@@ -247,11 +247,11 @@ async function engine(){
       if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
       if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
     }else if(S.mode==='TESTNET'){
-      if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)testnetOpen(x,'MOMENTUM');
-      if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)testnetOpen(x,'SCALPING');
+      if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await testnetOpen(x,'MOMENTUM');
+      if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await testnetOpen(x,'SCALPING');
     }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
-      if(liveGates(x,'MOMENTUM').pass&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)liveOpen(x,'MOMENTUM');
-      if(liveGates(x,'SCALPING').pass&&S.pos.filter(p=>p.e==='SCALPING').length<SC)liveOpen(x,'SCALPING');
+      if(liveGates(x,'MOMENTUM').pass&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await liveOpen(x,'MOMENTUM');
+      if(liveGates(x,'SCALPING').pass&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await liveOpen(x,'SCALPING');
     }
   }
   if(S.rotation.enabled&&!S.emergencyStop)await profitRotation();
@@ -338,7 +338,7 @@ async function profitRotation(){
 }
 
 /* ===== Position management (preserved) ===== */
-function managePaper(){
+async function managePaper(){
   for(const p of [...S.pos]){
     if(p.mode==='LIVE')continue;
     if(p.mode==='TESTNET'&&p.orderId)continue;
@@ -501,7 +501,8 @@ function pickOptionContract(u,signal){
 }
 /* Open an option paper trade on a specific set (1..OPT_SETS) */
 function optionOpen(setIdx,u,signal){
-  if(S.mode!=='PAPER')return false;
+  if(S.mode!=='PAPER'||S.emergencyStop)return false;
+  const base=S.rows.find(r=>r.s===u);if(!base||!base.confirmed)return false;
   const set=S.optSets[setIdx];if(!set||set.status==='OPEN')return false;
   const pick=pickOptionContract(u,signal);if(!pick)return false;
   const mark=pick.mark,contract=pick.contract;
@@ -512,7 +513,7 @@ function optionOpen(setIdx,u,signal){
   const entryPx=mark.p+(signal==='BUY'?slipPx:-slipPx);
   set.status='OPEN';set.symbol=u;set.side=signal;set.entry=entryPx;set.current=mark.p;set.qty=qty;
   set.contract=contract.n;set.expiry=contract.ex;set.strike=contract.k;set.pnl=-entryFee;set.entryFee=entryFee;set.opened=Date.now();set.reason=signal+' '+pick.type+' @ K='+contract.k;
-  S.hist.unshift({time:Date.now(),s:u,e:'OPTIONS',side:signal,action:'ENTRY',price:entryPx,qty,fees:entryFee,pnl:0,live:false,mode:'PAPER',reason:set.reason,optSet:setIdx+1,contract:contract.n});
+  S.hist.unshift({time:Date.now(),s:u,e:'OPTIONS',side:signal,action:'ENTRY',price:entryPx,qty,fees:entryFee,pnl:0,live:false,mode:'PAPER',reason:set.reason,optSet:setIdx+1,contract:contract.n,signalStage:base.stage,qualityScore:base.qualityScore});
   save();return true;
 }
 /* Helper: get underlying spot price */
@@ -536,7 +537,7 @@ function manageOptions(){
     const expired=set.expiry&&Date.now()>=set.expiry;
     if(hitSL||hitTP||expired){
       S.real+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;
-      S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:mk.p,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:'PAPER',reason:expired?'Expiry':(hitSL?'Stop loss':'Take profit'),optSet:set.id,contract:set.contract});
+      S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:mk.p,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:'PAPER',reason:expired?'Expiry':(hitSL?'Stop loss':'Take profit'),optSet:set.id,contract:set.contract,signalStage:'CONFIRMED',qualityScore:N((S.rows.find(r=>r.s===set.symbol)||{}).qualityScore)});
       set.status='CLOSED';set.closed=Date.now();set.pnl=0;set.entry=0;set.current=0;set.qty=0;set.contract='';set.entryFee=0;
     }
   }
@@ -544,8 +545,8 @@ function manageOptions(){
 }
 /* Engine: evaluate option signals and open trades on available sets */
 function engineOptions(){
-  if(S.mode!=='PAPER'||!S.auto)return;
-  const active=S.optData.rows.filter(x=>x.signal!=='WATCH');
+  if(S.mode!=='PAPER'||!S.auto||S.emergencyStop)return;
+  const active=S.optData.rows.filter(x=>x.signal!=='WATCH'&&S.rows.some(r=>r.s===x.u&&r.confirmed));
   if(!active.length)return;
   for(const row of active){
     for(let i=0;i<OPT_SETS;i++){
@@ -672,7 +673,7 @@ function historyTable(arr){
     const pnl=N(h.pnl),pnlPct=h.entry&&h.exit?((h.exit-h.entry)/h.entry*100*(h.side==='SELL'?-1:1)):0;
     return '<tr><td>'+new Date(N(h.time)).toLocaleString('en-IN')+'</td><td><span class="coin">'+E(h.s)+'</span></td>'+
       '<td>'+E(h.mode||'PAPER')+'</td><td>'+E(h.e)+'</td><td class="'+(h.side==='BUY'?'buy':'sell')+'">'+h.side+'</td>'+
-      '<td>'+fmtPrice(h.entry||h.price)+'</td><td>'+fmtPrice(h.exit||0)+'</td><td>'+fmtQty(h.qty)+'</td><td>'+E(h.signalStage||'—')+'</td><td>'+N(h.qualityScore)||'—'+'</td><td>'+E(h.rotationId||'—')+'</td>'+
+      '<td>'+fmtPrice(h.entry||h.price)+'</td><td>'+fmtPrice(h.exit||0)+'</td><td>'+fmtQty(h.qty)+'</td><td>'+E(h.signalStage||'—')+'</td><td>'+(h.qualityScore!=null?N(h.qualityScore):'—')+'</td><td>'+E(h.rotationId||'—')+'</td>'+
       '<td>₹'+R(h.fees)+'</td><td>₹'+R(N(h.pnl)+N(h.fees))+'</td><td class="'+cl(pnl)+'">₹'+PNL(pnl)+'</td>'+
       '<td class="'+cl(pnl)+'">'+P(pnlPct)+'</td><td>'+(pnl>0?'<span class="buy">WIN</span>':'<span class="sell">LOSS</span>')+'</td></tr>';
   }).join('');

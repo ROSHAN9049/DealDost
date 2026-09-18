@@ -1,5 +1,0 @@
-(function(){'use strict';
-function api(p){return fetch('/api/binance-market?path='+encodeURIComponent(p),{cache:'no-store'}).then(function(r){return r.json()})}
-function run(){api('/eapi/v1/exchangeInfo').then(function(x){var a=x.optionSymbols||x.symbols||[],m={};a.forEach(function(o){if(o.status==='TRADING'||o.symbolStatus==='TRADING'){var u=String(o.underlying||o.underlyingSymbol||'').toUpperCase();if(u)m[u]=1}});var list=Object.keys(m).sort();var el=document.getElementById('bd-options-radar');if(!el){el=document.createElement('div');el.id='bd-options-radar';el.style.cssText='margin:8px 0;padding:10px;background:#0b1421;border:1px solid #20324a;border-radius:12px;color:#b8c6d8;font-size:12px';var app=document.getElementById('app');if(app)app.prepend(el)}el.innerHTML='<b style="color:#e8eef8">OPTIONS RADAR</b> · Binance option underlyings: <b style="color:#7ee7b0">'+(list.length?list.join(', '):'none returned')+'</b><div style="margin-top:5px;color:#8495aa">Auto-options checks scanner BUY/SELL candidates and enters only when a matching TRADING option contract + mark price is available.</div>'}).catch(function(e){})}
-run();setInterval(run,30000);
-})();

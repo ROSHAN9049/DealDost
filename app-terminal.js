@@ -70,7 +70,7 @@ async function api(base,path){
 function storageKey(){return 'ddv5_'+S.mode}
 function save(){
   try{
-    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled});
+    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,liveTrading:false,liveAuto:false,emergencyStop:false});
     localStorage.setItem('ddSettings',JSON.stringify(S.settings));
   }catch(e){}
 }
@@ -82,7 +82,7 @@ function load(){
     S.real=N(q.real);S.fees=N(q.fees);S.lastTrade=q.lastTrade||{};
     if(q.optSets&&Array.isArray(q.optSets)&&q.optSets.length===OPT_SETS)S.optSets=q.optSets;
     S.dailyRiskUsed=N(q.dailyRiskUsed);S.dailyRiskDate=q.dailyRiskDate||'';
-    S.rotation.events=N(q.rotationEvents);S.rotation.enabled=q.rotationEnabled!==false;
+    S.rotation.events=N(q.rotationEvents);S.rotation.enabled=q.rotationEnabled!==false;if(q.rotation&&typeof q.rotation==='object')S.rotation={...S.rotation,...q.rotation};S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=false;
     try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
   }catch(e){}
 }
@@ -237,7 +237,7 @@ async function liveOpen(x,e){
 }
 
 /* ===== Engine (confirmed-only entries + emergency stop + daily risk) ===== */
-function engine(){
+async function engine(){
   if(!S.auto||S.emergencyStop)return;
   dailyRiskReset();
   const arr=S.rows.filter(x=>x.confirmed).sort((a,b)=>b.qualityScore-a.qualityScore);
@@ -254,7 +254,7 @@ function engine(){
       if(liveGates(x,'SCALPING').pass&&S.pos.filter(p=>p.e==='SCALPING').length<SC)liveOpen(x,'SCALPING');
     }
   }
-  if(S.rotation.enabled&&!S.emergencyStop)profitRotation();
+  if(S.rotation.enabled&&!S.emergencyStop)await profitRotation();
 }
 
 /* ===== 16-Gate LIVE validation ===== */
@@ -264,7 +264,7 @@ function liveGates(x,e){
   g(1,S.mode==='LIVE','Mode is not LIVE');
   g(2,S.liveTrading,'LIVE Trading is OFF');
   g(3,S.liveAuto,'LIVE AUTO is OFF');
-  g(4,Boolean(process.env.BINANCE_API_KEY||S.account),'Server credentials missing');
+  g(4,Boolean(S.account&&S.account.apiReady!==false),'Server credentials missing');
   g(5,S.account&&S.account.availableBalance>0,'API permission invalid or no balance');
   g(6,x&&x.s&&/^[A-Z0-9_]{5,30}$/.test(x.s),'Symbol invalid');
   g(7,N(x.p)>0,'Price invalid');
@@ -285,7 +285,7 @@ function liveGates(x,e){
 }
 
 /* ===== Profit Rotation ===== */
-function profitRotation(){
+async function profitRotation(){
   if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
   const confirmed=S.rows.filter(x=>x.confirmed).sort((a,b)=>b.qualityScore-a.qualityScore);
   if(!confirmed.length)return;
@@ -324,8 +324,8 @@ function profitRotation(){
   // Open new confirmed signal
   let opened=false;
   if(S.mode==='PAPER')opened=paperOpen(x,e);
-  else if(S.mode==='TESTNET')opened=testnetOpen(x,e);
-  else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading)opened=liveOpen(x,e);
+  else if(S.mode==='TESTNET')opened=await testnetOpen(x,e);
+  else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading)opened=await liveOpen(x,e);
   if(opened){
     const newHist=S.hist[0];if(newHist)newHist.rotationId=rotId;
     S.rotation.lastRotation=Date.now();S.rotation.events++;
@@ -363,9 +363,9 @@ async function syncAccount(){
   S.lastAccount=Date.now();
   try{
     const a=await api(AC,'/fapi/v2/account');const bal=(a.assets||[]).find(x=>x.asset==='USDT');
-    S.account={availableBalance:N(a.availableBalance||bal?.availableBalance),walletBalance:N(a.totalWalletBalance||bal?.walletBalance),unrealized:N(a.totalUnrealizedProfit),margin:N(a.totalMarginBalance)};
+    S.account={availableBalance:N(a.availableBalance||bal?.availableBalance),walletBalance:N(a.totalWalletBalance||bal?.walletBalance),unrealized:N(a.totalUnrealizedProfit),margin:N(a.totalMarginBalance),apiReady:true};
     if(S.mode==='LIVE')S.pos=(a.positions||[]).filter(p=>Math.abs(N(p.positionAmt))>0).map(p=>({id:'live-'+p.symbol,s:p.symbol,e:'LIVE',side:N(p.positionAmt)>0?'BUY':'SELL',entry:N(p.entryPrice),current:N(p.markPrice),q:Math.abs(N(p.positionAmt)),pnl:N(p.unRealizedProfit),sl:0,tp:0,mode:'LIVE'}));
-  }catch(e){S.err='Account sync: '+e.message}
+  }catch(e){S.account={apiReady:false,error:e.message};S.err='Account sync: '+e.message}
 }
 async function syncTestnet(){
   if(S.mode!=='TESTNET')return;
@@ -418,7 +418,7 @@ async function scan(){
     }));
     S.lastScan=Date.now();S.err='';
     await syncAccount();await syncTestnet();
-    managePaper();engine();render();
+    managePaper();await engine();render();
   }catch(e){S.err='Market scan: '+e.message;render()}
   finally{S.busy=false}
 }
@@ -672,11 +672,11 @@ function historyTable(arr){
     const pnl=N(h.pnl),pnlPct=h.entry&&h.exit?((h.exit-h.entry)/h.entry*100*(h.side==='SELL'?-1:1)):0;
     return '<tr><td>'+new Date(N(h.time)).toLocaleString('en-IN')+'</td><td><span class="coin">'+E(h.s)+'</span></td>'+
       '<td>'+E(h.mode||'PAPER')+'</td><td>'+E(h.e)+'</td><td class="'+(h.side==='BUY'?'buy':'sell')+'">'+h.side+'</td>'+
-      '<td>'+fmtPrice(h.entry||h.price)+'</td><td>'+fmtPrice(h.exit||0)+'</td><td>'+fmtQty(h.qty)+'</td>'+
+      '<td>'+fmtPrice(h.entry||h.price)+'</td><td>'+fmtPrice(h.exit||0)+'</td><td>'+fmtQty(h.qty)+'</td><td>'+E(h.signalStage||'—')+'</td><td>'+N(h.qualityScore)||'—'+'</td><td>'+E(h.rotationId||'—')+'</td>'+
       '<td>₹'+R(h.fees)+'</td><td>₹'+R(N(h.pnl)+N(h.fees))+'</td><td class="'+cl(pnl)+'">₹'+PNL(pnl)+'</td>'+
       '<td class="'+cl(pnl)+'">'+P(pnlPct)+'</td><td>'+(pnl>0?'<span class="buy">WIN</span>':'<span class="sell">LOSS</span>')+'</td></tr>';
   }).join('');
-  return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>Time</th><th>Coin</th><th>Mode</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>Fees</th><th>Gross PNL</th><th>Net PNL</th><th>PNL%</th><th>Result</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>Time</th><th>Coin</th><th>Mode</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>Stage</th><th>Quality</th><th>Rotation ID</th><th>Fees</th><th>Gross PNL</th><th>Net PNL</th><th>PNL%</th><th>Result</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
 /* ===== Full history table with all filters ===== */
@@ -705,7 +705,7 @@ function fullHistoryTable(){
       '<td>₹'+R(h.fees)+'</td><td>₹'+R(N(h.pnl)+N(h.fees))+'</td><td class="'+cl(pnl)+'">₹'+PNL(pnl)+'</td>'+
       '<td class="'+cl(pnl)+'">'+P(pnlPct)+'</td><td>'+(pnl>0?'<span class="buy">WIN</span>':'<span class="sell">LOSS</span>')+'</td></tr>';
   }).join('');
-  return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>Time</th><th>Coin</th><th>Mode</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>Fees</th><th>Gross PNL</th><th>Net PNL</th><th>PNL%</th><th>Result</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>Time</th><th>Coin</th><th>Mode</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>Stage</th><th>Quality</th><th>Rotation ID</th><th>Fees</th><th>Gross PNL</th><th>Net PNL</th><th>PNL%</th><th>Result</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
 /* ===== Section Renderers ===== */
@@ -1056,13 +1056,13 @@ window.DD={
   get err(){return S.err},set err(v){S.err=v},
   render,scan,scanOptions,connectWS,
   toggleAuto(){S.auto=!S.auto;render();if(S.auto)engine()},
-  toggleLiveAuto(){if(!S.liveAuto){if(!confirm('Enable LIVE AUTO trading? This will place REAL orders on Binance automatically.'))return}S.liveAuto=!S.liveAuto;render()},
+  toggleLiveAuto(){if(S.mode!=='LIVE'||!S.liveTrading){S.liveAuto=false;S.err='LIVE AUTO blocked: LIVE Trading must be ON first.';render();return}if(!S.liveAuto){if(!confirm('Enable LIVE AUTO trading? This will place REAL orders on Binance automatically.'))return}S.liveAuto=!S.liveAuto;render()},toggleLiveTrading(){if(S.mode!=='LIVE'){S.liveTrading=false;render();return}if(!S.liveTrading&&!confirm('Enable LIVE TRADING? Real Binance orders may be placed only when all safety gates pass.'))return;S.liveTrading=!S.liveTrading;if(!S.liveTrading)S.liveAuto=false;render()},toggleEmergency(){S.emergencyStop=!S.emergencyStop;save();render()},
   setMode(m){
     if(m===S.mode)return;
     if(m==='LIVE'&&!confirm('Switch to LIVE mode? Real Binance orders will be possible. Live Auto stays OFF until you enable it separately.'))return;
     // Save current mode state
     save();
-    S.mode=m;S.liveAuto=false;
+    S.mode=m;S.liveAuto=false;S.liveTrading=false;
     localStorage.setItem('ddMode',m);
     // Load new mode state
     load();render();if(m==='LIVE')syncAccount();if(m==='TESTNET'){syncTestnet();checkTestnetStatus().then(render)}

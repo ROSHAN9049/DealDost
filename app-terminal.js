@@ -21,7 +21,7 @@ const S={
   mode:(localStorage.getItem('ddMode')||'PAPER'),
   auto:true,liveAuto:false,liveTrading:false,
   emergencyStop:false,
-  rotation:{enabled:true,lastRotation:0,events:0,lastEngine:'',lastClosed:'',lastOpened:'',lastReason:'',lastResult:''},
+  rotation:{enabled:true,lastRotation:0,events:0,rotationDate:'',lastEngine:'',lastClosed:'',lastOpened:'',lastReason:'',lastResult:'',lastAttemptKey:''},
   tab:'dashboard',
   wsStatus:'connecting',ws:null,wsTimer:null,
   t:{},rows:[],k:{},universe:[],stableUniverse:[],
@@ -313,6 +313,8 @@ async function profitRotation(){
   const confirmed=S.rows.filter(x=>x.confirmed===true).sort((a,b)=>b.qualityScore-a.qualityScore);
   if(!confirmed.length)return;
   const x=confirmed[0];
+  const today=new Date().toDateString();if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
+  const attemptKey=[x.s,x.momentum,x.scalp,x.qualityScore].join('|');if(S.rotation.lastResult==='FAILED'&&S.rotation.lastAttemptKey===attemptKey)return;S.rotation.lastAttemptKey=attemptKey;
   const e=x.momentum!=='WAIT'?'MOMENTUM':x.scalp!=='WAIT'?'SCALPING':'';
   if(!e)return;
   const limit=e==='MOMENTUM'?MC:SC;
@@ -346,9 +348,9 @@ async function profitRotation(){
     const newHist=S.hist[0];if(newHist)newHist.rotationId=rotId;
     S.rotation.lastRotation=Date.now();S.rotation.events++;S.rotation.lastEngine=e;
     S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);S.rotation.lastOpened=x.s;
-    S.rotation.lastReason=reason;S.rotation.lastResult='SUCCESS';
+    S.rotation.lastReason=reason;S.rotation.lastResult='SUCCESS';S.rotation.lastAttemptKey=attemptKey;
   }else{
-    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — replacement entry failed/blocked';
+    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — replacement entry failed/blocked';S.rotation.lastAttemptKey=attemptKey;
   }
   save();render();
 }

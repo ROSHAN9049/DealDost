@@ -320,15 +320,18 @@ async function profitRotation(){
   if(!confirmed.length)return;
   const x=confirmed[0];
   const today=new Date().toDateString();if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
-  const attemptKey=[x.s,x.momentum,x.scalp,x.qualityScore].join('|');if(S.rotation.lastResult==='FAILED'&&S.rotation.lastAttemptKey===attemptKey)return;S.rotation.lastAttemptKey=attemptKey;
+  const attemptKey=[x.s,x.momentum,x.scalp,x.qualityScore].join('|');
+  if(S.rotation.lastResult==='FAILED'&&S.rotation.lastAttemptKey===attemptKey)return;
   const e=x.momentum!=='WAIT'?'MOMENTUM':x.scalp!=='WAIT'?'SCALPING':'';
   if(!e)return;
   const limit=e==='MOMENTUM'?MC:SC;
   const inEngine=S.pos.filter(p=>p.e===e);
-  if(inEngine.length<limit)return;
-  if(!dailyRiskOK()||S.pos.some(p=>p.s===x.s))return;
+  if(inEngine.length<limit){S.rotation.lastResult='BLOCKED';S.rotation.lastReason=e+' slot not full';return}
+  if(!dailyRiskOK()){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Daily risk limit';return}
+  if(S.pos.some(p=>p.s===x.s)){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Confirmed coin already open';return}
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
-  if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return;
+  if(Date.now()-N(S.lastTrade[x.s]||0)<cd){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Cooldown active';return}
+  S.rotation.lastAttemptKey=attemptKey;
 
   const profitable=inEngine.filter(p=>N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
   const candidates=profitable.length?profitable:inEngine.filter(p=>N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
@@ -621,9 +624,11 @@ function statsFor(histArr){
   const grossProfit=wins.reduce((s,h)=>s+N(h.pnl),0);
   const grossLoss=Math.abs(losses.reduce((s,h)=>s+N(h.pnl),0));
   const profitFactor=grossLoss?grossProfit/grossLoss:0;
+  // EXIT pnl is already NET of entry + exit fees. Do not subtract fees again.
+  // Fees are tracked separately for reporting only.
   let peak=0,dd=0,cum=0;
-  exits.slice().reverse().forEach(h=>{cum+=N(h.pnl)-N(h.fees);peak=Math.max(peak,cum);dd=Math.max(dd,peak-cum)});
-  return{trades:exits.length,wins:wins.length,losses:losses.length,winRate,totalPnl,totalFees,netPnl:totalPnl-totalFees,avgWin,avgLoss,profitFactor,maxDD:dd};
+  exits.slice().reverse().forEach(h=>{cum+=N(h.pnl);peak=Math.max(peak,cum);dd=Math.max(dd,peak-cum)});
+  return{trades:exits.length,wins:wins.length,losses:losses.length,winRate,totalPnl,totalFees,netPnl:totalPnl,avgWin,avgLoss,profitFactor,maxDD:dd};
 }
 function dailyPnl(histArr){
   const days={};histArr.filter(h=>h.action==='EXIT').forEach(h=>{const d=new Date(N(h.time)).toDateString();days[d]=(days[d]||0)+N(h.pnl)-N(h.fees)});return days;

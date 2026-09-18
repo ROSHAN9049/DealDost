@@ -21,7 +21,7 @@ const S={
   auto:true,liveAuto:false,
   tab:'dashboard',
   wsStatus:'connecting',ws:null,wsTimer:null,
-  t:{},rows:[],k:{},universe:[],
+  t:{},rows:[],k:{},universe:[],stableUniverse:[],
   pos:[],hist:[],eq:10000,real:0,fees:0,
   account:null,testnetAccount:null,testnetStatus:null,testnetRestricted:false,
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
@@ -77,6 +77,7 @@ function load(){
     S.eq=N(q.eq)||(S.mode==='PAPER'?N(S.settings.paperCapital)||10000:10000);
     S.real=N(q.real);S.fees=N(q.fees);S.lastTrade=q.lastTrade||{};
     if(q.optSets&&Array.isArray(q.optSets)&&q.optSets.length===OPT_SETS)S.optSets=q.optSets;
+    try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
   }catch(e){}
 }
 
@@ -270,8 +271,13 @@ async function scan(){
     const ex=await api(PUB,'/fapi/v1/exchangeInfo'),tt=await api(PUB,'/fapi/v1/ticker/24hr');
     const syms=new Set((ex.symbols||[]).filter(x=>x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING').map(x=>x.symbol));
     (Array.isArray(tt)?tt:[]).forEach(x=>{if(syms.has(x.symbol))S.t[x.symbol]={p:N(x.lastPrice),c:N(x.priceChangePercent),v:N(x.quoteVolume)}});
-    // Sort by absolute 24h change descending
-    const top=[...syms].sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c))).slice(0,N(S.settings.coinCount)||50);
+    // Stable universe: pin first scan's top coins, then only update prices for those
+    const count=N(S.settings.coinCount)||50;
+    if(!S.stableUniverse.length){
+      S.stableUniverse=[...syms].sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c))).slice(0,count);
+      try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
+    }
+    const top=S.stableUniverse.filter(s=>syms.has(s));
     S.universe=top;
     S.rows=top.map(s=>({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,reasons:'Loading'}));
     await Promise.all(top.map(async s=>{
@@ -602,7 +608,7 @@ function renderDashboard(){
     (S.mode==='LIVE'?'<div class="auto-toggle '+(S.liveAuto?'on':'')+'" onclick="DD.toggleLiveAuto()"><div class="sw"></div><span class="lbl">LIVE AUTO '+(S.liveAuto?'ON':'OFF')+'</span></div>':'')+
     '<button class="btn blue sm" onclick="DD.scan()">Refresh Scanner</button>'+
     '<button class="btn sm" onclick="DD.reconnect()">Reconnect WS</button></div>';
-  return banner+autoRow+cards+'<div class="panel"><div class="panel-header"><div class="panel-title">Live Scanner — Top '+S.rows.length+' by 24H Change</div><div class="panel-sub">Last scan: '+(S.lastScan?new Date(S.lastScan).toLocaleTimeString('en-IN'):'—')+'</div></div>'+scannerTable()+'</div>';
+  return banner+autoRow+cards+'<div class="panel"><div class="panel-header"><div class="panel-title">Live Scanner — STABLE '+(S.stableUniverse.length||S.settings.coinCount||50)+' · Top '+(S.rows.length||0)+' by 24H Change</div><div class="panel-sub">Last scan: '+(S.lastScan?new Date(S.lastScan).toLocaleTimeString('en-IN'):'—')+'</div></div>'+scannerTable()+'</div>';
 }
 
 function renderMomentum(){
@@ -791,7 +797,8 @@ function renderAnalytics(){
 function renderSettings(){
   return '<div class="panel"><div class="panel-header"><div class="panel-title">Settings</div></div><div class="settings-grid">'+
     '<div class="setting-row"><div><div class="set-label">Scanner Refresh</div><div class="set-desc">Interval in seconds</div></div><input type="number" value="'+(S.settings.scanInterval||30)+'" min="10" max="120" onchange="DD.updateSetting(\'scanInterval\',+this.value)"></div>'+
-    '<div class="setting-row"><div><div class="set-label">Coin Count</div><div class="set-desc">Number of coins to scan</div></div><input type="number" value="'+(S.settings.coinCount||50)+'" min="10" max="100" onchange="DD.updateSetting(\'coinCount\',+this.value)"></div>'+
+    '<div class="setting-row"><div><div class="set-label">Coin Count</div><div class="set-desc">Number of coins to scan (applies on next universe reset)</div></div><input type="number" value="'+(S.settings.coinCount||50)+'" min="10" max="100" onchange="DD.updateSetting(\'coinInterval\',+this.value)"></div>'+
+    '<div class="setting-row"><div><div class="set-label">Stable Universe</div><div class="set-desc">'+(S.stableUniverse.length?'Pinned to '+S.stableUniverse.length+' coins from first scan':'Not yet pinned — will pin on next scan')+'</div></div><button class="btn sm" onclick="DD.resetUniverse()">Reset Universe</button></div>'+
     '<div class="setting-row"><div><div class="set-label">Paper Capital</div><div class="set-desc">Virtual starting capital</div></div><input type="number" value="'+(S.settings.paperCapital||10000)+'" min="100" max="1000000" onchange="DD.updateSetting(\'paperCapital\',+this.value)"></div>'+
     '<div class="setting-row"><div><div class="set-label">Slippage</div><div class="set-desc">Simulated slippage (bps)</div></div><input type="number" value="'+((S.settings.slippage||0.0003)*10000).toFixed(1)+'" min="0" max="100" onchange="DD.updateSetting(\'slippage\',+this.value/10000)"></div>'+
     '<div class="setting-row"><div><div class="set-label">Taker Fee</div><div class="set-desc">Per-side fee (0.05%)</div></div><input type="text" value="0.05%" disabled></div>'+
@@ -921,7 +928,8 @@ window.DD={
   updateSetting(k,v){S.settings[k]=v;save();render()},
   resetPaper(){if(confirm('Reset '+S.mode+' trading data? This clears positions and history for this mode.')){S.pos=[];S.hist=[];S.eq=N(S.settings.paperCapital)||10000;S.real=0;S.fees=0;S.lastTrade={};S.optSets=Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''}));save();render()}},
   exportData(){try{const d=localStorage[storageKey()];const blob=new Blob([d],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='dealdost-'+S.mode.toLowerCase()+'-'+Date.now()+'.json';a.click();URL.revokeObjectURL(url)}catch(e){alert('Export failed: '+e.message)}},
-  drawLine,drawBar
+  drawLine,drawBar,
+  resetUniverse(){S.stableUniverse=[];try{localStorage.removeItem('dd_stable_universe_v1')}catch(e){}render();scan()}
 };
 
 /* ===== Boot ===== */

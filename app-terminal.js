@@ -285,56 +285,72 @@ function liveGates(x,e){
 }
 
 /* ===== Profit Rotation ===== */
+async function closeForRotation(p){
+  if(!p)return false;
+  if(p.mode==='PAPER'){
+    const px=N(S.t[p.s]?.p);if(!px)return false;
+    const gross=p.side==='BUY'?(px-p.entry)*p.q:(p.entry-px)*p.q,ef=px*p.q*F;
+    p.pnl=gross-p.entryFee-ef;S.real+=p.pnl;S.eq+=p.pnl;S.fees+=p.entryFee+ef;
+    S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:px,qty:p.q,pnl:p.pnl,fees:p.entryFee+ef,live:false,mode:'PAPER',reason:'Rotation',signalStage:p.signalStage||'CONFIRMED',qualityScore:N(p.qualityScore),rotationId:S.rotationId});
+    S.pos=S.pos.filter(q=>q.id!==p.id);S.lastTrade[p.s]=Date.now();return true;
+  }
+  const base=p.mode==='TESTNET'?TN_TR:TR;
+  try{
+    const resp=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'close',symbol:p.s,side:p.side,quantity:p.q})});
+    const j=await resp.json();
+    if(!resp.ok)throw Error(j.error||'Rotation close failed');
+    const px=N(j.avgPrice)||N(S.t[p.s]?.p)||p.current;
+    const gross=p.side==='BUY'?(px-p.entry)*p.q:(p.entry-px)*p.q,ef=px*p.q*F;
+    p.pnl=gross-p.entryFee-ef;S.real+=p.pnl;S.eq+=p.pnl;S.fees+=p.entryFee+ef;
+    S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:px,qty:p.q,pnl:p.pnl,fees:p.entryFee+ef,live:p.mode==='LIVE',mode:p.mode,reason:'Rotation',signalStage:p.signalStage||'CONFIRMED',qualityScore:N(p.qualityScore),rotationId:S.rotationId});
+    S.pos=S.pos.filter(q=>q.id!==p.id);S.lastTrade[p.s]=Date.now();return true;
+  }catch(err){S.err=(p.mode||'LIVE')+' rotation close: '+err.message;return false}
+}
+
+/* ===== Profit Rotation ===== */
 async function profitRotation(){
   if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
-  const confirmed=S.rows.filter(x=>x.confirmed).sort((a,b)=>b.qualityScore-a.qualityScore);
+  const confirmed=S.rows.filter(x=>x.confirmed===true).sort((a,b)=>b.qualityScore-a.qualityScore);
   if(!confirmed.length)return;
   const x=confirmed[0];
-  const e=x.momentum!=='WAIT'?'MOMENTUM':x.scalp!=='WAIT'?'SCALPING':'MOMENTUM';
+  const e=x.momentum!=='WAIT'?'MOMENTUM':x.scalp!=='WAIT'?'SCALPING':'';
+  if(!e)return;
   const limit=e==='MOMENTUM'?MC:SC;
   const inEngine=S.pos.filter(p=>p.e===e);
-  if(inEngine.length<limit)return; // slot available, no rotation needed
-  if(!dailyRiskOK())return;
-  if(S.pos.some(p=>p.s===x.s))return; // duplicate
+  if(inEngine.length<limit)return;
+  if(!dailyRiskOK()||S.pos.some(p=>p.s===x.s))return;
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
-  if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return; // cooldown
+  if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return;
+
+  const profitable=inEngine.filter(p=>N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
+  const candidates=profitable.length?profitable:inEngine.filter(p=>N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
+  const closedPos=candidates[0];
+  if(!closedPos){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='No position to rotate';return}
+
   S.rotationId++;
   const rotId=S.rotationId;
-  let closedPos=null,reason='';
-  const profitable=S.pos.filter(p=>p.e===e&&N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
-  if(profitable.length){
-    closedPos=profitable[0];reason='PROFIT ROTATION';
-  }else{
-    const losers=S.pos.filter(p=>p.e===e&&N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
-    if(losers.length){closedPos=losers[0];reason='WORST LOSS ROTATION'}
+  const reason=profitable.length?'PROFIT ROTATION':'WORST LOSS ROTATION';
+  if(!(await closeForRotation(closedPos))){
+    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — close failed';save();return;
   }
-  if(!closedPos){
-    S.rotation.lastResult='BLOCKED';S.rotation.lastReason='No position to rotate';return;
-  }
-  // Close one position
-  const px=N(S.t[closedPos.s]?.p);if(!px){S.rotation.lastResult='FAILED';return}
-  const gross=closedPos.side==='BUY'?(px-closedPos.entry)*closedPos.q:(closedPos.entry-px)*closedPos.q;
-  const ef=px*closedPos.q*F;
-  closedPos.pnl=gross-closedPos.entryFee-ef;
-  S.real+=closedPos.pnl;S.eq+=closedPos.pnl;S.fees+=closedPos.entryFee+ef;
-  S.dailyRiskUsed+=Math.abs(closedPos.pnl)/Math.max(S.eq,1);
-  S.hist.unshift({time:Date.now(),s:closedPos.s,e,side:closedPos.side,action:'EXIT',entry:closedPos.entry,exit:px,pnl:closedPos.pnl,fees:closedPos.entryFee+ef,live:closedPos.mode==='LIVE',mode:closedPos.mode,reason,rotationId:rotId,signalStage:'CONFIRMED',qualityScore:x.qualityScore});
-  S.pos=S.pos.filter(q=>q.id!==closedPos.id);
-  S.lastTrade[closedPos.s]=Date.now();
-  // Open new confirmed signal
+
   let opened=false;
   if(S.mode==='PAPER')opened=paperOpen(x,e);
   else if(S.mode==='TESTNET')opened=await testnetOpen(x,e);
-  else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading)opened=await liveOpen(x,e);
+  else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
+    const g=liveGates(x,e);
+    if(g.pass)opened=await liveOpen(x,e); else S.err='LIVE rotation blocked: '+g.failed.join('; ');
+  }
+
   if(opened){
     const newHist=S.hist[0];if(newHist)newHist.rotationId=rotId;
-    S.rotation.lastRotation=Date.now();S.rotation.events++;
-    S.rotation.lastEngine=e;S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);
-    S.rotation.lastOpened=x.s;S.rotation.lastReason=reason;S.rotation.lastResult='SUCCESS';
+    S.rotation.lastRotation=Date.now();S.rotation.events++;S.rotation.lastEngine=e;
+    S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);S.rotation.lastOpened=x.s;
+    S.rotation.lastReason=reason;S.rotation.lastResult='SUCCESS';
   }else{
-    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — entry blocked';
+    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — replacement entry failed/blocked';
   }
-  save();
+  save();render();
 }
 
 /* ===== Position management (preserved) ===== */

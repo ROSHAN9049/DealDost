@@ -454,7 +454,12 @@ async function syncTestnetSymbols(){
     if(j.testnetUnavailable||j.restricted){S.testnetSymbolsReady=false;S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
     if(!r.ok)throw Error(j.error||'Testnet symbol list failed');
     S.testnetSymbols=new Set(Array.isArray(j.symbols)?j.symbols:[]);
-    for(const s of S.testnetRejectedSymbols){if(!S.testnetSymbols.has(s))S.testnetRejectedSymbols.delete(s)}
+    // A symbol rejected by an actual Demo order remains blocked even if it still
+    // appears in exchangeInfo; only a later symbol refresh that removes/re-adds
+    // it should change that state.
+    for(const s of [...S.testnetRejectedSymbols]){
+      if(!S.testnetSymbols.has(s))S.testnetRejectedSymbols.delete(s);
+    }
     S.testnetSymbolsReady=S.testnetSymbols.size>0;
     if(S.testnetSymbolsReady&&S.testnetRestricted){S.testnetRestricted=false}
     if(S.testnetSymbolsReady&&S.mode==='TESTNET'&&/invalid symbol|not supported by Binance Futures Demo/i.test(String(S.err||'')))S.err='';
@@ -470,6 +475,11 @@ async function syncTestnetSymbols(){
 async function scan(){
   if(S.busy)return;S.busy=true;
   try{
+    // TESTNET universe must be built only from symbols verified by Binance Futures Demo.
+    // The public market feed can contain contracts that Demo rejects for order placement.
+    if(S.mode==='TESTNET'&&!S.testnetSymbolsReady){
+      await syncTestnetSymbols();
+    }
     const ex=await api(PUB,'/fapi/v1/exchangeInfo'),tt=await api(PUB,'/fapi/v1/ticker/24hr');
     const syms=new Set((ex.symbols||[]).filter(x=>x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING').map(x=>x.symbol));
     (Array.isArray(tt)?tt:[]).forEach(x=>{if(syms.has(x.symbol))S.t[x.symbol]={p:N(x.lastPrice),c:N(x.priceChangePercent),v:N(x.quoteVolume)}});
@@ -479,9 +489,10 @@ async function scan(){
       S.stableUniverse=[...syms].sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c))).slice(0,count);
       try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
     }
-    const validStable=S.stableUniverse.filter(s=>syms.has(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
+    const demoOK=s=>S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(s));
+    const validStable=S.stableUniverse.filter(s=>syms.has(s)&&demoOK(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
     if(validStable.length<count){
-      const extras=[...syms].filter(s=>/^[A-Z0-9_]{1,30}$/.test(s)&&!validStable.includes(s))
+      const extras=[...syms].filter(s=>demoOK(s)&&/^[A-Z0-9_]{1,30}$/.test(s)&&!validStable.includes(s))
         .sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c)));
       validStable.push(...extras.slice(0,count-validStable.length));
       S.stableUniverse=validStable.slice(0,count);
@@ -489,6 +500,9 @@ async function scan(){
     }
     const top=validStable.slice(0,count);
     S.universe=top;
+    if(S.mode==='TESTNET'&&S.err&&/Binance Futures Demo rejected this symbol|not supported by Binance Futures Demo/i.test(String(S.err))){
+      S.err='';
+    }
     S.rows=top.map(s=>({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,reasons:'Loading'}));
     // Keep Binance requests below burst/rate limits: process the stable universe in small batches.
     const batchSize=8;
@@ -798,7 +812,7 @@ function scannerTable(mode){
       '<td class="'+(x.trend==='BULLISH'?'buy':x.trend==='BEARISH'?'sell':'neutral-text')+'">'+x.trend+'</td>'+
       '<td style="font-size:9px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis">'+E(x.confirmReasons||x.reasons)+'</td>'+
       '<td>'+signalBadge(z==='WAIT'?'NEUTRAL':z)+'</td>'+
-      '<td><button class="btn sm blue" onclick="DD.manualEntry(\''+E(x.s)+'\',\''+E(z)+'\')">Trade</button></td></tr>';
+      '<td>'+((S.mode==='TESTNET'&&S.testnetRejectedSymbols.has(x.s))?'<span class="neutral-text">Demo Skip</span>':'<button class="btn sm blue" onclick="DD.manualEntry(\''+E(x.s)+'\',\''+E(z)+'\')">Trade</button>')+'</td></tr>';
   }).join('');
   const fb='<div class="filters"><span class="filter-label">Search:</span><input class="filter-input" id="filter-coin-scan" placeholder="Coin name…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()"></div>';
   return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Coin</th><th>Price</th><th>24H</th><th>24H Vol</th><th>Vol Spike</th><th>Mom</th><th>Mom Score</th><th>Scalp</th><th>Scalp Score</th><th>Stage</th><th>Quality</th><th>Trend</th><th>Confirmations</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';

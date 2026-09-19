@@ -217,7 +217,15 @@ function paperOpen(x,e){
   save();return true;
 }
 async function testnetOpen(x,e){
-  if(S.mode!=='TESTNET'||!canOpen(x,e))return false;
+  // Final server-side/client-side safety gate: TESTNET may never place an
+  // automatic or manual order unless the signal is fully CONFIRMED.
+  // This protects against any alternate entry path bypassing engine filters.
+  if(S.mode!=='TESTNET')return false;
+  if(!x||x.confirmed!==true){
+    S.err='TESTNET: '+(x?.s||'Unknown symbol')+' skipped — signal is not CONFIRMED. No order was placed.';
+    return false;
+  }
+  if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e))return false;
   if(!S.testnetSymbolsReady)return false;
   if(!S.testnetSymbols.has(x.s)){S.err='TESTNET: '+x.s+' is not supported by Binance Futures Demo — skipped';return false;}
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}

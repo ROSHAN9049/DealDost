@@ -1,4 +1,9 @@
 {
   "outputDirectory": ".",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "functions": {
+    "api/**/*.js": {
+      "regions": ["bom1"]
+    }
+  }
 }

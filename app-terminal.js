@@ -27,7 +27,7 @@ const S={
   t:{},rows:[],k:{},universe:[],stableUniverse:[],
   pos:[],hist:[],eq:10000,real:0,fees:0,optReal:0,optFees:0,
   dailyRiskUsed:0,dailyRiskDate:'',rotationId:0,
-  account:null,testnetAccount:null,testnetStatus:null,testnetSymbols:new Set(),testnetSymbolsReady:false,testnetRestricted:false,
+  account:null,testnetAccount:null,testnetStatus:null,testnetSymbols:new Set(),testnetSymbolsReady:false,testnetRestricted:false,testnetRejectedSymbols:new Set(),
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
@@ -227,6 +227,7 @@ async function testnetOpen(x,e){
   }
   if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e))return false;
   if(!S.testnetSymbolsReady)return false;
+  if(S.testnetRejectedSymbols.has(x.s)){return false;}
   if(!S.testnetSymbols.has(x.s)){S.err='TESTNET: '+x.s+' is not supported by Binance Futures Demo — skipped';return false;}
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
   const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
@@ -243,7 +244,8 @@ async function testnetOpen(x,e){
     if(!resp.ok){
       const msg=String(j.error||j.msg||'Testnet order failed');
       if(Number(j.code)===-1121||/invalid symbol/i.test(msg)){
-        S.err='TESTNET: '+x.s+' — Binance Futures Demo rejected this symbol. No order was placed.';
+        S.testnetRejectedSymbols.add(x.s);
+        S.err='TESTNET: '+x.s+' — Binance Futures Demo rejected this symbol. No order was placed. It will be skipped until the next symbol refresh.';
         return false;
       }
       throw Error(msg);
@@ -276,7 +278,7 @@ async function liveOpen(x,e){
 async function engine(){
   if(!S.auto||S.emergencyStop)return;
   dailyRiskReset();
-  const arr=S.rows.filter(x=>x.confirmed&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
+  const arr=S.rows.filter(x=>x.confirmed&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)&&!S.testnetRejectedSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
   for(const x of arr){
     if(!dailyRiskOK())break;
     if(S.mode==='PAPER'){
@@ -346,7 +348,7 @@ async function closeForRotation(p){
 /* ===== Profit Rotation ===== */
 async function profitRotation(){
   if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
-  const confirmed=S.rows.filter(x=>x.confirmed===true&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
+  const confirmed=S.rows.filter(x=>x.confirmed===true&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)&&!S.testnetRejectedSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
   if(!confirmed.length)return;
   const x=confirmed[0];
   const today=new Date().toDateString();if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
@@ -452,6 +454,7 @@ async function syncTestnetSymbols(){
     if(j.testnetUnavailable||j.restricted){S.testnetSymbolsReady=false;S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
     if(!r.ok)throw Error(j.error||'Testnet symbol list failed');
     S.testnetSymbols=new Set(Array.isArray(j.symbols)?j.symbols:[]);
+    for(const s of S.testnetRejectedSymbols){if(!S.testnetSymbols.has(s))S.testnetRejectedSymbols.delete(s)}
     S.testnetSymbolsReady=S.testnetSymbols.size>0;
     if(S.testnetSymbolsReady&&S.testnetRestricted){S.testnetRestricted=false}
     if(S.testnetSymbolsReady&&S.mode==='TESTNET'&&/invalid symbol|not supported by Binance Futures Demo/i.test(String(S.err||'')))S.err='';

@@ -27,7 +27,7 @@ const S={
   t:{},rows:[],k:{},universe:[],stableUniverse:[],
   pos:[],hist:[],eq:10000,real:0,fees:0,optReal:0,optFees:0,
   dailyRiskUsed:0,dailyRiskDate:'',rotationId:0,
-  account:null,testnetAccount:null,testnetStatus:null,testnetSymbols:new Set(),testnetRestricted:false,
+  account:null,testnetAccount:null,testnetStatus:null,testnetSymbols:new Set(),testnetSymbolsReady:false,testnetRestricted:false,
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
@@ -218,7 +218,8 @@ function paperOpen(x,e){
 }
 async function testnetOpen(x,e){
   if(S.mode!=='TESTNET'||!canOpen(x,e))return false;
-  if(S.testnetSymbols.size&&!S.testnetSymbols.has(x.s)){return false;}
+  if(!S.testnetSymbolsReady)return false;
+  if(!S.testnetSymbols.has(x.s)){return false;}
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
   const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
   if(!Number.isFinite(r.q)||r.q<=0)return false;
@@ -260,7 +261,7 @@ async function liveOpen(x,e){
 async function engine(){
   if(!S.auto||S.emergencyStop)return;
   dailyRiskReset();
-  const arr=S.rows.filter(x=>x.confirmed&& (S.mode!=='TESTNET'||!S.testnetSymbols.size||S.testnetSymbols.has(x.s))).sort((a,b)=>b.qualityScore-a.qualityScore);
+  const arr=S.rows.filter(x=>x.confirmed&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
   for(const x of arr){
     if(!dailyRiskOK())break;
     if(S.mode==='PAPER'){
@@ -430,11 +431,12 @@ async function checkTestnetStatus(){
 async function syncTestnetSymbols(){
   try{
     const r=await fetch(TN_SYMS,{cache:'no-store'});const j=await r.json();
-    if(j.testnetUnavailable||j.restricted){S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
+    if(j.testnetUnavailable||j.restricted){S.testnetSymbolsReady=false;S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
     if(!r.ok)throw Error(j.error||'Testnet symbol list failed');
     S.testnetSymbols=new Set(Array.isArray(j.symbols)?j.symbols:[]);
+    S.testnetSymbolsReady=true;
     return true;
-  }catch(e){S.testnetSymbols=new Set();return false}
+  }catch(e){S.testnetSymbols=new Set();S.testnetSymbolsReady=false;return false}
 }
 
 /* ===== Scanner (preserved, ranking by absolute 24h change) ===== */

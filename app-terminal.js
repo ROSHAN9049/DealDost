@@ -821,7 +821,7 @@ function scannerTable(mode){
       '<td class="'+(x.trend==='BULLISH'?'buy':x.trend==='BEARISH'?'sell':'neutral-text')+'">'+x.trend+'</td>'+
       '<td style="font-size:9px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis">'+E(x.confirmReasons||x.reasons)+'</td>'+
       '<td>'+signalBadge(z==='WAIT'?'NEUTRAL':z)+'</td>'+
-      '<td>'+(S.mode==='TESTNET'&&S.testnetRejectedSymbols.has(x.s)?'<span class="neutral-text">Demo Skip</span>':(!x.confirmed||z==='WAIT'?'<span class="neutral-text">WAIT</span>':'<button class="btn sm blue" onclick="DD.manualEntry(\\''+E(x.s)+'\\',\\''+E(z)+'\\')">Trade</button>'))+'</td></tr>'
+      '<td>'+(S.mode==='TESTNET'&&S.testnetRejectedSymbols.has(x.s)?'<span class="neutral-text">Demo Skip</span>':(!x.confirmed||z==='WAIT'?'<span class="neutral-text">WAIT</span>':'<button class="btn sm blue" onclick="DD.manualEntry(\'+E(x.s)+'\',\'+E(z)+'\')">Trade</button>'))+'</td></tr>'
   }).join('');
   const fb='<div class="filters"><span class="filter-label">Search:</span><input class="filter-input" id="filter-coin-scan" placeholder="Coin name…" value="'+E(S.filterCoin)+'" oninput="DD.filterCoin=this.value;DD.render()"></div>';
   return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Coin</th><th>Price</th><th>24H</th><th>24H Vol</th><th>Vol Spike</th><th>Mom</th><th>Mom Score</th><th>Scalp</th><th>Scalp Score</th><th>Stage</th><th>Quality</th><th>Trend</th><th>Confirmations</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';

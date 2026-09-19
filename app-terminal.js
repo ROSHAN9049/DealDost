@@ -255,9 +255,19 @@ async function testnetOpen(x,e){
         try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
         S.err='TESTNET: '+x.s+' skipped — Binance Futures Demo rejected the symbol. No order was placed.';
         const count=N(S.settings.coinCount)||50;
-        const candidates=[...S.testnetSymbols].filter(s=>!S.testnetRejectedSymbols.has(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
-        const ordered=[...S.stableUniverse,...candidates].filter((v,i,a)=>a.indexOf(v)===i);
-        S.stableUniverse=ordered.slice(0,count);
+        // Refill only from symbols that are present in BOTH the Demo
+        // exchangeInfo and the current public market ticker. This prevents
+        // a rejected/ghost Demo symbol from immediately replacing itself.
+        const marketSymbols=new Set(Object.keys(S.t||{}));
+        const current=new Set(S.stableUniverse);
+        const candidates=[...S.testnetSymbols]
+          .filter(s=>marketSymbols.has(s)&&!S.testnetRejectedSymbols.has(s)&&/^[A-Z0-9_]{1,30}$/.test(s)&&!current.has(s))
+          .sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c)));
+        for(const s of candidates){
+          if(S.stableUniverse.length>=count)break;
+          S.stableUniverse.push(s);
+        }
+        S.stableUniverse=[...new Set(S.stableUniverse)].slice(0,count);
         S.universe=S.stableUniverse.slice(0,count);
         try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
         render();

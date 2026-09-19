@@ -90,7 +90,7 @@ function load(){
       S.rotation.lastRotation=0;S.rotation.lastEngine='';S.rotation.lastClosed='';S.rotation.lastOpened='';S.rotation.lastReason='';S.rotation.lastResult='';S.rotation.lastAttemptKey='';
     }
     S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
-    try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
+    try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}\n    try{const rj=JSON.parse(localStorage.getItem('dd_testnet_rejected_v1')||'[]');if(Array.isArray(rj))S.testnetRejectedSymbols=new Set(rj.map(String))}catch(e){}
   }catch(e){}
 }
 
@@ -497,7 +497,7 @@ async function scan(){
       S.stableUniverse=[...syms].sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c))).slice(0,count);
       try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
     }
-    const demoOK=s=>S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(s));
+    const demoOK=s=>S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(s)&&!S.testnetRejectedSymbols.has(s));
     const validStable=S.stableUniverse.filter(s=>syms.has(s)&&demoOK(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
     if(validStable.length<count){
       const extras=[...syms].filter(s=>demoOK(s)&&/^[A-Z0-9_]{1,30}$/.test(s)&&!validStable.includes(s))

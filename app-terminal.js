@@ -87,7 +87,7 @@ function load(){
     // replacement was blocked by the daily-risk gate. Never display that as a
     // real rotation after reload.
     if(S.rotation.lastResult==='BLOCKED'&&/daily risk|risk limit|slot not full/i.test(String(S.rotation.lastReason||''))){
-      S.rotation.lastRotation=0;S.rotation.lastEngine='';S.rotation.lastClosed='';S.rotation.lastOpened='';
+      S.rotation.lastRotation=0;S.rotation.lastEngine='';S.rotation.lastClosed='';S.rotation.lastOpened='';S.rotation.lastReason='';S.rotation.lastResult='';S.rotation.lastAttemptKey='';
     }
     S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
     try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
@@ -232,7 +232,14 @@ async function testnetOpen(x,e){
       S.err='TESTNET: '+(j.error||'Binance Futures Demo trading is unavailable from this deployment location or account eligibility.');
       render();return false;
     }
-    if(!resp.ok)throw Error(j.error||'Testnet order failed');
+    if(!resp.ok){
+      const msg=String(j.error||j.msg||'Testnet order failed');
+      if(Number(j.code)===-1121||/invalid symbol/i.test(msg)){
+        S.err='TESTNET: '+x.s+' — Binance Futures Demo rejected this symbol. No order was placed.';
+        return false;
+      }
+      throw Error(msg);
+    }
     const ent=j.entry||j,fillPx=N(ent.avgPrice)||x.p;
     S.pos.push({id:'tn-'+Date.now(),s:x.s,e,side:z,entry:fillPx,current:fillPx,q:N(j.quantity)||r.q,
       sl:z==='BUY'?fillPx*(1-r.stop):fillPx*(1+r.stop),tp:z==='BUY'?fillPx*(1+2*r.stop):fillPx*(1-2*r.stop),
@@ -331,7 +338,7 @@ async function closeForRotation(p){
 /* ===== Profit Rotation ===== */
 async function profitRotation(){
   if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
-  const confirmed=S.rows.filter(x=>x.confirmed===true).sort((a,b)=>b.qualityScore-a.qualityScore);
+  const confirmed=S.rows.filter(x=>x.confirmed===true&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
   if(!confirmed.length)return;
   const x=confirmed[0];
   const today=new Date().toDateString();if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
@@ -422,7 +429,10 @@ async function syncTestnet(){
     S.testnetRestricted=false;
     const bal=(a.assets||[]).find(x=>x.asset==='USDT');
     S.testnetAccount={availableBalance:N(a.availableBalance||bal?.availableBalance),walletBalance:N(a.totalWalletBalance||bal?.walletBalance),unrealized:N(a.totalUnrealizedProfit),margin:N(a.totalMarginBalance)};
-  }catch(e){S.err='Testnet sync: '+e.message}
+  }catch(e){
+    const msg=String(e.message||e);
+    S.err=/invalid symbol/i.test(msg)?'TESTNET account sync returned an unexpected Invalid symbol response. Trading is blocked until Demo account sync succeeds.':'Testnet sync: '+msg;
+  }
 }
 async function checkTestnetStatus(){
   try{const r=await fetch(TN_STATUS,{cache:'no-store'});if(r.ok)S.testnetStatus=await r.json()}catch(e){S.testnetStatus=null}
@@ -438,7 +448,11 @@ async function syncTestnetSymbols(){
     if(S.testnetSymbolsReady&&S.testnetRestricted){S.testnetRestricted=false}
     if(S.testnetSymbolsReady&&S.mode==='TESTNET'&&/invalid symbol|not supported by Binance Futures Demo/i.test(String(S.err||'')))S.err='';
     return true;
-  }catch(e){S.testnetSymbols=new Set();S.testnetSymbolsReady=false;return false}
+  }catch(e){
+    S.testnetSymbols=new Set();S.testnetSymbolsReady=false;
+    S.err='TESTNET: Demo symbol list could not be verified — '+String(e.message||e);
+    return false;
+  }
 }
 
 /* ===== Scanner (preserved, ranking by absolute 24h change) ===== */

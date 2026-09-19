@@ -438,16 +438,46 @@ async function syncAccount(){
 async function syncTestnet(){
   if(S.mode!=='TESTNET')return;
   try{
-    const a=await api(TN_AC,'/fapi/v2/account');
-    if(a.testnetUnavailable||a.restricted){
+    const [a,pr]=await Promise.all([
+      api(TN_AC,'/fapi/v2/account'),
+      api(TN_AC,'/fapi/v2/positionRisk')
+    ]);
+    if(a.testnetUnavailable||a.restricted||pr?.testnetUnavailable||pr?.restricted){
       S.testnetRestricted=true;S.auto=false;
       try{localStorage.setItem('ddTestnetRestrictedAt',String(Date.now()))}catch(e){}
-      S.err='TESTNET: '+(a.error||'Binance Futures Demo is unavailable from this deployment location.');
+      S.err='TESTNET: '+(a.error||pr?.error||'Binance Futures Demo is unavailable from this deployment location.');
       return;
     }
     S.testnetRestricted=false;
     const bal=(a.assets||[]).find(x=>x.asset==='USDT');
-    S.testnetAccount={availableBalance:N(a.availableBalance||bal?.availableBalance),walletBalance:N(a.totalWalletBalance||bal?.walletBalance),unrealized:N(a.totalUnrealizedProfit),margin:N(a.totalMarginBalance)};
+    S.testnetAccount={
+      availableBalance:N(a.availableBalance||bal?.availableBalance),
+      walletBalance:N(a.totalWalletBalance||bal?.walletBalance),
+      unrealized:N(a.totalUnrealizedProfit),
+      margin:N(a.totalMarginBalance)
+    };
+
+    // Reconcile the local TESTNET positions with Binance Demo after every account sync.
+    // This keeps the dashboard alive across refreshes and prevents stale local positions.
+    const remote=(Array.isArray(pr)?pr:[]).filter(p=>Math.abs(N(p.positionAmt))>0);
+    const remoteBySymbol=new Map(remote.map(p=>[String(p.symbol),p]));
+    const localTest=S.pos.filter(p=>p.mode==='TESTNET');
+    const next=[];
+    for(const rp of remote){
+      const symbol=String(rp.symbol),amt=N(rp.positionAmt),local=localTest.find(p=>p.s===symbol);
+      const side=amt>0?'BUY':'SELL',qty=Math.abs(amt),entry=N(rp.entryPrice),current=N(rp.markPrice)||entry;
+      next.push({
+        ...(local||{}),
+        id:local?.id||'tn-sync-'+symbol,
+        s:symbol,e:local?.e||'MOMENTUM',side,entry,current,q:qty,
+        pnl:N(rp.unRealizedProfit),mode:'TESTNET',
+        orderId:local?.orderId||null,
+        opened:local?.opened||Date.now()
+      });
+    }
+    const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&Date.now()-N(p.opened)<10000);
+    const keep=[...next,...stale];
+    S.pos=[...S.pos.filter(p=>p.mode!=='TESTNET'),...keep];
   }catch(e){
     const msg=String(e.message||e);
     S.err=/invalid symbol/i.test(msg)?'TESTNET account sync returned an unexpected Invalid symbol response. Trading is blocked until Demo account sync succeeds.':'Testnet sync: '+msg;

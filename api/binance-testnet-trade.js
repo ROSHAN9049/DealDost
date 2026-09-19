@@ -16,7 +16,16 @@ async function req(method,path,params={}){
   return j;
 }
 function floorStep(v,step){if(!step||step<=0)return v;const p=Math.max(0,Math.ceil(-Math.log10(step)));return Number((Math.floor((v+1e-12)/step)*step).toFixed(p))}
-async function symbolInfo(symbol){const e=await req('GET','/fapi/v1/exchangeInfo');const s=(e.symbols||[]).find(x=>x.symbol===symbol);if(!s||s.status!=='TRADING'||s.contractType!=='PERPETUAL'||s.quoteAsset!=='USDT')throw Error('Only active USDT-M perpetuals are allowed');return s}
+async function symbolInfo(symbol){
+  const r=await fetch(BASE+'/fapi/v1/exchangeInfo',{headers:{accept:'application/json'},cache:'no-store'});
+  const text=await r.text();let e;try{e=JSON.parse(text)}catch{e={}}
+  if(!r.ok){const err=Error(e.msg||e.error||('Demo exchangeInfo failed ('+r.status+')'));err.status=r.status;err.code=e.code;err.binanceMessage=e.msg||e.message||e.error;err.restricted=r.status===403||r.status===451;throw err}
+  const s=(e.symbols||[]).find(x=>x.symbol===symbol);
+  if(!s||s.status!=='TRADING'||s.contractType!=='PERPETUAL'||s.quoteAsset!=='USDT'){
+    const err=Error('Symbol '+symbol+' is not supported by Binance Futures Demo');err.code=-1121;throw err
+  }
+  return s
+}
 export default async function handler(req0,res){
   if(req0.method!=='POST')return res.status(405).json({error:'POST only'});
   if(!UNLOCKED)return res.status(403).json({error:'Binance Futures Demo trading is locked'});

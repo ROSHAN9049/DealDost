@@ -339,7 +339,7 @@ async function profitRotation(){
   if(!e)return;
   const limit=e==='MOMENTUM'?MC:SC;
   const inEngine=S.pos.filter(p=>p.e===e);
-  if(inEngine.length<limit){S.rotation.lastResult='BLOCKED';S.rotation.lastReason=e+' slot not full';return}
+  if(inEngine.length<limit){return}
   if(!dailyRiskOK()){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Daily risk limit';return}
   if(S.pos.some(p=>p.s===x.s)){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Confirmed coin already open';return}
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;

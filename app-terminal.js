@@ -219,7 +219,7 @@ function paperOpen(x,e){
 async function testnetOpen(x,e){
   if(S.mode!=='TESTNET'||!canOpen(x,e))return false;
   if(!S.testnetSymbolsReady)return false;
-  if(!S.testnetSymbols.has(x.s)){return false;}
+  if(!S.testnetSymbols.has(x.s)){S.err='TESTNET: '+x.s+' is not supported by Binance Futures Demo — skipped';return false;}
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
   const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
   if(!Number.isFinite(r.q)||r.q<=0)return false;
@@ -434,7 +434,9 @@ async function syncTestnetSymbols(){
     if(j.testnetUnavailable||j.restricted){S.testnetSymbolsReady=false;S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
     if(!r.ok)throw Error(j.error||'Testnet symbol list failed');
     S.testnetSymbols=new Set(Array.isArray(j.symbols)?j.symbols:[]);
-    S.testnetSymbolsReady=true;
+    S.testnetSymbolsReady=S.testnetSymbols.size>0;
+    if(S.testnetSymbolsReady&&S.testnetRestricted){S.testnetRestricted=false}
+    if(S.testnetSymbolsReady&&S.mode==='TESTNET'&&/invalid symbol|not supported by Binance Futures Demo/i.test(String(S.err||'')))S.err='';
     return true;
   }catch(e){S.testnetSymbols=new Set();S.testnetSymbolsReady=false;return false}
 }

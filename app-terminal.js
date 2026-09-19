@@ -8,7 +8,7 @@
 
 /* ===== Constants (preserved from scanner-v3) ===== */
 const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade',
-  TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',
+  TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',TN_SYMS='/api/binance-testnet-symbols',
   F=.0005,MC=3,SC=3,OC=4,MOM_COOLDOWN=20*60e3,SCALP_COOLDOWN=10*60e3,COOLDOWN=10*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01,DAILY_RISK_LIMIT=0.06;
   const CONF_MOM=80,CONF_SCALP=82,VOL_FILTER=1.15,QUALITY_MIN=70;
 const NAV=['dashboard','momentum','momentum-history','scalping','scalping-history','options','options-history','positions','trade-history','pnl','paper','testnet','live','analytics','settings'];
@@ -27,7 +27,7 @@ const S={
   t:{},rows:[],k:{},universe:[],stableUniverse:[],
   pos:[],hist:[],eq:10000,real:0,fees:0,optReal:0,optFees:0,
   dailyRiskUsed:0,dailyRiskDate:'',rotationId:0,
-  account:null,testnetAccount:null,testnetStatus:null,testnetRestricted:false,
+  account:null,testnetAccount:null,testnetStatus:null,testnetSymbols:new Set(),testnetRestricted:false,
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',expiry:0,strike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
@@ -86,7 +86,7 @@ function load(){
     // Migration guard: older builds could record a close/open snapshot even when
     // replacement was blocked by the daily-risk gate. Never display that as a
     // real rotation after reload.
-    if(S.rotation.lastResult==='BLOCKED'&&/daily risk|risk limit/i.test(String(S.rotation.lastReason||''))){
+    if(S.rotation.lastResult==='BLOCKED'&&/daily risk|risk limit|slot not full/i.test(String(S.rotation.lastReason||''))){
       S.rotation.lastRotation=0;S.rotation.lastEngine='';S.rotation.lastClosed='';S.rotation.lastOpened='';
     }
     S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
@@ -218,6 +218,7 @@ function paperOpen(x,e){
 }
 async function testnetOpen(x,e){
   if(S.mode!=='TESTNET'||!canOpen(x,e))return false;
+  if(S.testnetSymbols.size&&!S.testnetSymbols.has(x.s)){return false;}
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
   const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
   if(!Number.isFinite(r.q)||r.q<=0)return false;
@@ -259,7 +260,7 @@ async function liveOpen(x,e){
 async function engine(){
   if(!S.auto||S.emergencyStop)return;
   dailyRiskReset();
-  const arr=S.rows.filter(x=>x.confirmed).sort((a,b)=>b.qualityScore-a.qualityScore);
+  const arr=S.rows.filter(x=>x.confirmed&& (S.mode!=='TESTNET'||!S.testnetSymbols.size||S.testnetSymbols.has(x.s))).sort((a,b)=>b.qualityScore-a.qualityScore);
   for(const x of arr){
     if(!dailyRiskOK())break;
     if(S.mode==='PAPER'){
@@ -424,6 +425,16 @@ async function syncTestnet(){
 }
 async function checkTestnetStatus(){
   try{const r=await fetch(TN_STATUS,{cache:'no-store'});if(r.ok)S.testnetStatus=await r.json()}catch(e){S.testnetStatus=null}
+  if(S.mode==='TESTNET')await syncTestnetSymbols();
+}
+async function syncTestnetSymbols(){
+  try{
+    const r=await fetch(TN_SYMS,{cache:'no-store'});const j=await r.json();
+    if(j.testnetUnavailable||j.restricted){S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
+    if(!r.ok)throw Error(j.error||'Testnet symbol list failed');
+    S.testnetSymbols=new Set(Array.isArray(j.symbols)?j.symbols:[]);
+    return true;
+  }catch(e){S.testnetSymbols=new Set();return false}
 }
 
 /* ===== Scanner (preserved, ranking by absolute 24h change) ===== */
@@ -473,7 +484,9 @@ async function scan(){
       }));
     }
     S.lastScan=Date.now();S.err='';
-    await syncAccount();await syncTestnet();
+    await syncAccount();
+    if(S.mode==='TESTNET')await syncTestnetSymbols();
+    await syncTestnet();
     await managePaper();await engine();render();
   }catch(e){S.err='Market scan: '+e.message;render()}
   finally{S.busy=false}
@@ -1134,7 +1147,7 @@ window.DD={
     S.mode=m;S.liveAuto=false;S.liveTrading=false;
     localStorage.setItem('ddMode',m);
     // Load new mode state
-    load();render();if(m==='LIVE')syncAccount();if(m==='TESTNET'){syncTestnet();checkTestnetStatus().then(render)}
+    load();render();if(m==='LIVE')syncAccount();if(m==='TESTNET'){syncTestnetSymbols().then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render)}
   },
   close(sym){
     const p=S.pos.find(x=>x.s===sym);if(!p)return;

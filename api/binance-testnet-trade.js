@@ -26,6 +26,14 @@ async function symbolInfo(symbol){
   }
   return s
 }
+async function testOrder(symbol,side,quantity){
+  try{
+    return await req('POST','/fapi/v1/order/test',{symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'ACK'});
+  }catch(e){
+    if(e.code===-1121)e.demoUnsupported=true;
+    throw e;
+  }
+}
 export default async function handler(req0,res){
   if(req0.method!=='POST')return res.status(405).json({error:'POST only'});
   if(!UNLOCKED)return res.status(403).json({error:'Binance Futures Demo trading is locked'});
@@ -47,6 +55,7 @@ export default async function handler(req0,res){
     const requestedSide=String(b.side||'BUY').toUpperCase();
     if(!['BUY','SELL'].includes(requestedSide))return res.status(400).json({error:'Invalid side'});
     const side=action==='close'?(requestedSide==='BUY'?'SELL':'BUY'):requestedSide;
+    await testOrder(symbol,side,quantity);
     const entry=await req('POST','/fapi/v1/order',{symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'});
     if(action==='close')return res.status(200).json(entry);
     const fill=dec(entry.avgPrice)||px;
@@ -64,6 +73,7 @@ export default async function handler(req0,res){
     }
     return res.status(200).json({entry,protection,serverPrice:px,quantity,notional:quantity*fill});
   }catch(e){
+    if(e.demoUnsupported||e.code===-1121)return res.status(400).json({error:e.binanceMessage||('Binance Futures Demo rejected '+String(req0.body?.symbol||'')+' during safe preflight.'),code:-1121,demoUnsupported:true});
     if(e.restricted)return res.status(403).json({error:e.binanceMessage||'Binance Futures Demo trading is unavailable from this deployment location or account eligibility.',testnetUnavailable:true,restricted:true,upstreamStatus:e.status,code:e.code||null,baseUrl:BASE});
     return res.status(502).json({error:e.message,code:e.code||null});
   }

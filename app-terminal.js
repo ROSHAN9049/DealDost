@@ -586,12 +586,12 @@ function buildOptions(){
     return{u,count:all.length,expiry:near?near.ex:0,signal:sig,change:ch,volume:v,contracts:all};
   }).sort((a,b)=>Math.abs(b.change)-Math.abs(a.change));
 }
-function optChainData(u){
+function optChainData(u,tradableOnly=false){
   const all=S.optData.contracts.filter(x=>x.u===u&&x.ex>Date.now());
   if(!all.length)return null;
-  // Avoid contracts expiring too soon. Same-day expiry is not eligible for
-  // automatic paper entries; the selected expiry must have at least 24 hours left.
-  const eligible=all.filter(x=>x.ex-Date.now()>=24*60*60*1000);
+  // Same-day/near-expiry contracts remain visible in the radar/chain, but
+  // automatic trading only considers expiries with at least 24 hours left.
+  const eligible=tradableOnly?all.filter(x=>x.ex-Date.now()>=24*60*60*1000):all;
   if(!eligible.length)return null;
   const exs={};eligible.forEach(x=>{(exs[x.ex]||(exs[x.ex]=[])).push(x)});
   const ex=Object.keys(exs).map(Number).sort((a,b)=>a-b)[0],a=exs[ex]||[];
@@ -604,7 +604,7 @@ function optChainData(u){
    BUY signal = long CALL + short higher-strike CALL.
    SELL signal = long PUT + short lower-strike PUT. */
 function pickOptionSpread(u,signal){
-  const cd=optChainData(u);if(!cd)return null;
+  const cd=optChainData(u,true);if(!cd)return null;
   const u24=S.optData.underlying[u],spotPx=N(u24?.p);if(!spotPx)return null;
   const liquid=x=>{const m=S.optData.marks[x?.n];return !!(m&&m.p>0&&m.bid>0&&m.ask>0)};
   const choose=(arr,target,dir)=>{

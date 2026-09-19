@@ -245,7 +245,15 @@ async function testnetOpen(x,e){
       const msg=String(j.error||j.msg||'Testnet order failed');
       if(Number(j.code)===-1121||/invalid symbol/i.test(msg)){
         S.testnetRejectedSymbols.add(x.s);
-        S.err='TESTNET: '+x.s+' — Binance Futures Demo rejected this symbol. No order was placed. It will be skipped until the next symbol refresh.';
+        // Remove Demo-rejected symbols from the active universe immediately.
+        // This prevents the engine from moving from one rejected coin to another
+        // on every scan while keeping the symbol blacklist in memory.
+        S.stableUniverse=S.stableUniverse.filter(s=>s!==x.s);
+        S.universe=S.universe.filter(s=>s!==x.s);
+        S.rows=S.rows.filter(r=>r.s!==x.s);
+        try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
+        S.err='TESTNET: '+x.s+' — Binance Futures Demo rejected this symbol. No order was placed. It has been removed from the TESTNET trading universe.';
+        render();
         return false;
       }
       throw Error(msg);

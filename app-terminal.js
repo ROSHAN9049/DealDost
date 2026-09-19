@@ -253,7 +253,13 @@ async function testnetOpen(x,e){
         S.universe=S.universe.filter(s=>s!==x.s);
         S.rows=S.rows.filter(r=>r.s!==x.s);
         try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
-        S.err='TESTNET: '+x.s+' — Binance Futures Demo rejected this symbol. No order was placed. It has been removed from the TESTNET trading universe.';
+        S.err='TESTNET: '+x.s+' skipped — Binance Futures Demo rejected the symbol. No order was placed.';
+        const count=N(S.settings.coinCount)||50;
+        const candidates=[...S.testnetSymbols].filter(s=>!S.testnetRejectedSymbols.has(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
+        const ordered=[...S.stableUniverse,...candidates].filter((v,i,a)=>a.indexOf(v)===i);
+        S.stableUniverse=ordered.slice(0,count);
+        S.universe=S.stableUniverse.slice(0,count);
+        try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
         render();
         return false;
       }

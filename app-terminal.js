@@ -90,7 +90,8 @@ function load(){
       S.rotation.lastRotation=0;S.rotation.lastEngine='';S.rotation.lastClosed='';S.rotation.lastOpened='';S.rotation.lastReason='';S.rotation.lastResult='';S.rotation.lastAttemptKey='';
     }
     S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
-    try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}\n    try{const rj=JSON.parse(localStorage.getItem('dd_testnet_rejected_v1')||'[]');if(Array.isArray(rj))S.testnetRejectedSymbols=new Set(rj.map(String))}catch(e){}
+    try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
+    try{const rj=JSON.parse(localStorage.getItem('dd_testnet_rejected_v1')||'[]');if(Array.isArray(rj))S.testnetRejectedSymbols=new Set(rj.map(String))}catch(e){}
   }catch(e){}
 }
 

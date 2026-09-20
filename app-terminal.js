@@ -592,7 +592,7 @@ async function scan(){
     }
     const top=validStable.slice(0,count);
     S.universe=top;
-    if(S.mode==='TESTNET'&&S.err&&/Binance Futures Demo rejected this symbol|not supported by Binance Futures Demo/i.test(String(S.err))){
+    if(S.mode==='TESTNET'&&S.err&&/Binance Futures Demo rejected (?:this symbol|the symbol)|skipped.*Binance Futures Demo.*rejected|not supported by Binance Futures Demo/i.test(String(S.err))){
       S.err='';
     }
     // Keep the last valid calculation visible during a refresh. Replacing all

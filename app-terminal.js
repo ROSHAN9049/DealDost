@@ -164,7 +164,11 @@ function calc(s){
   let stage='WATCH',confirmed=false,qualityScore=0,confirmReasons=[];
   const has24h=Math.abs(N(t.c))>=0.35;
   // Recompute pipeline inputs here so confirmation never depends on block-scoped variables above.
-  const pipelineVol=VR(m5);
+  // Use the strongest closed-candle volume confirmation from 5m or 1m.
+  // The scanner table already exposes the live volume-spike condition; using
+  // only 5m here could leave a row at Quality 85 but WATCH because 5m volume
+  // was below 1.15x even when the confirmed 1m volume spike was above it.
+  const pipelineVol=Math.max(VR(m5),VR(m1));
   const pipelineE20=EMA(m15,20);
   const pipelineE50=EMA(m15,50);
   const lastM1=m1.at(-1);

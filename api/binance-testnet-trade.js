@@ -15,7 +15,11 @@ async function req(method,path,params={}){
   if(!r.ok){const e=Error(j.msg||j.error||'Binance Demo request failed');e.status=r.status;e.code=j.code;e.binanceMessage=j.msg||j.message||j.error;if(r.status===403||r.status===451)e.restricted=true;throw e}
   return j;
 }
-function floorStep(v,step){if(!step||step<=0)return v;const p=Math.max(0,Math.ceil(-Math.log10(step)));return Number((Math.floor((v+1e-12)/step)*step).toFixed(p))}
+function stepPrecision(step){if(!step||step<=0)return 8;const s=String(step);if(s.includes('e-'))return Number(s.split('e-')[1]);const i=s.indexOf('.');return i<0?0:s.length-i-1}
+function floorStep(v,step){if(!step||step<=0)return v;const p=stepPrecision(step);return Number((Math.floor((v+1e-12)/step)*step).toFixed(p))}
+function ceilStep(v,step){if(!step||step<=0)return v;const p=stepPrecision(step);return Number((Math.ceil((v-1e-12)/step)*step).toFixed(p))}
+function priceStep(info){return dec((info.filters||[]).find(x=>x.filterType==='PRICE_FILTER')?.tickSize)}
+function formatStep(v,step){const p=stepPrecision(step);return Number(v).toFixed(p)}
 async function symbolInfo(symbol){
   const r=await fetch(BASE+'/fapi/v1/exchangeInfo',{headers:{accept:'application/json'},cache:'no-store'});
   const text=await r.text();let e;try{e=JSON.parse(text)}catch{e={}}
@@ -59,7 +63,11 @@ export default async function handler(req0,res){
     const entry=await req('POST','/fapi/v1/order',{symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'});
     if(action==='close')return res.status(200).json(entry);
     const fill=dec(entry.avgPrice)||px;
-    const stop=Math.min(Math.max(dec(b.stopPct)||STOP,.003),.012),sl=side==='BUY'?fill*(1-stop):fill*(1+stop),tp=side==='BUY'?fill*(1+stop*RR):fill*(1-stop*RR),exitSide=side==='BUY'?'SELL':'BUY';
+    const stop=Math.min(Math.max(dec(b.stopPct)||STOP,.003),.012),rawSl=side==='BUY'?fill*(1-stop):fill*(1+stop),rawTp=side==='BUY'?fill*(1+stop*RR):fill*(1-stop*RR),exitSide=side==='BUY'?'SELL':'BUY';
+    const tick=priceStep(info);
+    const sl=side==='BUY'?floorStep(rawSl,tick):ceilStep(rawSl,tick);
+    const tp=side==='BUY'?ceilStep(rawTp,tick):floorStep(rawTp,tick);
+    if(!tick||sl<=0||tp<=0)return res.status(400).json({error:'Binance price filter is unavailable for '+symbol});
     let protection=null;
     if(process.env.TESTNET_PROTECT_ORDERS!=='false'){
       // Demo environments can reject the newer /fapi/v1/algoOrder route even
@@ -67,13 +75,13 @@ export default async function handler(req0,res){
       // order endpoint first; fall back to algoOrder only if needed. Never leave
       // an automatic TESTNET position unprotected.
       try{
-        const so=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),stopPrice:String(sl),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
-        const to=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),stopPrice:String(tp),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        const so=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),stopPrice:formatStep(sl,tick),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        const to=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),stopPrice:formatStep(tp,tick),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
         protection={stopOrderId:so.orderId,takeProfitOrderId:to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'standard'};
       }catch(firstErr){
         try{
-          const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:String(sl),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
-          const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:String(tp),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
+          const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:formatStep(sl,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
+          const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:formatStep(tp,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
           protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'algoOrder'};
         }catch(secondErr){
           try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}

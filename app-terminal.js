@@ -491,27 +491,45 @@ async function closeForRotation(p){
 /* ===== Profit Rotation ===== */
 async function profitRotation(){
   if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
-  const confirmed=S.rows.filter(x=>x.confirmed===true&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)&&!S.testnetRejectedSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
+  // Rotation must use a confirmed candidate that is actually eligible for
+  // replacement. The previous logic always selected the highest-quality
+  // confirmed row first; if that symbol was already open, rotation stopped
+  // with "Confirmed coin already open" even when another eligible signal existed.
+  // In TESTNET, do not use the client-side symbol cache as an execution gate;
+  // testnetOpen() performs the authoritative server-side preflight.
+  const confirmed=S.rows
+    .filter(x=>x.confirmed===true&&!S.pos.some(p=>p.s===x.s))
+    .sort((a,b)=>b.qualityScore-a.qualityScore);
   if(!confirmed.length)return;
-  const x=confirmed[0];
-  const today=new Date().toDateString();if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
+  const today=new Date().toDateString();
+  if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
+
+  // Find the first confirmed signal whose engine is full and whose own
+  // cooldown is clear. This keeps rotation alive when the top signal is
+  // already occupied or temporarily blocked.
+  let target=null,e='',inEngine=[];
+  for(const candidate of confirmed){
+    const ce=candidate.momentum!=='WAIT'?'MOMENTUM':candidate.scalp!=='WAIT'?'SCALPING':'';
+    if(!ce)continue;
+    const limit=ce==='MOMENTUM'?MC:SC;
+    const enginePositions=S.pos.filter(p=>p.e===ce);
+    if(enginePositions.length<limit)continue;
+    const cd=ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
+    if(Date.now()-N(S.lastTrade[candidate.s]||0)<cd)continue;
+    target=candidate;e=ce;inEngine=enginePositions;break;
+  }
+  if(!target)return;
+
+  const x=target;
   const attemptKey=[x.s,x.momentum,x.scalp,x.qualityScore].join('|');
   if(S.rotation.lastResult==='FAILED'&&S.rotation.lastAttemptKey===attemptKey)return;
-  const e=x.momentum!=='WAIT'?'MOMENTUM':x.scalp!=='WAIT'?'SCALPING':'';
-  if(!e)return;
-  const limit=e==='MOMENTUM'?MC:SC;
-  const inEngine=S.pos.filter(p=>p.e===e);
-  if(inEngine.length<limit){return}
-  if(!dailyRiskOK()){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Daily risk limit';return}
-  if(S.pos.some(p=>p.s===x.s)){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Confirmed coin already open';return}
-  const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
-  if(Date.now()-N(S.lastTrade[x.s]||0)<cd){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Cooldown active';return}
+  if(!dailyRiskOK()){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Daily risk limit';S.rotation.lastAttemptKey=attemptKey;save();return}
   S.rotation.lastAttemptKey=attemptKey;
 
   const profitable=inEngine.filter(p=>N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
   const candidates=profitable.length?profitable:inEngine.filter(p=>N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
   const closedPos=candidates[0];
-  if(!closedPos){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='No position to rotate';return}
+  if(!closedPos){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='No position to rotate';save();return}
 
   S.rotationId++;
   const rotId=S.rotationId;

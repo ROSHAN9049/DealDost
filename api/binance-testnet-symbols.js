@@ -6,7 +6,7 @@ export default async function handler(req,res){
     const text=await r.text();let j;try{j=JSON.parse(text)}catch{j={raw:text}};
     if(!r.ok)return res.status(r.status).json({error:j.msg||j.error||'Demo exchangeInfo failed',testnetUnavailable:r.status===403||r.status===451,restricted:r.status===403||r.status===451});
     const symbols=(j.symbols||[]).filter(x=>x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING').map(x=>x.symbol);
-    res.setHeader('Cache-Control','public, max-age=30, s-maxage=30');
+    res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
     return res.status(200).json({symbols});
   }catch(e){return res.status(502).json({error:e.message})}
 }

@@ -195,7 +195,8 @@ function calc(s){
   // strong scalp setups permanently stuck at SETUP even when 5M agreed.
   qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(dirM1?25:0)+(dirM5?25:0)+(dirM15?15:0)+(pipelineQuality?10:0)));
   if(has24h&&hasVol&&(dirM1||dirM5)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
-  if(stage==='SETUP'&&sigDir!=='NONE'&&dirM1&&higherTfConfirm&&qualityScore>=QUALITY_MIN){
+  const signalTimeframeConfirmed=(dirM1&&higherTfConfirm)||(dirM5&&dirM15);
+  if(stage==='SETUP'&&sigDir!=='NONE'&&signalTimeframeConfirmed&&qualityScore>=QUALITY_MIN){
     stage='CONFIRMED';confirmed=true;confirmReasons.push('CONFIRMED '+sigDir);
   }
   return{s,p:N(t.p),c:N(t.c),v:N(t.v),m:ms,sc:ss,momentum:mom,scalp,atr,funding:N(t.funding),oi:N(t.oi),support,resistance,trend,

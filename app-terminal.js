@@ -1248,6 +1248,8 @@ function renderPositions(){
     }).join('');
     html+='</div></div>';
   }
+  const optionPositions=openOpts.map(set=>'<div class="pos-card"><div class="pos-head"><span class="pos-coin">'+E(set.symbol)+'</span><span class="pos-tag">OPTIONS</span><span class="pos-tag">'+E(set.side)+'</span><span class="pos-tag">'+(S.mode==='TESTNET'?'TESTNET-SIM':'PAPER')+'</span><button class="btn sm red" onclick="DD.closeOptSet('+((set.id||1)-1)+')">Close</button></div><div class="pos-grid">'+posField('Entry',fmtPrice(set.entry))+posField('Mark',fmtPrice(set.current))+posField('Qty',fmtQty(set.qty))+posField('SL',OPT_STOP*100+'%')+posField('TP',OPT_TP*100+'%')+posField('Expiry',set.expiry?new Date(set.expiry).toLocaleDateString():'—')+posField('Quality',N((S.rows.find(r=>r.s===set.symbol)||{}).qualityScore)||'—')+'</div><div class="pos-pnl '+cl(set.pnl)+'">Net PNL: ₹'+PNL(set.pnl)+'</div></div>').join('');
+  if(openOpts.length)html+='<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:900;color:var(--blue);margin-bottom:6px;letter-spacing:.05em">OPTIONS ('+openOpts.length+'/'+OPT_SETS+') · '+(S.mode==='TESTNET'?'TESTNET SIM':'PAPER')+'</div><div class="pos-list">'+optionPositions+'</div></div>';
   return html+'</div>';
 }
 

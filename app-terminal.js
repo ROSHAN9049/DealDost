@@ -634,13 +634,14 @@ async function syncTestnet(){
     // Do not reuse the local PAPER equity (S.eq), which can otherwise remain
     // at zero after switching modes.
     S.testnetAccount={availableBalance:available,walletBalance:wallet,unrealized,margin};
-    if(Number.isFinite(wallet)&&wallet>0){
-      S.eq=wallet;
-      S.real=N(S.testnetAccount.realized||0);
-      S.fees=0;
-    }
-    S.real=N(S.real);
-    S.fees=N(S.fees);
+    // The KPI renderer adds TESTNET unrealized P&L to S.eq. Binance's
+    // totalMarginBalance already includes that unrealized amount, so keep
+    // the base equity at marginBalance - unrealized to avoid double counting.
+    if(Number.isFinite(margin)&&margin>0)S.eq=margin-unrealized;
+    else if(Number.isFinite(wallet)&&wallet>0)S.eq=wallet;
+    // Keep local realized/fee history intact; account sync must not reset it
+    // to zero just because Binance's account endpoint does not expose the
+    // same realized-P&L field used by the dashboard.
 
     // Reconcile the local TESTNET positions with Binance Demo after every account sync.
     // This keeps the dashboard alive across refreshes and prevents stale local positions.
@@ -674,7 +675,8 @@ async function syncTestnet(){
     S.testnetAccount.unrealized=tnUnrealized;
     S.unreal=N(tnUnrealized);
     S.total=N(S.real)+N(tnUnrealized);
-    if(N(S.testnetAccount.walletBalance)>0)S.eq=N(S.testnetAccount.walletBalance);
+    if(N(S.testnetAccount.margin)>0)S.eq=N(S.testnetAccount.margin)-N(S.testnetAccount.unrealized);
+    else if(N(S.testnetAccount.walletBalance)>0)S.eq=N(S.testnetAccount.walletBalance);
     render();
   }catch(e){
     const msg=String(e.message||e);

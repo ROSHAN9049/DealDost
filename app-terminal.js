@@ -314,7 +314,7 @@ async function testnetOpen(x,e){
   if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e)){
     const last=N(S.lastTrade[x.s]||0),cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     const mins=last>0?Math.max(0,Math.ceil((cd-(Date.now()-last))/60000)):0;
-    S.err='TESTNET: '+x.s+' confirmed '+z+' but entry gate blocked'+(mins?' — cooldown '+mins+'m remaining':'');
+    S.err='TESTNET: '+x.s+' confirmed '+signal(x,e)+' but entry gate blocked'+(mins?' — cooldown '+mins+'m remaining':'');
     return false;
   }
   if(!S.testnetSymbolsReady)return false;

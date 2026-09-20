@@ -246,6 +246,7 @@ async function testnetOpen(x,e){
       const msg=String(j.error||j.msg||'Testnet order failed');
       if(Number(j.code)===-1121||/invalid symbol/i.test(msg)){
         S.testnetRejectedSymbols.add(x.s);
+        try{localStorage.setItem('dd_testnet_rejected_v1',JSON.stringify([...S.testnetRejectedSymbols]))}catch(e){}
         // Remove Demo-rejected symbols from the active universe immediately.
         // This prevents the engine from moving from one rejected coin to another
         // on every scan while keeping the symbol blacklist in memory.
@@ -559,20 +560,27 @@ async function scan(){
       S.err='';
     }
     S.rows=top.map(s=>({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,reasons:'Loading'}));
-    // Keep Binance requests below burst/rate limits: process the stable universe in small batches.
-    const batchSize=8;
+    // Fetch candle data with bounded concurrency. The previous 8-symbol/5-request
+    // burst could create 40 simultaneous Binance requests, leaving many rows stuck
+    // on "Loading" or triggering transient rate-limit/timeouts. Indicators only need
+    // the three candle streams; funding/open-interest are optional enrichments and
+    // must not block signal calculation.
+    const batchSize=4;
     for(let b=0;b<top.length;b+=batchSize){
       const batch=top.slice(b,b+batchSize);
       await Promise.all(batch.map(async s=>{
         try{
-          const [m5,m15,m1,fr,oi]=await Promise.all([
+          const [m5,m15,m1]=await Promise.all([
             api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=5m&limit=100'),
             api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=15m&limit=100'),
-            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=1m&limit=100'),
+            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=1m&limit=100')
+          ]);
+          S.k[s]={m5,m15,m1};
+          // Optional enrichments never block the core scanner.
+          const [fr,oi]=await Promise.all([
             api(PUB,'/fapi/v1/premiumIndex?symbol='+s).catch(()=>({})),
             api(PUB,'/fapi/v1/openInterest?symbol='+s).catch(()=>({}))
           ]);
-          S.k[s]={m5,m15,m1};
           if(S.t[s]){S.t[s].funding=N(fr.lastFundingRate)*100;S.t[s].oi=N(oi.openInterest)}
           const r=calc(s),i=S.rows.findIndex(x=>x.s===s);if(i>=0)S.rows[i]=r;
         }catch(e){

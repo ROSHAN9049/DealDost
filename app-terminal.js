@@ -269,7 +269,7 @@ function canOpen(x,e){
   if(!x.confirmed)return false;
   if(S.emergencyStop)return false;
   if(S.pos.some(p=>p.s===x.s))return false;
-  if(engineOpenCount(e)+N(S.entryLocks[e])>=engineLimit(e))return false;
+  if(engineOpenCount(e)>=engineLimit(e))return false;
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
   const last=N(S.lastTrade[x.s]||0);
   // Repair stale local cooldown timestamps that have no matching recorded

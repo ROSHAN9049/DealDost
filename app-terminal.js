@@ -1264,8 +1264,10 @@ function renderOptionsHistory(){
 function renderPositions(){
   const openOpts=S.optSets.filter(s=>s.status==='OPEN');
   if(!S.pos.length&&!openOpts.length)return '<div class="panel"><div class="empty"><div class="icon">📊</div>No open positions.</div></div>';
-  const engines=['MOMENTUM','SCALPING','OPTIONS','LIVE'];
-  let html='<div class="panel"><div class="panel-header"><div class="panel-title">Open Positions</div><div class="panel-sub">'+S.pos.length+' position(s) · Mode: '+S.mode+'</div></div>';
+  const engines=['MOMENTUM','SCALPING','OPTIONS','EXTERNAL','LIVE'];
+  const managedCount=S.pos.filter(p=>['MOMENTUM','SCALPING','OPTIONS','LIVE'].includes(p.e)).length;
+  const externalCount=S.pos.filter(p=>p.e==='EXTERNAL').length;
+  let html='<div class="panel"><div class="panel-header"><div class="panel-title">Open Positions</div><div class="panel-sub">'+S.pos.length+' Binance position(s) · Managed '+managedCount+' · External '+externalCount+' · Mode: '+S.mode+'</div></div>';
   for(const eng of engines){
     const ep=S.pos.filter(p=>p.e===eng);
     if(!ep.length)continue;
@@ -1471,13 +1473,31 @@ window.DD={
     // Load new mode state
     load();render();if(m==='LIVE')syncAccount();if(m==='TESTNET'){syncTestnetSymbols().then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render)}
   },
-  close(sym){
-    const p=S.pos.find(x=>x.s===sym);if(!p)return;
-    const x=N(S.t[sym]?.p);if(!x)return;
-    const gross=p.side==='BUY'?(x-p.entry)*p.q:(p.entry-x)*p.q,ef=x*p.q*F;
-    p.pnl=gross-p.entryFee-ef;S.real+=p.pnl;S.eq+=p.pnl;S.fees+=p.entryFee+ef;
-    S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:x,pnl:p.pnl,fees:p.entryFee+ef,live:p.mode==='LIVE',mode:p.mode,reason:'Manual close'});
-    S.pos=S.pos.filter(q=>q.id!==p.id);S.lastTrade[sym]=Date.now();save();render();
+  async close(sym){
+    const p=S.pos.find(x=>x.s===sym);if(!p||p.closing)return false;
+    const x=N(S.t[sym]?.p)||N(p.current)||N(p.entry);if(!x)return false;
+    p.closing=true;render();
+    try{
+      if(p.mode==='TESTNET'||p.mode==='LIVE'){
+        const base=p.mode==='TESTNET'?TN_TR:TR;
+        const resp=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'close',symbol:p.s,side:p.side,quantity:p.q})});
+        const j=await resp.json();
+        if(!resp.ok)throw Error(j.error||j.msg||'Close order failed');
+        const px=N(j.avgPrice)||x, gross=p.side==='BUY'?(px-p.entry)*p.q:(p.entry-px)*p.q, ef=px*p.q*F;
+        p.pnl=gross-N(p.entryFee)-ef;S.real+=p.pnl;S.eq+=p.pnl;S.fees+=N(p.entryFee)+ef;
+        S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:px,qty:p.q,pnl:p.pnl,fees:N(p.entryFee)+ef,live:p.mode==='LIVE',mode:p.mode,reason:'Manual close',signalStage:p.signalStage||'',qualityScore:N(p.qualityScore)});
+        S.pos=S.pos.filter(q=>q.id!==p.id);S.lastTrade[sym]=Date.now();
+        if(p.mode==='TESTNET')await syncTestnet();else await syncAccount();
+      }else{
+        const gross=p.side==='BUY'?(x-p.entry)*p.q:(p.entry-x)*p.q,ef=x*p.q*F;
+        p.pnl=gross-N(p.entryFee)-ef;S.real+=p.pnl;S.eq+=p.pnl;S.fees+=N(p.entryFee)+ef;
+        S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:x,qty:p.q,pnl:p.pnl,fees:N(p.entryFee)+ef,live:false,mode:p.mode,reason:'Manual close',signalStage:p.signalStage||'',qualityScore:N(p.qualityScore)});
+        S.pos=S.pos.filter(q=>q.id!==p.id);S.lastTrade[sym]=Date.now();
+      }
+      save();render();return true;
+    }catch(err){
+      p.closing=false;S.err=(p.mode||S.mode)+' close failed: '+err.message;render();return false;
+    }
   },
   openEngine(sym,e){
     if(!['MOMENTUM','SCALPING'].includes(e))return false;

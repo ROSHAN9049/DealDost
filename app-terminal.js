@@ -626,12 +626,21 @@ async function syncTestnet(){
     }
     S.testnetRestricted=false;
     const bal=(a.assets||[]).find(x=>x.asset==='USDT');
-    S.testnetAccount={
-      availableBalance:N(a.availableBalance||bal?.availableBalance),
-      walletBalance:N(a.totalWalletBalance||bal?.walletBalance),
-      unrealized:N(a.totalUnrealizedProfit),
-      margin:N(a.totalMarginBalance)
-    };
+    const available=N(a.availableBalance||bal?.availableBalance);
+    const wallet=N(a.totalWalletBalance||bal?.walletBalance);
+    const unrealized=N(a.totalUnrealizedProfit);
+    const margin=N(a.totalMarginBalance);
+    // Binance Demo account is the source of truth for TESTNET equity/P&L.
+    // Do not reuse the local PAPER equity (S.eq), which can otherwise remain
+    // at zero after switching modes.
+    S.testnetAccount={availableBalance:available,walletBalance:wallet,unrealized,margin};
+    if(Number.isFinite(wallet)&&wallet>0){
+      S.eq=wallet;
+      S.real=N(S.testnetAccount.realized||0);
+      S.fees=0;
+    }
+    S.real=N(S.real);
+    S.fees=N(S.fees);
 
     // Reconcile the local TESTNET positions with Binance Demo after every account sync.
     // This keeps the dashboard alive across refreshes and prevents stale local positions.
@@ -658,6 +667,15 @@ async function syncTestnet(){
     const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&Date.now()-N(p.opened)<60000);
     const keep=[...next,...stale];
     S.pos=[...S.pos.filter(p=>p.mode!=='TESTNET'),...keep];
+
+    // TESTNET dashboard P&L must be derived from the exchange snapshot,
+    // not from PAPER/local counters. Unrealized P&L comes from positionRisk.
+    const tnUnrealized=remote.reduce((sum,p)=>sum+N(p.unRealizedProfit),0);
+    S.testnetAccount.unrealized=tnUnrealized;
+    S.unreal=N(tnUnrealized);
+    S.total=N(S.real)+N(tnUnrealized);
+    if(N(S.testnetAccount.walletBalance)>0)S.eq=N(S.testnetAccount.walletBalance);
+    render();
   }catch(e){
     const msg=String(e.message||e);
     S.err=/invalid symbol/i.test(msg)?'TESTNET account sync returned an unexpected Invalid symbol response. Trading is blocked until Demo account sync succeeds.':'Testnet sync: '+msg;

@@ -317,10 +317,11 @@ async function testnetOpen(x,e){
     S.err='TESTNET: '+x.s+' confirmed '+signal(x,e)+' but entry gate blocked'+(mins?' — cooldown '+mins+'m remaining':'');
     return false;
   }
-  if(!S.testnetSymbolsReady)return false;
-  if(S.testnetRejectedSymbols.has(x.s)){return false;}
-  if(!S.testnetSymbols.has(x.s)){S.err='TESTNET: '+x.s+' is not supported by Binance Futures Demo — skipped';return false;}
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
+  // Do not block a confirmed signal using the client-side exchangeInfo cache.
+  // Demo listings can lag the public Futures feed; the server performs the
+  // authoritative symbol preflight immediately before the order.
+  if(S.testnetRejectedSymbols.has(x.s)){S.err='TESTNET: '+x.s+' was previously rejected by Demo; retrying preflight now.';S.testnetRejectedSymbols.delete(x.s)}
   const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
   if(!Number.isFinite(r.q)||r.q<=0)return false;
   try{
@@ -402,10 +403,13 @@ async function engine(){
   // exchangeInfo can change independently of the public futures feed; never
   // let a stale symbol cache decide whether an order is eligible.
   if(S.mode==='TESTNET'){
-    const ok=await syncTestnetSymbols();
-    if(!ok)return;
+    // Refresh the cache for diagnostics, but never use it as the final
+    // execution gate. binance-testnet-trade.js performs authoritative
+    // exchangeInfo + quantity preflight on every confirmed entry.
+    await syncTestnetSymbols();
+    if(S.testnetRestricted)return;
   }
-  const arr=S.rows.filter(x=>x.confirmed&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)&&!S.testnetRejectedSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
+  const arr=S.rows.filter(x=>x.confirmed).sort((a,b)=>b.qualityScore-a.qualityScore);
   for(const x of arr){
     if(!dailyRiskOK())break;
     if(S.mode==='PAPER'){

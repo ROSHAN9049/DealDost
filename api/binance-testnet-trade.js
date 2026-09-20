@@ -60,7 +60,8 @@ export default async function handler(req0,res){
     if(!['BUY','SELL'].includes(requestedSide))return res.status(400).json({error:'Invalid side'});
     const side=action==='close'?(requestedSide==='BUY'?'SELL':'BUY'):requestedSide;
     await testOrder(symbol,side,quantity);
-    const entry=await req('POST','/fapi/v1/order',{symbol,side,type:'MARKET',quantity:String(quantity),reduceOnly:action==='close'?'true':undefined,newOrderRespType:'RESULT'});
+    const entryParams={symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'};if(action==='close')entryParams.reduceOnly='true';
+    const entry=await req('POST','/fapi/v1/order',entryParams);
     if(action==='close')return res.status(200).json(entry);
     const fill=dec(entry.avgPrice)||px;
     const stop=Math.min(Math.max(dec(b.stopPct)||STOP,.003),.012),rawSl=side==='BUY'?fill*(1-stop):fill*(1+stop),rawTp=side==='BUY'?fill*(1+stop*RR):fill*(1-stop*RR),exitSide=side==='BUY'?'SELL':'BUY';

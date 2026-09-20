@@ -48,7 +48,7 @@ export default async function handler(req0,res){
     let quantity=floorStep(Math.abs(dec(b.quantity)),dec(lot.stepSize));
     if(quantity<dec(lot.minQty))return res.status(400).json({error:'Quantity below Binance minimum'});
     if(dec(lot.maxQty)&&quantity>dec(lot.maxQty))quantity=dec(lot.maxQty);
-    const mark=await req('GET','/fapi/v1/premiumIndex?symbol='+encodeURIComponent(symbol));
+    const mark=await req('GET','/fapi/v1/premiumIndex',{symbol});
     const px=dec(mark.markPrice);
     if(quantity*px>MAX_NOTIONAL)quantity=floorStep(MAX_NOTIONAL/px,dec(lot.stepSize));
     if(quantity<dec(lot.minQty))return res.status(400).json({error:'Testnet safety cap is below minimum order size'});

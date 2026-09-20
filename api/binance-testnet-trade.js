@@ -62,13 +62,23 @@ export default async function handler(req0,res){
     const stop=Math.min(Math.max(dec(b.stopPct)||STOP,.003),.012),sl=side==='BUY'?fill*(1-stop):fill*(1+stop),tp=side==='BUY'?fill*(1+stop*RR):fill*(1-stop*RR),exitSide=side==='BUY'?'SELL':'BUY';
     let protection=null;
     if(process.env.TESTNET_PROTECT_ORDERS!=='false'){
+      // Demo environments can reject the newer /fapi/v1/algoOrder route even
+      // when normal Futures orders are accepted. Try the standard conditional
+      // order endpoint first; fall back to algoOrder only if needed. Never leave
+      // an automatic TESTNET position unprotected.
       try{
-        const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:String(sl),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
-        const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:String(tp),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
-        protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp};
-      }catch(e){
-        try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}
-        throw Error('Demo entry protection failed; emergency close attempted: '+e.message)
+        const so=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),stopPrice:String(sl),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        const to=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),stopPrice:String(tp),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        protection={stopOrderId:so.orderId,takeProfitOrderId:to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'standard'};
+      }catch(firstErr){
+        try{
+          const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:String(sl),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
+          const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:String(tp),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
+          protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'algoOrder'};
+        }catch(secondErr){
+          try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}
+          throw Error('Demo entry protection failed; emergency close attempted. Standard: '+firstErr.message+'; Algo: '+secondErr.message)
+        }
       }
     }
     return res.status(200).json({entry,protection,serverPrice:px,quantity,notional:quantity*fill});

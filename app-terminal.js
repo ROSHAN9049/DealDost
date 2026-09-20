@@ -245,6 +245,18 @@ function calc(s){
     reasons:(mr.length?mr:sr.length?sr:['Waiting for closed-candle confirmation']).join(' · ')};
 }
 function signal(x,e){return e==='MOMENTUM'?x.momentum:x.scalp}
+// Entry reservations prevent concurrent TESTNET/rotation requests from racing
+// past the per-engine open-position caps before Binance reconciliation returns.
+if(!S.entryLocks)S.entryLocks={MOMENTUM:0,SCALPING:0,OPTIONS:0};
+function engineLimit(e){return e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC}
+function engineOpenCount(e){return S.pos.filter(p=>p&&p.e===e).length}
+function reserveEntry(e){
+  const limit=engineLimit(e);
+  if(engineOpenCount(e)+N(S.entryLocks[e])>=limit)return false;
+  S.entryLocks[e]=N(S.entryLocks[e])+1;
+  return true;
+}
+function releaseEntry(e){S.entryLocks[e]=Math.max(0,N(S.entryLocks[e])-1)}
 function riskModel(x,e,equity){
   const raw=(x.atr||x.p*.006)/Math.max(x.p,1e-9),
     stop=e==='SCALPING'?Math.min(Math.max(raw,.004),.008):Math.min(Math.max(raw*.95,.0055),.012),

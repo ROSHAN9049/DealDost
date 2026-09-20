@@ -314,7 +314,14 @@ async function testnetOpen(x,e){
   if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e)){
     const last=N(S.lastTrade[x.s]||0),cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     const mins=last>0?Math.max(0,Math.ceil((cd-(Date.now()-last))/60000)):0;
-    S.err='TESTNET: '+x.s+' confirmed '+signal(x,e)+' but entry gate blocked'+(mins?' — cooldown '+mins+'m remaining':'');
+    const slot=e==='MOMENTUM'?MC:SC;
+    const reason=last>0&&Date.now()-last<cd?'cooldown '+mins+'m remaining'
+      :S.pos.some(p=>p.s===x.s)?'duplicate symbol already open'
+      :S.pos.filter(p=>p.e===e).length>=slot?e+' position limit reached'
+      :signal(x,e)==='WAIT'?'engine signal is WAIT'
+      :'entry safety gate failed';
+    S.err='TESTNET: '+x.s+' CONFIRMED '+signal(x,e)+' — '+reason;
+    render();
     return false;
   }
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
@@ -416,8 +423,13 @@ async function engine(){
       if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
       if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
     }else if(S.mode==='TESTNET'){
-      if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await testnetOpen(x,'MOMENTUM');
-      if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await testnetOpen(x,'SCALPING');
+      // TESTNET: let the entry function itself decide eligibility. The old
+      // outer signal/slot check could silently skip a CONFIRMED row before
+      // testnetOpen() had a chance to report the real blocking reason.
+      if(x.confirmed){
+        if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await testnetOpen(x,'MOMENTUM');
+        if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await testnetOpen(x,'SCALPING');
+      }
     }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
       if(liveGates(x,'MOMENTUM').pass&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await liveOpen(x,'MOMENTUM');
       if(liveGates(x,'SCALPING').pass&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await liveOpen(x,'SCALPING');

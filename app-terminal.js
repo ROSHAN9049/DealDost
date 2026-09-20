@@ -1166,11 +1166,12 @@ function renderScalpingHistory(){
 
 function renderOptions(){
   const rows=S.optData.rows||[];
+  const layerNote=S.mode==='TESTNET'?'<div class="note info"><b>TESTNET OPTIONS SIMULATION:</b> live Binance Options market data + virtual execution only. No Binance Options private order is sent.</div>':'';
   const optOpen=S.optSets.filter(s=>s.status==='OPEN').length;
   const optUnreal=S.optSets.filter(s=>s.status==='OPEN').reduce((a,s)=>a+N(s.pnl),0);
   const optClosed=S.hist.filter(h=>h.e==='OPTIONS'&&h.action==='EXIT').length;
   const optMetrics='<div class="kpi-grid">'+kpiCard('Options Open',optOpen+'/'+OPT_SETS)+kpiCard('Options Closed',optClosed)+kpiCard('Options Realized PNL','₹'+PNL(S.optReal),pnlClass(S.optReal))+kpiCard('Options Unrealized PNL','₹'+PNL(optUnreal),pnlClass(optUnreal))+kpiCard('Options Fees','₹'+R(S.optFees))+kpiCard('Net Contribution','₹'+PNL(S.optReal+optUnreal-S.optFees),pnlClass(S.optReal+optUnreal-S.optFees))+'</div>';
-  let html='<div class="panel"><div class="panel-header"><div class="panel-title">Binance Options Radar</div><div class="panel-sub">All underlyings · defined-risk spreads · naked selling OFF</div></div>';
+  let html=layerNote+'<div class="panel"><div class="panel-header"><div class="panel-title">Binance Options Radar</div><div class="panel-sub">All underlyings · defined-risk spreads · naked selling OFF</div></div>';
   html=optMetrics+html;
   if(S.optLoading&&!rows.length)return html+'<div class="note">Loading options radar…</div></div>';
   if(!rows.length)return html+'<div class="note">No option data. <button class="btn sm" onclick="DD.scanOptions()">Scan Options</button></div></div>';

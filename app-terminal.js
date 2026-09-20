@@ -303,6 +303,8 @@ function paperOpen(x,e){
   save();return true;
 }
 async function testnetOpen(x,e){
+  if(!['MOMENTUM','SCALPING'].includes(e)||!reserveEntry(e))return false;
+  try{
   // Final server-side/client-side safety gate: TESTNET may never place an
   // automatic or manual order unless the signal is fully CONFIRMED.
   // This protects against any alternate entry path bypassing engine filters.
@@ -387,6 +389,7 @@ async function testnetOpen(x,e){
     S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:fillPx,qty:N(j.quantity)||r.q,pnl:0,fees:0,live:true,mode:'TESTNET',reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
     await syncTestnet();save();return true;
   }catch(err){S.err='TESTNET: '+err.message;return false}
+  }finally{releaseEntry(e)}
 }
 async function liveOpen(x,e){
   if(S.mode!=='LIVE'||!S.liveAuto||!canOpen(x,e))return false;
@@ -615,13 +618,18 @@ async function syncTestnet(){
     const remoteBySymbol=new Map(remote.map(p=>[String(p.symbol),p]));
     const localTest=S.pos.filter(p=>p.mode==='TESTNET');
     const next=[];
+    let momUsed=0,scalpUsed=0;
     for(const rp of remote){
       const symbol=String(rp.symbol),amt=N(rp.positionAmt),local=localTest.find(p=>p.s===symbol);
       const side=amt>0?'BUY':'SELL',qty=Math.abs(amt),entry=N(rp.entryPrice),current=N(rp.markPrice)||entry;
+      let engine=local?.e;
+      if(engine==='MOMENTUM' && momUsed<MC)momUsed++;
+      else if(engine==='SCALPING' && scalpUsed<SC)scalpUsed++;
+      else engine='EXTERNAL';
       next.push({
         ...(local||{}),
         id:local?.id||'tn-sync-'+symbol,
-        s:symbol,e:local?.e||'MOMENTUM',side,entry,current,q:qty,
+        s:symbol,e:engine||'EXTERNAL',side,entry,current,q:qty,
         pnl:N(rp.unRealizedProfit),mode:'TESTNET',
         orderId:local?.orderId||null,
         opened:local?.opened||Date.now()

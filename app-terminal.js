@@ -248,6 +248,7 @@ function signal(x,e){return e==='MOMENTUM'?x.momentum:x.scalp}
 // Entry reservations prevent concurrent TESTNET/rotation requests from racing
 // past the per-engine open-position caps before Binance reconciliation returns.
 if(!S.entryLocks)S.entryLocks={MOMENTUM:0,SCALPING:0,OPTIONS:0};
+if(!S.testnetPositionBlocked)S.testnetPositionBlocked={};
 function engineLimit(e){return e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC}
 function engineOpenCount(e){return S.pos.filter(p=>p&&p.e===e).length}
 function reserveEntry(e){
@@ -339,6 +340,11 @@ async function testnetOpen(x,e){
     return false;
   }
   if(S.testnetRestricted){S.err='TESTNET: Binance Futures Demo is unavailable from this deployment location.';return false}
+  const blockedUntil=N(S.testnetPositionBlocked[x.s]||0);
+  if(blockedUntil>Date.now()){
+    S.err='TESTNET: '+x.s+' blocked temporarily — Binance Demo max position/leverage limit. Retry after '+Math.ceil((blockedUntil-Date.now())/60000)+'m.';
+    render();return false;
+  }
   // Do not block a confirmed signal using the client-side exchangeInfo cache.
   // Demo listings can lag the public Futures feed; the server performs the
   // authoritative symbol preflight immediately before the order.
@@ -356,6 +362,13 @@ async function testnetOpen(x,e){
     }
     if(!resp.ok){
       const msg=String(j.error||j.msg||'Testnet order failed');
+      if(/maximum allowable position|position at current leverage|max position/i.test(msg)){
+        // Exchange-side leverage/position-limit rejection: do not hammer the
+        // same symbol every scan and do not change risk sizing blindly.
+        S.testnetPositionBlocked[x.s]=Date.now()+10*60*1000;
+        S.err='TESTNET: '+x.s+' blocked — Binance Demo maximum position at current leverage. No retry for 10m.';
+        render();return false;
+      }
       if(Number(j.code)===-1121||/invalid symbol/i.test(msg)){
         S.testnetRejectedSymbols.add(x.s);
         try{localStorage.setItem('dd_testnet_rejected_v1',JSON.stringify([...S.testnetRejectedSymbols]))}catch(e){}

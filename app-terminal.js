@@ -32,7 +32,7 @@ const S={
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',longContract:'',shortContract:'',expiry:0,strike:0,shortStrike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
   scanTimer:null,manageTimer:null,optTimer:null,
-  settings:JSON.parse(localStorage.getItem('ddSettings')||'{}'),
+  settings:(()=>{try{const v=JSON.parse(localStorage.getItem('ddSettings')||'{}');return v&&typeof v==='object'?v:{}}catch(e){return{}}})(),
   filterCoin:'',filterMode:'',filterStrategy:'',filterResult:'',filterDate:''
 };
 if(!S.settings.coinCount)S.settings.coinCount=50;
@@ -59,11 +59,32 @@ function closed(a){return Array.isArray(a)&&a.length>2?a.slice(0,-1):a||[]}
 
 /* ===== API ===== */
 async function api(base,path){
-  const r=await fetch(base+encodeURIComponent(path),{cache:'no-store'});
-  const t=await r.text();
-  let j;try{j=JSON.parse(t)}catch{throw Error('Invalid Binance response '+r.status)}
-  if(!r.ok)throw Error(j.msg||j.error||'Binance API '+r.status);
-  return j;
+  const url=base+encodeURIComponent(path);
+  let lastErr=null;
+  for(let attempt=0;attempt<2;attempt++){
+    const ctl=new AbortController();
+    const timer=setTimeout(()=>ctl.abort(),12000);
+    try{
+      const r=await fetch(url,{cache:'no-store',signal:ctl.signal});
+      const t=await r.text();
+      let j;try{j=JSON.parse(t)}catch{throw Error('Invalid Binance response '+r.status)}
+      if(!r.ok){
+        const err=Error(j.msg||j.error||'Binance API '+r.status);err.status=r.status;
+        if((r.status===429||r.status===418||r.status>=500)&&attempt===0){
+          const wait=Math.min(1500,Math.max(300,N(r.headers.get('Retry-After'))*1000||500));
+          await new Promise(res=>setTimeout(res,wait));continue;
+        }
+        throw err;
+      }
+      return j;
+    }catch(e){
+      lastErr=e;
+      if(attempt===0&&(/aborted|failed to fetch|network|timeout/i.test(String(e.message||e)))){
+        await new Promise(res=>setTimeout(res,350));continue;
+      }
+    }finally{clearTimeout(timer)}
+  }
+  throw lastErr||Error('Binance request failed');
 }
 
 /* ===== Storage with mode isolation ===== */
@@ -563,33 +584,34 @@ async function scan(){
     if(S.mode==='TESTNET'&&S.err&&/Binance Futures Demo rejected this symbol|not supported by Binance Futures Demo/i.test(String(S.err))){
       S.err='';
     }
-    S.rows=top.map(s=>({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,reasons:'Loading'}));
-    // Fetch candle data with bounded concurrency. The previous 8-symbol/5-request
-    // burst could create 40 simultaneous Binance requests, leaving many rows stuck
-    // on "Loading" or triggering transient rate-limit/timeouts. Indicators only need
-    // the three candle streams; funding/open-interest are optional enrichments and
-    // must not block signal calculation.
-    const batchSize=4;
+    // Keep the last valid calculation visible during a refresh. Replacing all
+    // 50 rows with "Loading" on every scan made transient API failures look like
+    // permanent scanner failures.
+    const previousRows=new Map(S.rows.map(x=>[x.s,x]));
+    S.rows=top.map(s=>previousRows.get(s)||({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,oi:0,stage:'WATCH',confirmed:false,qualityScore:0,confirmReasons:'',reasons:'Loading'}));
+    // Core scanner data is only the three candle streams. Keep concurrency low
+    // because every request passes through the market-data server route. Binance
+    // explicitly requires clients to back off after 429 responses.
+    const batchSize=2;
     for(let b=0;b<top.length;b+=batchSize){
       const batch=top.slice(b,b+batchSize);
       await Promise.all(batch.map(async s=>{
         try{
-          const [m5,m15,m1]=await Promise.all([
-            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=5m&limit=100'),
-            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=15m&limit=100'),
-            api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=1m&limit=100')
-          ]);
+          // Sequential interval fetches avoid a 3x burst per symbol while still
+          // processing two symbols at a time.
+          const m5=await api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=5m&limit=100');
+          const m15=await api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=15m&limit=100');
+          const m1=await api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=1m&limit=100');
           S.k[s]={m5,m15,m1};
-          // Optional enrichments never block the core scanner.
-          const [fr,oi]=await Promise.all([
-            api(PUB,'/fapi/v1/premiumIndex?symbol='+s).catch(()=>({})),
-            api(PUB,'/fapi/v1/openInterest?symbol='+s).catch(()=>({}))
-          ]);
-          if(S.t[s]){S.t[s].funding=N(fr.lastFundingRate)*100;S.t[s].oi=N(oi.openInterest)}
           const r=calc(s),i=S.rows.findIndex(x=>x.s===s);if(i>=0)S.rows[i]=r;
         }catch(e){
           const i=S.rows.findIndex(x=>x.s===s);
-          if(i>=0)S.rows[i].reasons='Feed unavailable: '+String(e.message||'request failed').slice(0,80);
+          if(i>=0){
+            const prior=S.rows[i];
+            S.rows[i]=prior&&prior.reasons!=='Loading'
+              ?{...prior,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),reasons:'Candle refresh retry: '+String(e.message||'request failed').slice(0,70)}
+              :{...prior,reasons:'Feed unavailable: '+String(e.message||'request failed').slice(0,80)};
+          }
         }
       }));
     }

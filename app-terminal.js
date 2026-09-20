@@ -302,7 +302,7 @@ function paperOpen(x,e){
   if(!['PAPER','TESTNET'].includes(S.mode)||!reserveEntry(e))return false;
   if(!canOpen(x,e)){releaseEntry(e);return false;}
   const z=signal(x,e),r=riskModel(x,e,S.eq),ef=x.p*r.q*F;
-  if(!Number.isFinite(r.q)||r.q<=0)return false;
+  if(!Number.isFinite(r.q)||r.q<=0){releaseEntry(e);return false}
   const slip=x.p*S.settings.slippage;
   const entryPx=x.p+(z==='BUY'?slip:-slip);
   S.pos.push({id:Date.now()+Math.random(),s:x.s,e,side:z,entry:entryPx,current:x.p,q:r.q,
@@ -639,13 +639,17 @@ async function syncTestnet(){
     const remoteBySymbol=new Map(remote.map(p=>[String(p.symbol),p]));
     const localTest=S.pos.filter(p=>p.mode==='TESTNET');
     const next=[];
+    const assignedCounts={MOMENTUM:0,SCALPING:0};
     for(const rp of remote){
       const symbol=String(rp.symbol),amt=N(rp.positionAmt),local=localTest.find(p=>p.s===symbol);
       const side=amt>0?'BUY':'SELL',qty=Math.abs(amt),entry=N(rp.entryPrice),current=N(rp.markPrice)||entry;
+      const requestedEngine=local?.e==='MOMENTUM'||local?.e==='SCALPING'?local.e:'EXTERNAL';
+      const engine=requestedEngine!=='EXTERNAL'&&assignedCounts[requestedEngine]<engineLimit(requestedEngine)?requestedEngine:'EXTERNAL';
+      if(engine!=='EXTERNAL')assignedCounts[engine]++;
       next.push({
         ...(local||{}),
         id:local?.id||'tn-sync-'+symbol,
-        s:symbol,e:local?.e||'MOMENTUM',side,entry,current,q:qty,
+        s:symbol,e:engine,side,entry,current,q:qty,
         pnl:N(rp.unRealizedProfit),mode:'TESTNET',
         orderId:local?.orderId||null,
         opened:local?.opened||Date.now()

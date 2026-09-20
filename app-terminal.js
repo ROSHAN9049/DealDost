@@ -172,7 +172,9 @@ function calc(s){
   const pipelineE20=EMA(m15,20);
   const pipelineE50=EMA(m15,50);
   const lastM1=m1.at(-1);
-  const pipelineQuality=lastM1?Math.abs(N(lastM1[4])-N(lastM1[1]))/Math.max(N(lastM1[2])-N(lastM1[3]),1e-9)>=.35:false;
+  const lastM5=m5.at(-1);
+  const m1BodyQuality=lastM1?Math.abs(N(lastM1[4])-N(lastM1[1]))/Math.max(N(lastM1[2])-N(lastM1[3]),1e-9)>=.35:false;
+  const m5BodyQuality=lastM5?Math.abs(N(lastM5[4])-N(lastM5[1]))/Math.max(N(lastM5[2])-N(lastM5[3]),1e-9)>=.35:false;
   const hasVol=pipelineVol>=VOL_FILTER;
   const m1Confirm=scalp!=='WAIT';
   const m5Confirm=mom!=='WAIT';
@@ -193,7 +195,29 @@ function calc(s){
   // 24H momentum, and at least one aligned higher timeframe (5M or 15M)
   // can become CONFIRMED. The old rule required 15M every time, which left
   // strong scalp setups permanently stuck at SETUP even when 5M agreed.
-  qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(dirM1?25:0)+(dirM5?25:0)+(dirM15?15:0)+(pipelineQuality?10:0)));
+  // Engine-specific quality: Momentum is scored from its own 5M/15M evidence;
+  // Scalping keeps the 1M candle-body confirmation. This avoids a strong
+  // Momentum setup being capped at 65 merely because the 1M candle is weak.
+  const momentumQuality=Math.min(100,Math.round(
+    (has24h?10:0)+
+    (hasVol?15:0)+
+    (dirM5?25:0)+
+    (dirM15?25:0)+
+    (m5BodyQuality?15:0)+
+    (mom!=='WAIT'&&Math.abs(N(t.c))>=0.6?10:0)
+  ));
+  const scalpingQuality=Math.min(100,Math.round(
+    (has24h?10:0)+
+    (hasVol?15:0)+
+    (dirM1?25:0)+
+    (dirM5?15:0)+
+    (dirM15?15:0)+
+    (m1BodyQuality?10:0)+
+    (scalp!=='WAIT'?10:0)
+  ));
+  qualityScore=sigDir==='BUY'||sigDir==='SELL'
+    ?(mom!=='WAIT'&&scalp==='WAIT'?momentumQuality:scalp!=='WAIT'&&mom==='WAIT'?scalpingQuality:Math.max(momentumQuality,scalpingQuality))
+    :0;
   if(has24h&&hasVol&&(dirM1||dirM5)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
   const signalTimeframeConfirmed=(dirM1&&higherTfConfirm)||(dirM5&&dirM15);
   const blockers=[];

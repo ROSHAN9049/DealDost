@@ -1186,7 +1186,7 @@ function renderOptions(){
     const set=S.optSets[i];
     const stCls=set.status==='OPEN'?'open':set.status==='SIGNAL'?'signal':set.status==='ERROR'?'error':set.status==='CLOSED'?'closed':'waiting';
     let pnlHtml='';
-    if(set.status==='OPEN'){const pnlPct=set.entry>0?((set.current-set.entry)/set.entry*(set.side==='BUY'?1:-1)*100):0;pnlHtml='<div class="pos-pnl '+cl(set.pnl)+'">PNL: ₹'+PNL(set.pnl)+' ('+P(pnlPct)+')</div>'}
+    if(set.status==='OPEN'){const pnlPct=set.entry>0?((set.current-set.entry)/set.entry*100):0;pnlHtml='<div class="pos-pnl '+cl(set.pnl)+'">PNL: ₹'+PNL(set.pnl)+' ('+P(pnlPct)+')</div>'}
     html+='<div class="opt-set-card '+stCls+'"><div class="opt-set-head"><span class="opt-set-num">Set '+(i+1)+'</span>'+
       '<span class="opt-set-status '+stCls+'">'+set.status+'</span></div>'+
       (set.symbol?'<div class="opt-set-info"><span>Symbol:</span> <b>'+E(set.symbol)+'</b></div>':'')+
@@ -1315,10 +1315,9 @@ function renderTestnet(){
   else if(ts.apiKeyConfigured===false){statusNote='<div class="note info">Testnet API keys are not configured. To enable Testnet trading, add BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET to your environment. Paper Trading works without configuration.</div>'}
   else if(ts.testnetUnlocked===false){statusNote='<div class="note info">Testnet is locked. Set TESTNET_UNLOCKED=true in your environment to enable Demo orders.</div>'}
   else{statusNote='<div class="note info">Testnet API: Configured · '+(ts.testnetUnlocked?'Unlocked':'Locked')+' · Base: '+E(ts.baseUrl)+'</div>'}
-  return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+
-    statusNote+
-    '<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+'')+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>';
+  const optOpen=S.optSets.filter(s=>s.status==='OPEN').length,optUnreal=S.optSets.filter(s=>s.status==='OPEN').reduce((a,s)=>a+N(s.pnl),0),optClosed=S.hist.filter(h=>h.e==='OPTIONS'&&h.action==='EXIT').length;
+  const optPanel='<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">Options — TESTNET SIMULATION</div><div class="panel-sub">Live Binance Options market data · virtual execution only · real Options orders OFF</div></div><div class="kpi-grid">'+kpiCard('Options Sets',optOpen+'/'+OPT_SETS)+kpiCard('Options Closed',optClosed)+kpiCard('Options Unrealized','₹'+PNL(optUnreal),pnlClass(optUnreal))+kpiCard('Options Realized','₹'+PNL(S.optReal),pnlClass(S.optReal))+kpiCard('Options Fees','₹'+R(S.optFees))+'</div><div class="note info">TESTNET Futures orders remain real Demo orders. Options are simulated separately because Binance does not provide an official Options Testnet order endpoint.</div></div>';
+  return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+statusNote+'<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+'')+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+optPanel+'<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>';
 }
 
 function renderLive(){
@@ -1466,7 +1465,7 @@ window.DD={
   checkTestnet(){checkTestnetStatus().then(()=>{syncTestnet();render()})},
   retryTestnet(){S.testnetRestricted=false;try{localStorage.removeItem('ddTestnetRestrictedAt')}catch(e){}S.err='';checkTestnetStatus().then(()=>{syncTestnet();render()})},
   closeOptSet(i){
-    const set=S.optSets[i];if(!set||set.status!=='OPEN')return;
+    const set=S.optSets[i];if(!set||set.status!=='OPEN'||!['PAPER','TESTNET'].includes(S.mode))return;
     const lm=S.optData.marks[set.longContract],sm=S.optData.marks[set.shortContract];
     const exitPx=(lm&&sm&&lm.bid>0&&sm.ask>0)?Math.max(0,N(lm.bid)-N(sm.ask)):set.current;
     const uSpot=N(S.optData.underlying[set.symbol]?.p);

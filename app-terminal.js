@@ -593,7 +593,7 @@ async function syncTestnet(){
         opened:local?.opened||Date.now()
       });
     }
-    const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&Date.now()-N(p.opened)<10000);
+    const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&Date.now()-N(p.opened)<60000);
     const keep=[...next,...stale];
     S.pos=[...S.pos.filter(p=>p.mode!=='TESTNET'),...keep];
   }catch(e){
@@ -828,6 +828,7 @@ function optionOpen(setIdx,u,signal){
   if(S.mode!=='PAPER'||S.emergencyStop)return false;
   const base=S.rows.find(r=>r.s===u);if(!base||!base.confirmed)return false;
   const set=S.optSets[setIdx];if(!set||set.status==='OPEN')return false;
+  if(S.optSets.some((q,j)=>j!==setIdx&&q.status==='OPEN'&&q.symbol===u))return false;
   const pick=pickOptionSpread(u,signal);if(!pick){set.status='ERROR';set.reason='No liquid defined-risk spread (24h+ expiry)';return false}
   const qty=spreadQty(pick);
   if(!Number.isFinite(qty)||qty<=0)return false;
@@ -873,6 +874,7 @@ function engineOptions(){
       if(set.status==='SIGNAL'&&set.symbol===row.u)continue;
       if(Date.now()-N(set.closed)<OPT_COOLDOWN&&set.status==='CLOSED')continue;
       if(S.pos.some(p=>p.s===row.u&&p.e==='OPTIONS'))continue;
+      if(S.optSets.some((q,j)=>j!==i&&q.status==='OPEN'&&q.symbol===row.u))continue;
       const pick=pickOptionSpread(row.u,row.signal);
       if(!pick){set.status='ERROR';set.reason='No liquid defined-risk spread (24h+ expiry)';continue}
       set.status='SIGNAL';set.symbol=row.u;set.side=row.signal;set.reason='Signal: '+row.signal+' on '+row.u+' ('+P(row.change)+' 24H)';
@@ -910,11 +912,11 @@ function statsFor(histArr){
   return{trades:exits.length,wins:wins.length,losses:losses.length,winRate,totalPnl,totalFees,netPnl:totalPnl,avgWin,avgLoss,profitFactor,maxDD:dd};
 }
 function dailyPnl(histArr){
-  const days={};histArr.filter(h=>h.action==='EXIT').forEach(h=>{const d=new Date(N(h.time)).toDateString();days[d]=(days[d]||0)+N(h.pnl)-N(h.fees)});return days;
+  const days={};histArr.filter(h=>h.action==='EXIT').forEach(h=>{const d=new Date(N(h.time)).toDateString();days[d]=(days[d]||0)+N(h.pnl)});return days;
 }
 function equityCurve(histArr,startEq){
   const exits=histArr.filter(h=>h.action==='EXIT').reverse();let eq=N(startEq);const pts=[eq];
-  exits.forEach(h=>{eq+=N(h.pnl)-N(h.fees);pts.push(eq)});return pts;
+  exits.forEach(h=>{eq+=N(h.pnl);pts.push(eq)});return pts;
 }
 
 /* ===== Charts (lightweight canvas) ===== */
@@ -1043,7 +1045,7 @@ function renderDashboard(){
   const unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
   const st=statsFor(S.hist);const today=new Date().toDateString();
   const todayTrades=S.hist.filter(h=>h.action==='EXIT'&&new Date(N(h.time)).toDateString()===today);
-  const todayPnl=todayTrades.reduce((s,h)=>s+N(h.pnl)-N(h.fees),0);
+  const todayPnl=todayTrades.reduce((s,h)=>s+N(h.pnl),0);
   const avail=S.mode==='LIVE'?(S.account?.availableBalance||0):S.mode==='TESTNET'?(S.testnetAccount?.availableBalance||S.eq):S.eq;
   const kpis=[
     {l:'Total Equity',v:'₹'+R(S.eq+unreal),c:'acc'},{l:'Available Balance',v:'₹'+R(avail),c:''},
@@ -1223,8 +1225,8 @@ function renderPnl(){
   const st=statsFor(S.hist);const dp=dailyPnl(S.hist);const dpArr=Object.values(dp).slice(-30);
   const ec=equityCurve(S.hist,S.eq);const unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
   const now=new Date(),weekAgo=new Date(now.getTime()-7*864e5),monthAgo=new Date(now.getTime()-30*864e5);
-  const weekly=S.hist.filter(h=>h.action==='EXIT'&&new Date(N(h.time))>=weekAgo).reduce((s,h)=>s+N(h.pnl)-N(h.fees),0);
-  const monthly=S.hist.filter(h=>h.action==='EXIT'&&new Date(N(h.time))>=monthAgo).reduce((s,h)=>s+N(h.pnl)-N(h.fees),0);
+  const weekly=S.hist.filter(h=>h.action==='EXIT'&&new Date(N(h.time))>=weekAgo).reduce((s,h)=>s+N(h.pnl),0);
+  const monthly=S.hist.filter(h=>h.action==='EXIT'&&new Date(N(h.time))>=monthAgo).reduce((s,h)=>s+N(h.pnl),0);
   const todayPnl=dp[new Date().toDateString()]||0;
   const cards='<div class="kpi-grid">'+
     kpiCard('Total PNL','₹'+PNL(st.netPnl),pnlClass(st.netPnl))+kpiCard("Today's PNL",'₹'+PNL(todayPnl),pnlClass(todayPnl))+

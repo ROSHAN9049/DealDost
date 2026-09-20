@@ -33,7 +33,8 @@ const S={
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',longContract:'',shortContract:'',expiry:0,strike:0,shortStrike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
   scanTimer:null,manageTimer:null,optTimer:null,
   settings:(()=>{try{const v=JSON.parse(localStorage.getItem('ddSettings')||'{}');return v&&typeof v==='object'?v:{}}catch(e){return{}}})(),
-  filterCoin:'',filterMode:'',filterStrategy:'',filterResult:'',filterDate:''
+  filterCoin:'',filterMode:'',filterStrategy:'',filterResult:'',filterDate:'',
+  entryLocks:{MOMENTUM:0,SCALPING:0,OPTIONS:0}
 };
 if(!S.settings.coinCount)S.settings.coinCount=50;
 if(!S.settings.scanInterval)S.settings.scanInterval=30;
@@ -254,12 +255,21 @@ function riskModel(x,e,equity){
     q=Math.min(rawQ,maxNotional/Math.max(x.p,1e-9));
   return{stop,risk,q};
 }
+function engineLimit(e){return e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC}
+function engineOpenCount(e){return S.pos.filter(p=>p&&p.e===e).length}
+function reserveEntry(e){
+  const limit=engineLimit(e);
+  if(engineOpenCount(e)+N(S.entryLocks[e])>=limit)return false;
+  S.entryLocks[e]=N(S.entryLocks[e])+1;
+  return true;
+}
+function releaseEntry(e){S.entryLocks[e]=Math.max(0,N(S.entryLocks[e])-1)}
 function canOpen(x,e){
   if(!x||!x.p||signal(x,e)==='WAIT')return false;
   if(!x.confirmed)return false;
   if(S.emergencyStop)return false;
   if(S.pos.some(p=>p.s===x.s))return false;
-  if(S.pos.filter(p=>p.e===e).length>=(e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC))return false;
+  if(engineOpenCount(e)+N(S.entryLocks[e])>=engineLimit(e))return false;
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
   const last=N(S.lastTrade[x.s]||0);
   // Repair stale local cooldown timestamps that have no matching recorded
@@ -289,7 +299,8 @@ function recordDailyRisk(risk,equity){
 
 /* ===== Paper/Testnet/Live entry (preserved logic) ===== */
 function paperOpen(x,e){
-  if(!['PAPER','TESTNET'].includes(S.mode)||!canOpen(x,e))return false;
+  if(!['PAPER','TESTNET'].includes(S.mode)||!reserveEntry(e))return false;
+  if(!canOpen(x,e)){releaseEntry(e);return false;}
   const z=signal(x,e),r=riskModel(x,e,S.eq),ef=x.p*r.q*F;
   if(!Number.isFinite(r.q)||r.q<=0)return false;
   const slip=x.p*S.settings.slippage;
@@ -300,9 +311,14 @@ function paperOpen(x,e){
   recordDailyRisk(r.risk,S.eq);
   S.lastTrade[x.s]=Date.now();
   S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:S.mode==='LIVE',mode:S.mode,reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
-  save();return true;
+  save();releaseEntry(e);return true;
 }
 async function testnetOpen(x,e){
+  if(!['MOMENTUM','SCALPING'].includes(e)||!reserveEntry(e))return false;
+  try{return await _testnetOpen(x,e)}
+  finally{releaseEntry(e)}
+}
+async function _testnetOpen(x,e){
   // Final server-side/client-side safety gate: TESTNET may never place an
   // automatic or manual order unless the signal is fully CONFIRMED.
   // This protects against any alternate entry path bypassing engine filters.
@@ -420,19 +436,19 @@ async function engine(){
   for(const x of arr){
     if(!dailyRiskOK())break;
     if(S.mode==='PAPER'){
-      if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
-      if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
+      if(x.momentum!=='WAIT'&&engineOpenCount('MOMENTUM')<MC)paperOpen(x,'MOMENTUM');
+      if(x.scalp!=='WAIT'&&engineOpenCount('SCALPING')<SC)paperOpen(x,'SCALPING');
     }else if(S.mode==='TESTNET'){
       // TESTNET: let the entry function itself decide eligibility. The old
       // outer signal/slot check could silently skip a CONFIRMED row before
       // testnetOpen() had a chance to report the real blocking reason.
       if(x.confirmed){
-        if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await testnetOpen(x,'MOMENTUM');
-        if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await testnetOpen(x,'SCALPING');
+        if(x.momentum!=='WAIT'&&engineOpenCount('MOMENTUM')<MC)await testnetOpen(x,'MOMENTUM');
+        if(x.scalp!=='WAIT'&&engineOpenCount('SCALPING')<SC)await testnetOpen(x,'SCALPING');
       }
     }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
-      if(liveGates(x,'MOMENTUM').pass&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await liveOpen(x,'MOMENTUM');
-      if(liveGates(x,'SCALPING').pass&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await liveOpen(x,'SCALPING');
+      if(liveGates(x,'MOMENTUM').pass&&engineOpenCount('MOMENTUM')<MC)await liveOpen(x,'MOMENTUM');
+      if(liveGates(x,'SCALPING').pass&&engineOpenCount('SCALPING')<SC)await liveOpen(x,'SCALPING');
     }
   }
   if(S.rotation.enabled&&!S.emergencyStop)await profitRotation();
@@ -490,7 +506,9 @@ async function closeForRotation(p){
 
 /* ===== Profit Rotation ===== */
 async function profitRotation(){
-  if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
+  if(!S.auto||S.emergencyStop||!S.rotation.enabled||S.rotation.busy)return;
+  S.rotation.busy=true;
+  try{
   // Rotation must use a confirmed candidate that is actually eligible for
   // replacement. The previous logic always selected the highest-quality
   // confirmed row first; if that symbol was already open, rotation stopped
@@ -560,6 +578,7 @@ async function profitRotation(){
     S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — replacement entry failed/blocked';S.rotation.lastAttemptKey=attemptKey;
   }
   save();render();
+  }finally{S.rotation.busy=false}
 }
 
 /* ===== Position management (preserved) ===== */

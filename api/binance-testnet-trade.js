@@ -30,9 +30,11 @@ async function symbolInfo(symbol){
   }
   return s
 }
-async function testOrder(symbol,side,quantity){
+async function testOrder(symbol,side,quantity,reduceOnly=false){
   try{
-    return await req('POST','/fapi/v1/order/test',{symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'ACK'});
+    const params={symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'ACK'};
+    if(reduceOnly)params.reduceOnly='true';
+    return await req('POST','/fapi/v1/order/test',params);
   }catch(e){
     if(e.code===-1121)e.demoUnsupported=true;
     throw e;
@@ -59,7 +61,7 @@ export default async function handler(req0,res){
     const requestedSide=String(b.side||'BUY').toUpperCase();
     if(!['BUY','SELL'].includes(requestedSide))return res.status(400).json({error:'Invalid side'});
     const side=action==='close'?(requestedSide==='BUY'?'SELL':'BUY'):requestedSide;
-    await testOrder(symbol,side,quantity);
+    await testOrder(symbol,side,quantity,action==='close');
     const entryParams={symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'};if(action==='close')entryParams.reduceOnly='true';
     const entry=await req('POST','/fapi/v1/order',entryParams);
     if(action==='close')return res.status(200).json(entry);

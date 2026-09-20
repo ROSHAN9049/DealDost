@@ -272,6 +272,10 @@ async function testnetOpen(x,e){
         S.universe=S.stableUniverse.slice(0,count);
         try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
         render();
+        // Re-run the scanner immediately so the normal Stable-50 refill path
+        // can fetch a fresh public ticker and replace the rejected symbol.
+        // Do not wait for the next 30s scan interval.
+        setTimeout(()=>scan().catch(()=>{}),150);
         return false;
       }
       throw Error(msg);

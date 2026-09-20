@@ -10,7 +10,7 @@
 const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade',
   TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',TN_SYMS='/api/binance-testnet-symbols',
   F=.0005,MC=3,SC=3,OC=4,MOM_COOLDOWN=20*60e3,SCALP_COOLDOWN=10*60e3,COOLDOWN=10*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01,DAILY_RISK_LIMIT=0.06;
-  const CONF_MOM=80,CONF_SCALP=82,VOL_FILTER=1.15,QUALITY_MIN=70;
+  const CONF_MOM=70,CONF_SCALP=72,VOL_FILTER=1.15,QUALITY_MIN=70;
 const NAV=['dashboard','momentum','momentum-history','scalping','scalping-history','options','options-history','positions','trade-history','pnl','paper','testnet','live','analytics','settings'];
 const NAV_LABELS={'dashboard':'Dashboard','momentum':'Momentum','momentum-history':'Mom History','scalping':'Scalping','scalping-history':'Scalp History','options':'Options','options-history':'Opt History','positions':'Positions','trade-history':'Trade History','pnl':'PNL','paper':'Paper Trading','testnet':'Testnet','live':'Live Trading','analytics':'Analytics','settings':'Settings'};
 const BOTTOM_NAV=['dashboard','momentum','scalping','options','positions','pnl','analytics','settings'];
@@ -114,8 +114,8 @@ function calc(s){
     if(r>=53&&r<=70)bs+=20;if(r<=47&&r>=30)rs+=20;
     if(N(t.c)>=.6)bs+=15;if(N(t.c)<=-.6)rs+=15;
     ms=Math.min(100,Math.max(bs,rs));
-    if(bs>=80){mom='BUY';mr=['15m EMA20>EMA50','5m EMA9>EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x','24H '+P(t.c)]}
-    if(rs>=80){mom='SELL';mr=['15m EMA20<EMA50','5m EMA9<EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x','24H '+P(t.c)]}
+    if(bs>=CONF_MOM){mom='BUY';mr=['15m EMA20>EMA50','5m EMA9>EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x','24H '+P(t.c)]}
+    if(rs>=CONF_MOM){mom='SELL';mr=['15m EMA20<EMA50','5m EMA9<EMA21','RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x','24H '+P(t.c)]}
   }
   if(c1.length>=70&&c5.length>=70){
     const e8=EMA(m1,8),e21m=EMA(m1,21),e5=EMA(m5,9),e52=EMA(m5,21),r=RSI(m1),v=VR(m1),
@@ -135,8 +135,8 @@ function calc(s){
     if(N(t.c)>=.35)bs+=8;if(N(t.c)<=-.35)rs+=8;
     if(quality){bs+=4;rs+=4}
     ss=Math.min(100,Math.max(bs,rs));
-    if(bs>=82&&px>N(m1.at(-2)[4])){scalp='BUY';sr=['5m EMA9>EMA21','1m EMA8>EMA21','breakout '+fmtPrice(hi),'RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
-    if(rs>=82&&px<N(m1.at(-2)[4])){scalp='SELL';sr=['5m EMA9<EMA21','1m EMA8<EMA21','breakdown '+fmtPrice(lo),'RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
+    if(bs>=CONF_SCALP&&px>N(m1.at(-2)[4])){scalp='BUY';sr=['5m EMA9>EMA21','1m EMA8>EMA21','breakout '+fmtPrice(hi),'RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
+    if(rs>=CONF_SCALP&&px<N(m1.at(-2)[4])){scalp='SELL';sr=['5m EMA9<EMA21','1m EMA8<EMA21','breakdown '+fmtPrice(lo),'RSI '+r.toFixed(0),'vol '+v.toFixed(2)+'x']}
   }
   const trend=mom==='BUY'?'BULLISH':mom==='SELL'?'BEARISH':scalp==='BUY'?'BULLISH':scalp==='SELL'?'BEARISH':'NEUTRAL';
   /* Confirmed Signal Pipeline: STABLE50 -> 24H MOMENTUM -> VOLUME FILTER -> 1M -> 5M -> 15M -> QUALITY SCORE -> stage */
@@ -1214,7 +1214,7 @@ function renderAnalytics(){
 function renderSettings(){
   return '<div class="panel"><div class="panel-header"><div class="panel-title">Settings</div></div><div class="settings-grid">'+
     '<div class="setting-row"><div><div class="set-label">Scanner Refresh</div><div class="set-desc">Interval in seconds</div></div><input type="number" value="'+(S.settings.scanInterval||30)+'" min="10" max="120" onchange="DD.updateSetting(\'scanInterval\',+this.value)"></div>'+
-    '<div class="setting-row"><div><div class="set-label">Coin Count</div><div class="set-desc">Number of coins to scan (applies on next universe reset)</div></div><input type="number" value="'+(S.settings.coinCount||50)+'" min="10" max="100" onchange="DD.updateSetting(\'coinInterval\',+this.value)"></div>'+
+    '<div class="setting-row"><div><div class="set-label">Coin Count</div><div class="set-desc">Number of coins to scan (applies on next universe reset)</div></div><input type="number" value="'+(S.settings.coinCount||50)+'" min="10" max="100" onchange="DD.updateSetting(\'coinCount\',+this.value)"></div>'+
     '<div class="setting-row"><div><div class="set-label">Stable Universe</div><div class="set-desc">'+(S.stableUniverse.length?'Pinned to '+S.stableUniverse.length+' coins from first scan':'Not yet pinned — will pin on next scan')+'</div></div><button class="btn sm" onclick="DD.resetUniverse()">Reset Universe</button></div>'+
     '<div class="setting-row"><div><div class="set-label">Paper Capital</div><div class="set-desc">Virtual starting capital</div></div><input type="number" value="'+(S.settings.paperCapital||10000)+'" min="100" max="1000000" onchange="DD.updateSetting(\'paperCapital\',+this.value)"></div>'+
     '<div class="setting-row"><div><div class="set-label">Slippage</div><div class="set-desc">Simulated slippage (bps)</div></div><input type="number" value="'+((S.settings.slippage||0.0003)*10000).toFixed(1)+'" min="0" max="100" onchange="DD.updateSetting(\'slippage\',+this.value/10000)"></div>'+

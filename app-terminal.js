@@ -1342,6 +1342,8 @@ function renderPaper(){
 
 function renderTestnet(){
   const ta=S.testnetAccount,st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
+  const managedPositions=S.pos.filter(p=>['MOMENTUM','SCALPING','OPTIONS'].includes(p.e)).length;
+  const externalPositions=S.pos.filter(p=>p.e==='EXTERNAL').length;
   const ts=S.testnetStatus||{};
   const restricted=S.testnetRestricted||(typeof localStorage!=='undefined'&&localStorage.getItem('ddTestnetRestrictedAt')&&(Date.now()-Number(localStorage.getItem('ddTestnetRestrictedAt'))<600000));
   let statusNote='';
@@ -1351,7 +1353,7 @@ function renderTestnet(){
   else{statusNote='<div class="note info">Testnet API: Configured · '+(ts.testnetUnlocked?'Unlocked':'Locked')+' · Base: '+E(ts.baseUrl)+'</div>'}
   return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+
     statusNote+
-    '<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+'')+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
+    '<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+' ('+managedPositions+' managed)'+(externalPositions?' · '+externalPositions+' external':''))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
     '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>';
 }
 

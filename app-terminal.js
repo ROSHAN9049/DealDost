@@ -222,7 +222,7 @@ function calc(s){
   const signalTimeframeConfirmed=(dirM1&&higherTfConfirm)||(dirM5&&dirM15);
   const blockers=[];
   if(!has24h)blockers.push('24H < 0.35%');
-  if(!hasVol)blockers.push('Vol '+pipelineVol.toFixed(2)+'x < '+VOL_FILTER.toFixed(2)+'x');
+  if(!hasVol)blockers.push('Vol '+pipelineVol.toFixed(3)+'x < '+VOL_FILTER.toFixed(3)+'x');
   if(!dirM1&&!dirM5)blockers.push('No aligned 1M/5M signal');
   else if(!signalTimeframeConfirmed)blockers.push('Higher-TF alignment incomplete');
   if(qualityScore<QUALITY_MIN)blockers.push('Quality '+qualityScore+' < '+QUALITY_MIN);

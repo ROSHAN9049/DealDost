@@ -196,11 +196,19 @@ function calc(s){
   qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(dirM1?25:0)+(dirM5?25:0)+(dirM15?15:0)+(pipelineQuality?10:0)));
   if(has24h&&hasVol&&(dirM1||dirM5)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
   const signalTimeframeConfirmed=(dirM1&&higherTfConfirm)||(dirM5&&dirM15);
+  const blockers=[];
+  if(!has24h)blockers.push('24H < 0.35%');
+  if(!hasVol)blockers.push('Vol '+pipelineVol.toFixed(2)+'x < '+VOL_FILTER.toFixed(2)+'x');
+  if(!dirM1&&!dirM5)blockers.push('No aligned 1M/5M signal');
+  else if(!signalTimeframeConfirmed)blockers.push('Higher-TF alignment incomplete');
+  if(qualityScore<QUALITY_MIN)blockers.push('Quality '+qualityScore+' < '+QUALITY_MIN);
   if(stage==='SETUP'&&sigDir!=='NONE'&&signalTimeframeConfirmed&&qualityScore>=QUALITY_MIN){
     stage='CONFIRMED';confirmed=true;confirmReasons.push('CONFIRMED '+sigDir);
+  }else if(blockers.length){
+    confirmReasons.push('BLOCKED: '+blockers.join(' · '));
   }
   return{s,p:N(t.p),c:N(t.c),v:N(t.v),m:ms,sc:ss,momentum:mom,scalp,atr,funding:N(t.funding),oi:N(t.oi),support,resistance,trend,
-    stage,confirmed,qualityScore,confirmReasons:confirmReasons.join(' · '),
+    stage,confirmed,qualityScore,pipelineVol,confirmationBlockers:blockers,confirmReasons:confirmReasons.join(' · '),
     reasons:(mr.length?mr:sr.length?sr:['Waiting for closed-candle confirmation']).join(' · ')};
 }
 function signal(x,e){return e==='MOMENTUM'?x.momentum:x.scalp}
@@ -913,7 +921,7 @@ function scannerTable(mode){
   if(S.filterCoin)a=a.filter(x=>x.s.toLowerCase().includes(S.filterCoin.toLowerCase()));
   const rows=a.slice(0,50).map((x,i)=>{
     const z=mode==='M'?x.momentum:mode==='S'?x.scalp:(x.momentum!=='WAIT'?x.momentum:x.scalp);
-    const volSpike=VR(S.k[x.s]?.m5||[]);
+    const volSpike=N(x.pipelineVol)||VR(S.k[x.s]?.m5||[]);
     const stageCls=x.stage==='CONFIRMED'?'buy':x.stage==='SETUP'?'watch':'neutral-text';
     return '<tr><td>'+(i+1)+'</td><td><span class="coin">'+E(x.s)+'</span></td><td>'+fmtPrice(x.p)+'</td>'+
       '<td class="'+cl(x.c)+'">'+P(x.c)+'</td><td>'+R(x.v/1e6)+'M</td><td>'+volSpike.toFixed(2)+'x</td>'+
@@ -921,7 +929,7 @@ function scannerTable(mode){
       '<td class="'+(x.scalp==='BUY'?'buy':x.scalp==='SELL'?'sell':'neutral-text')+'">'+x.scalp+'</td><td>'+x.sc+'</td>'+
       '<td class="'+stageCls+'">'+E(x.stage||'WATCH')+'</td><td>'+(x.qualityScore||0)+'</td>'+
       '<td class="'+(x.trend==='BULLISH'?'buy':x.trend==='BEARISH'?'sell':'neutral-text')+'">'+x.trend+'</td>'+
-      '<td style="font-size:9px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis">'+E(x.confirmReasons||x.reasons)+'</td>'+
+      '<td style="font-size:9px;color:'+(x.confirmed?'var(--green)':'var(--muted)')+';max-width:260px;overflow:hidden;text-overflow:ellipsis'+'" title="'+E(x.confirmReasons||x.reasons)+'">'+E(x.confirmReasons||x.reasons)+'</td>'+
       '<td>'+signalBadge(z==='WAIT'?'NEUTRAL':z)+'</td>'+
       '<td>'+(S.mode==='TESTNET'&&S.testnetRejectedSymbols.has(x.s)?'<span class="neutral-text">Demo Skip</span>':(!x.confirmed||z==='WAIT'?'<span class="neutral-text">WAIT</span>':'<button class="btn sm blue" onclick="DD.manualEntry(\'+E(x.s)+\',\'+E(z)+\')"">Trade</button>'))+'</td></tr>'
   }).join('');

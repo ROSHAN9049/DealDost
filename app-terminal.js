@@ -178,19 +178,26 @@ function calc(s){
   const hasVol=pipelineVol>=VOL_FILTER;
   const m1Confirm=scalp!=='WAIT';
   const m5Confirm=mom!=='WAIT';
+  // Use strict 15M EMA20/EMA50 alignment for MOMENTUM.
+  // For SCALPING, use the closed 15M candle vs EMA20 as the higher-TF bias;
+  // this avoids blocking a fast scalp while the slower EMA50 is still catching up.
   const m15Bull=c15.length>=50&&N(c15.at(-1))>pipelineE20&&pipelineE20>pipelineE50;
   const m15Bear=c15.length>=50&&N(c15.at(-1))<pipelineE20&&pipelineE20<pipelineE50;
+  const scalp15Bull=c15.length>=50&&N(c15.at(-1))>pipelineE20;
+  const scalp15Bear=c15.length>=50&&N(c15.at(-1))<pipelineE20;
   const m15Confirm=m15Bull||m15Bear;
   if(has24h){confirmReasons.push('24H '+P(t.c))}
   if(hasVol){confirmReasons.push('Vol '+pipelineVol.toFixed(2)+'x')}
   if(m1Confirm){confirmReasons.push('1M '+scalp)}
   if(m5Confirm){confirmReasons.push('5M '+mom)}
   if(m15Confirm){confirmReasons.push('15m '+(m15Bull?'BULL':'BEAR'))}
+  else if(scalp!=='WAIT'&&(scalp15Bull||scalp15Bear)){confirmReasons.push('15m '+(scalp15Bull?'BULL BIAS':'BEAR BIAS'))}
   const sigDir=mom==='BUY'||scalp==='BUY'?'BUY':mom==='SELL'||scalp==='SELL'?'SELL':'NONE';
   const dirM1=scalp===sigDir;
   const dirM5=mom===sigDir;
   const dirM15=(sigDir==='BUY'&&m15Bull)||(sigDir==='SELL'&&m15Bear);
-  const higherTfConfirm=dirM5||dirM15;
+  const dirM15Scalp=(sigDir==='BUY'&&scalp15Bull)||(sigDir==='SELL'&&scalp15Bear);
+  const higherTfConfirm=dirM5||dirM15Scalp;
   // Confirmation is direction-aware. A strong closed 1M signal plus volume,
   // 24H momentum, and at least one aligned higher timeframe (5M or 15M)
   // can become CONFIRMED. The old rule required 15M every time, which left
@@ -211,7 +218,7 @@ function calc(s){
     (hasVol?15:0)+
     (dirM1?25:0)+
     (dirM5?15:0)+
-    (dirM15?15:0)+
+    (dirM15Scalp?15:0)+
     (m1BodyQuality?10:0)+
     (scalp!=='WAIT'?10:0)
   ));
@@ -219,7 +226,9 @@ function calc(s){
     ?(mom!=='WAIT'&&scalp==='WAIT'?momentumQuality:scalp!=='WAIT'&&mom==='WAIT'?scalpingQuality:Math.max(momentumQuality,scalpingQuality))
     :0;
   if(has24h&&hasVol&&(dirM1||dirM5)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
-  const signalTimeframeConfirmed=(dirM1&&higherTfConfirm)||(dirM5&&dirM15);
+  const signalTimeframeConfirmed=
+    (scalp!=='WAIT'&&dirM1&&higherTfConfirm) ||
+    (mom!=='WAIT'&&dirM5&&dirM15);
   const blockers=[];
   if(!has24h)blockers.push('24H < 0.35%');
   if(!hasVol)blockers.push('Vol '+pipelineVol.toFixed(3)+'x < '+VOL_FILTER.toFixed(3)+'x');

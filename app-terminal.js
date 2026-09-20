@@ -300,7 +300,7 @@ async function testnetOpen(x,e){
         // Re-run the scanner immediately so the normal Stable-50 refill path
         // can fetch a fresh public ticker and replace the rejected symbol.
         // Do not wait for the next 30s scan interval.
-        setTimeout(()=>scan().catch(()=>{}),150);
+        setTimeout(async()=>{try{await syncTestnetSymbols()}catch{};scan().catch(()=>{})},150);
         return false;
       }
       throw Error(msg);
@@ -333,6 +333,13 @@ async function liveOpen(x,e){
 async function engine(){
   if(!S.auto||S.emergencyStop)return;
   dailyRiskReset();
+  // Refresh Demo symbols immediately before TESTNET execution. The Demo
+  // exchangeInfo can change independently of the public futures feed; never
+  // let a stale symbol cache decide whether an order is eligible.
+  if(S.mode==='TESTNET'){
+    const ok=await syncTestnetSymbols();
+    if(!ok)return;
+  }
   const arr=S.rows.filter(x=>x.confirmed&& (S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(x.s)&&!S.testnetRejectedSymbols.has(x.s)))).sort((a,b)=>b.qualityScore-a.qualityScore);
   for(const x of arr){
     if(!dailyRiskOK())break;
@@ -535,7 +542,7 @@ async function checkTestnetStatus(){
 }
 async function syncTestnetSymbols(){
   try{
-    const r=await fetch(TN_SYMS,{cache:'no-store'});const j=await r.json();
+    const r=await fetch(TN_SYMS+'?ts='+Date.now(),{cache:'no-store'});const j=await r.json();
     if(j.testnetUnavailable||j.restricted){S.testnetSymbolsReady=false;S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
     if(!r.ok)throw Error(j.error||'Testnet symbol list failed');
     S.testnetSymbols=new Set(Array.isArray(j.symbols)?j.symbols:[]);

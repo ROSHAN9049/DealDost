@@ -534,6 +534,11 @@ async function profitRotation(){
   S.rotationId++;
   const rotId=S.rotationId;
   const reason=profitable.length?'PROFIT ROTATION':'WORST LOSS ROTATION';
+  // Clear the previous rotation snapshot before attempting a new close. This
+  // prevents a failed close from incorrectly showing the prior rotation's
+  // "Opened" symbol as if this attempt opened a replacement.
+  S.rotation.lastRotation=0;S.rotation.lastEngine=e;S.rotation.lastClosed=closedPos.s;S.rotation.lastOpened='';S.rotation.lastReason=reason+' — closing '+closedPos.s;S.rotation.lastResult='PENDING';
+  render();
   if(!(await closeForRotation(closedPos))){
     S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — close failed';save();return;
   }

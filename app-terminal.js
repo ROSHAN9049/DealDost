@@ -261,6 +261,14 @@ function canOpen(x,e){
   if(S.pos.some(p=>p.s===x.s))return false;
   if(S.pos.filter(p=>p.e===e).length>=(e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC))return false;
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
+  const last=N(S.lastTrade[x.s]||0);
+  // Repair stale local cooldown timestamps that have no matching recorded
+  // entry. This can happen after an old browser/localStorage state survives
+  // a deployment reset; real recorded trades still keep their cooldown.
+  if(last>0){
+    const hasEntry=S.hist.some(h=>h&&h.s===x.s&&h.action==='ENTRY'&&Math.abs(N(h.time)-last)<10000);
+    if(!hasEntry)S.lastTrade[x.s]=0;
+  }
   if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return false;
   return true;
 }
@@ -303,7 +311,12 @@ async function testnetOpen(x,e){
     S.err='TESTNET: '+(x?.s||'Unknown symbol')+' skipped — signal is not CONFIRMED. No order was placed.';
     return false;
   }
-  if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e))return false;
+  if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e)){
+    const last=N(S.lastTrade[x.s]||0),cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
+    const mins=last>0?Math.max(0,Math.ceil((cd-(Date.now()-last))/60000)):0;
+    S.err='TESTNET: '+x.s+' confirmed '+z+' but entry gate blocked'+(mins?' — cooldown '+mins+'m remaining':'');
+    return false;
+  }
   if(!S.testnetSymbolsReady)return false;
   if(S.testnetRejectedSymbols.has(x.s)){return false;}
   if(!S.testnetSymbols.has(x.s)){S.err='TESTNET: '+x.s+' is not supported by Binance Futures Demo — skipped';return false;}

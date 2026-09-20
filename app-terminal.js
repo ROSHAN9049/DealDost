@@ -185,9 +185,19 @@ function calc(s){
   if(m5Confirm){confirmReasons.push('5M '+mom)}
   if(m15Confirm){confirmReasons.push('15m '+(m15Bull?'BULL':'BEAR'))}
   const sigDir=mom==='BUY'||scalp==='BUY'?'BUY':mom==='SELL'||scalp==='SELL'?'SELL':'NONE';
-  qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(m1Confirm?25:0)+(m5Confirm?25:0)+(m15Confirm?15:0)+(pipelineQuality?10:0)));
-  if(has24h&&hasVol&&(m1Confirm||m5Confirm)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
-  if(stage==='SETUP'&&qualityScore>=QUALITY_MIN&&m15Confirm){stage='CONFIRMED';confirmed=true;confirmReasons.push('CONFIRMED')}
+  const dirM1=scalp===sigDir;
+  const dirM5=mom===sigDir;
+  const dirM15=(sigDir==='BUY'&&m15Bull)||(sigDir==='SELL'&&m15Bear);
+  const higherTfConfirm=dirM5||dirM15;
+  // Confirmation is direction-aware. A strong closed 1M signal plus volume,
+  // 24H momentum, and at least one aligned higher timeframe (5M or 15M)
+  // can become CONFIRMED. The old rule required 15M every time, which left
+  // strong scalp setups permanently stuck at SETUP even when 5M agreed.
+  qualityScore=Math.min(100,Math.round((has24h?10:0)+(hasVol?15:0)+(dirM1?25:0)+(dirM5?25:0)+(dirM15?15:0)+(pipelineQuality?10:0)));
+  if(has24h&&hasVol&&(dirM1||dirM5)){stage='SETUP';confirmReasons.push('Quality '+qualityScore)}
+  if(stage==='SETUP'&&sigDir!=='NONE'&&dirM1&&higherTfConfirm&&qualityScore>=QUALITY_MIN){
+    stage='CONFIRMED';confirmed=true;confirmReasons.push('CONFIRMED '+sigDir);
+  }
   return{s,p:N(t.p),c:N(t.c),v:N(t.v),m:ms,sc:ss,momentum:mom,scalp,atr,funding:N(t.funding),oi:N(t.oi),support,resistance,trend,
     stage,confirmed,qualityScore,confirmReasons:confirmReasons.join(' · '),
     reasons:(mr.length?mr:sr.length?sr:['Waiting for closed-candle confirmation']).join(' · ')};

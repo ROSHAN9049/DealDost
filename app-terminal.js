@@ -287,7 +287,11 @@ function qualityRiskPct(x){
 function volatilityGuard(x,e){
   const atrPct=N(x?.atr)/Math.max(N(x?.p),1e-9);
   const max=e==='SCALPING'?.012:.020;
-  return{atrPct,max,ok:!atrPct||atrPct<=max};
+  // ATR/price is a floating-point ratio. Treat values that are equal to the
+  // displayed safety limit as allowed; block only a genuinely higher value.
+  // The tolerance is tiny and does not materially widen the risk threshold.
+  const EPS=1e-9;
+  return{atrPct,max,ok:!atrPct||atrPct<=max+EPS};
 }
 function spreadGuard(x){
   const bid=N(S.t[x?.s]?.bid),ask=N(S.t[x?.s]?.ask),mid=N(x?.p);

@@ -44,6 +44,15 @@
   // The scanner must stay inside DealDost. Binance Demo is an API/account
   // execution environment, not a page that the terminal should auto-open.
   window.open=function(url,...args){
+    // DealDost is a single-page terminal. Background scanner/account refreshes
+    // must never create or navigate to another website.
+    try{
+      const u=new URL(String(url||''),window.location.href);
+      if(u.origin!==window.location.origin){
+        console.warn('[DealDost] blocked external window navigation:',u.href);
+        return null;
+      }
+    }catch(e){}
     if(blockNavigation(url,'window.open'))return null;
     return nativeOpen(url,...args);
   };
@@ -63,6 +72,22 @@
     }catch(e){}
     return originalFormSubmit.apply(this,arguments);
   };
+
+  // Block any external anchor navigation, not only Binance. This prevents a
+  // redirected/constructed Demo URL from escaping the terminal.
+  document.addEventListener('click',(event)=>{
+    try{
+      const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
+      if(link){
+        const u=new URL(link.href,window.location.href);
+        if(u.origin!==window.location.origin){
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          console.warn('[DealDost] blocked external anchor navigation:',u.href);
+        }
+      }
+    }catch(e){}
+  },true);
 
   document.addEventListener('click',(event)=>{
     try{

@@ -3,7 +3,20 @@
   "cleanUrls": true,
   "functions": {
     "api/**/*.js": {
-      "regions": ["bom1"]
+      "regions": [
+        "bom1"
+      ]
     }
-  }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self' https: wss: data: blob:; base-uri 'self'; form-action 'self'; object-src 'none'; frame-src 'self'; navigate-to 'self'"
+        }
+      ]
+    }
+  ]
 }

@@ -1132,7 +1132,7 @@ async function scanOptions(){
     // PAPER uses Binance public Options market data. TESTNET uses the
     // dedicated Options Demo proxy so its contracts/quotes are never mixed
     // with mainnet Options data.
-    const optBase=S.mode==='TESTNET'?'/api/binance-options-testnet-trade?action=market&path=':PUB;
+    const optBase='/api/binance-options-testnet-trade?action=market&path=';
     const optGet=async path=>{
       if(S.mode!=='TESTNET')return api(PUB,path);
       const r=await fetch(optBase+encodeURIComponent(path),{cache:'no-store'});
@@ -1165,7 +1165,9 @@ async function scanOptions(){
     const f=await api(PUB,'/fapi/v1/ticker/24hr');S.optData.underlying={};
     (Array.isArray(f)?f:[]).forEach(x=>{S.optData.underlying[x.symbol]={c:N(x.priceChangePercent),v:N(x.quoteVolume),p:N(x.lastPrice)}});
     buildOptions();
-    if(S.auto&&['PAPER','TESTNET'].includes(S.mode))await engineOptions();
+    // Options execution is PAPER-only because Binance currently documents
+    // public Options market data but no Options Testnet/Demo execution REST API.
+    if(S.auto&&S.mode==='PAPER')await engineOptions();
     if(['options','options-history'].includes(S.tab))render();
   }catch(e){
     if(S.mode==='TESTNET')S.optTestnetStatus={...S.optTestnetStatus,connected:false,error:String(e.message||e)};
@@ -1243,7 +1245,7 @@ function spreadQty(pick){
 /* Open one independent paper spread set. Both legs are entered together;
    only the net debit is at risk, so the position is defined-risk. */
 async function optionOpen(setIdx,u,signal){
-  if(!['PAPER','TESTNET'].includes(S.mode)||S.emergencyStop)return false;
+  if(S.mode!=='PAPER'||S.emergencyStop)return false;
   const base=S.rows.find(r=>r.s===u);if(!base||!base.confirmed)return false;
   const set=S.optSets[setIdx];if(!set||set.status==='OPEN')return false;
   if(S.optSets.some((q,j)=>j!==setIdx&&q.status==='OPEN'&&q.symbol===u))return false;
@@ -1261,6 +1263,7 @@ async function optionOpen(setIdx,u,signal){
     save();return true;
   }
   try{
+    if(S.mode!=='PAPER')return false;
     set.status='SIGNAL';set.symbol=u;set.side=signal;set.contract=pick.long.n+' / '+pick.short.n;
     set.longContract=pick.long.n;set.shortContract=pick.short.n;set.expiry=pick.expiry;set.strike=pick.long.k;set.shortStrike=pick.short.k;
     set.qty=qty;set.entry=entryPx;set.current=entryPx;set.entryFee=entryFee;set.reason=pick.type+' · TESTNET BUY '+pick.long.n+' / SELL '+pick.short.n;
@@ -1281,8 +1284,8 @@ async function optionOpen(setIdx,u,signal){
   }
 }
 async function manageOptions(){
-  if(!['PAPER','TESTNET'].includes(S.mode))return;
-  if(S.mode==='TESTNET'){
+  if(S.mode!=='PAPER')return;
+  if(false){
     try{
       const resp=await fetch(OPT_TN_TR+'?action=state',{cache:'no-store'});
       const j=await resp.json();
@@ -1321,7 +1324,7 @@ async function manageOptions(){
   save();
 }
 async function engineOptions(){
-  if(!['PAPER','TESTNET'].includes(S.mode)||!S.auto||S.emergencyStop)return;
+  if(S.mode!=='PAPER'||!S.auto||S.emergencyStop)return;
   const active=S.optData.rows.filter(x=>x.signal!=='WATCH'&&S.rows.some(r=>r.s===x.u&&r.confirmed));
   if(!active.length)return;
   for(const row of active){
@@ -1598,7 +1601,7 @@ function renderOptions(){
   const optOpen=S.optSets.filter(s=>s.status==='OPEN').length;
   const optUnreal=S.optSets.filter(s=>s.status==='OPEN').reduce((a,s)=>a+N(s.pnl),0);
   const optClosed=S.hist.filter(h=>h.e==='OPTIONS'&&h.action==='EXIT').length;
-  const optTestStatus=S.mode==='TESTNET'?('<div class="note '+(S.optTestnetStatus.connected?'info':'warn')+'">Options TESTNET: '+(S.optTestnetStatus.connected?'Demo market connected':'Demo market unavailable')+(S.optTestnetStatus.locked?' · execution locked':' · execution unlocked')+(S.optTestnetStatus.error?' · '+E(S.optTestnetStatus.error):'')+'</div>'):'<div class="note info">Options PAPER: Binance public Options market data</div>';
+  const optTestStatus=S.mode==='TESTNET'?('<div class="note warn">Options TESTNET: public Binance Options market data connected · execution LOCKED · Binance does not currently document an Options Testnet/Demo order endpoint'+(S.optTestnetStatus.error?' · '+E(S.optTestnetStatus.error):'')+'</div>'):'<div class="note info">Options PAPER: Binance public Options market data · simulated execution</div>';
   const optMetrics='<div class="kpi-grid">'+kpiCard('Options Open',optOpen+'/'+OPT_SETS)+kpiCard('Options Closed',optClosed)+kpiCard('Options Realized PNL','₹'+PNL(S.optReal),pnlClass(S.optReal))+kpiCard('Options Unrealized PNL','₹'+PNL(optUnreal),pnlClass(optUnreal))+kpiCard('Options Fees','₹'+R(S.optFees))+kpiCard('Net Contribution','₹'+PNL(S.optReal+optUnreal-S.optFees),pnlClass(S.optReal+optUnreal-S.optFees))+'</div>';
   let html='<div class="panel"><div class="panel-header"><div class="panel-title">Binance Options Radar</div><div class="panel-sub">All underlyings · defined-risk spreads · naked selling OFF</div></div>';
   html=optTestStatus+optMetrics+html;
@@ -1609,7 +1612,7 @@ function renderOptions(){
   const tbl=rows.slice(0,50).map((x,i)=>'<tr><td>'+(i+1)+'</td><td><span class="coin">'+E(x.u)+'</span></td><td>'+x.count+'</td><td class="'+cl(x.change)+'">'+P(x.change)+'</td><td>'+R(x.volume/1e6)+'M</td><td>'+(x.expiry?new Date(x.expiry).toLocaleDateString():'-')+'</td><td>'+(x.signal==='BUY'?'<span class="signal-badge buy">BUY</span>':x.signal==='SELL'?'<span class="signal-badge sell">SELL</span>':'<span class="signal-badge watch">WATCH</span>')+'</td><td><button class="btn sm blue" onclick="DD.optView=\''+E(x.u)+'\';DD.render()">Chain</button></td></tr>').join('');
   html+='<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Underlying</th><th>Contracts</th><th>24H</th><th>Volume</th><th>Expiry</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+tbl+'</tbody></table></div></div>';
   // Four independent option sets
-  html+='<div class="panel"><div class="panel-header"><div class="panel-title">Option Trading Sets (1–4)</div><div class="panel-sub">Each set trades independently · PAPER/TESTNET · confirmed defined-risk debit spreads · naked selling OFF</div></div>';
+  html+='<div class="panel"><div class="panel-header"><div class="panel-title">Option Trading Sets (1–4)</div><div class="panel-sub">Each set trades independently · PAPER only · confirmed defined-risk debit spreads · naked selling OFF</div></div>';
   html+='<div class="opt-set-grid">';
   for(let i=0;i<OPT_SETS;i++){
     const set=S.optSets[i];

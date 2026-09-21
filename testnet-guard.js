@@ -55,29 +55,30 @@
     return true;
   };
 
-  // The scanner must stay inside DealDost. Binance Demo is an API/account
-  // execution environment, not a page that the terminal should auto-open.
-  window.open=function(url,...args){
-    // DealDost is a single-page terminal. Background scanner/account refreshes
-    // must never create or navigate to another website.
-    try{
-      const u=new URL(String(url||''),window.location.href);
-      if(u.origin!==window.location.origin){
-        console.warn('[DealDost] blocked external window navigation:',u.href);
-        return null;
-      }
-    }catch(e){}
-    if(blockNavigation(url,'window.open'))return null;
-    return nativeOpen(url,...args);
-  };
-
-  // HARD POPUP LOCK: DealDost background code must never create a new
-  // window/tab. Keep ONE authoritative window.open override; duplicate
-  // overrides can make the navigation guard order-dependent.
+  // HARD NAVIGATION EXECUTION LOCK: background code must never create a
+  // popup or navigate the terminal to Binance/another external site.
   window.open=function(url,...args){
     console.warn('[DealDost] blocked popup/new-tab navigation:',String(url||''));
     return null;
   };
+
+  // Catch direct Location.assign()/replace() paths that bypass anchors and
+  // window.open. Same-origin navigation is allowed; external navigation is not.
+  try{
+    const lp=Location.prototype;
+    const nativeAssign=lp.assign;
+    const nativeReplace=lp.replace;
+    lp.assign=function(value){
+      if(blockExternalDestination(value,'location.assign'))return;
+      return nativeAssign.call(this,value);
+    };
+    lp.replace=function(value){
+      if(blockExternalDestination(value,'location.replace'))return;
+      return nativeReplace.call(this,value);
+    };
+  }catch(e){
+    console.warn('[DealDost] Location navigation guard install failed:',e);
+  }
 
   const nativeAnchorSetAttribute=HTMLAnchorElement.prototype.setAttribute;
   HTMLAnchorElement.prototype.setAttribute=function(name,value){

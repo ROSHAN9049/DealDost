@@ -489,9 +489,12 @@ async function engine(){
       // TESTNET: let the entry function itself decide eligibility. The old
       // outer signal/slot check could silently skip a CONFIRMED row before
       // testnetOpen() had a chance to report the real blocking reason.
-      if(x.confirmed){
+      if(x.confirmed&&!S.pos.some(p=>p&&p.s===x.s)){
+        // One exchange position may belong to only one engine. Do not invoke
+        // the async order path for a symbol that is already open; this prevents
+        // harmless duplicate-symbol errors from masking real TESTNET issues.
         if(x.momentum!=='WAIT'&&engineOpenCount('MOMENTUM')<MC)await testnetOpen(x,'MOMENTUM');
-        if(x.scalp!=='WAIT'&&engineOpenCount('SCALPING')<SC)await testnetOpen(x,'SCALPING');
+        if(x.scalp!=='WAIT'&&engineOpenCount('SCALPING')<SC&&!S.pos.some(p=>p&&p.s===x.s))await testnetOpen(x,'SCALPING');
       }
     }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
       if(liveGates(x,'MOMENTUM').pass&&engineOpenCount('MOMENTUM')<MC)await liveOpen(x,'MOMENTUM');
@@ -754,6 +757,21 @@ async function syncTestnet(){
       if(!remoteBySymbol.has(s)&&Date.now()-N(m.lastSeen||m.opened)>60000)delete managed[s];
     }
     saveTestnetManaged(managed);
+    // Enforce engine ownership caps during reconciliation without ever
+    // force-closing a real Demo position. If an old/stale registry makes an
+    // engine appear over-cap, keep only the first limit positions managed by
+    // that engine and classify overflow as EXTERNAL until it is closed.
+    const managedByEngine={MOMENTUM:0,SCALPING:0};
+    for(const p of next){
+      if(['MOMENTUM','SCALPING'].includes(p.e)){
+        if(managedByEngine[p.e] < engineLimit(p.e)) managedByEngine[p.e]++;
+        else{
+          p.e='EXTERNAL';
+          p.qualityScore=0;
+          if(managed[p.s])delete managed[p.s];
+        }
+      }
+    }
     const keep=[...next,...stale];
     S.pos=[...S.pos.filter(p=>p.mode!=='TESTNET'),...keep];
   }catch(e){

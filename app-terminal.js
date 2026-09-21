@@ -402,7 +402,6 @@ async function testnetOpen(x,e){
   const vg=volatilityGuard(x,e),sg=spreadGuard(x);
   if(!vg.ok){S.err='TESTNET: '+x.s+' blocked — volatility '+P(vg.atrPct*100)+' exceeds '+P(vg.max*100)+' safety limit.';render();return false}
   if(!sg.ok){S.err='TESTNET: '+x.s+' blocked — spread '+P(sg.spreadPct*100)+' exceeds '+P(sg.max*100)+' safety limit.';render();return false}
-  if(pause>0){S.err='TESTNET: '+e+' paused after 3 consecutive losses — resume in '+Math.ceil(pause/60000)+'m.';render();return false}
   if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e,true)){
     const last=N(S.lastTrade[x.s]||0),cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     const mins=last>0?Math.max(0,Math.ceil((cd-(Date.now()-last))/60000)):0;

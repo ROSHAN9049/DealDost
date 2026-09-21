@@ -9,6 +9,7 @@
 /* ===== Constants (preserved from scanner-v3) ===== */
 const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/binance-trade',
   TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',TN_SYMS='/api/binance-testnet-symbols',
+  OPT_TN_TR='/api/binance-options-testnet-trade',
   F=.0005,MC=3,SC=3,OC=4,MOM_COOLDOWN=20*60e3,SCALP_COOLDOWN=10*60e3,COOLDOWN=10*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01,DAILY_RISK_LIMIT=0.06;
   const CONF_MOM=70,CONF_SCALP=72,VOL_FILTER=1.15,QUALITY_MIN=70;
 const NAV=['dashboard','momentum','momentum-history','scalping','scalping-history','options','options-history','positions','trade-history','pnl','paper','testnet','live','analytics','settings'];
@@ -1152,7 +1153,7 @@ async function scanOptions(){
     const f=await api(PUB,'/fapi/v1/ticker/24hr');S.optData.underlying={};
     (Array.isArray(f)?f:[]).forEach(x=>{S.optData.underlying[x.symbol]={c:N(x.priceChangePercent),v:N(x.quoteVolume),p:N(x.lastPrice)}});
     buildOptions();
-    if(S.auto&&S.mode==='PAPER')engineOptions();
+    if(S.auto&&['PAPER','TESTNET'].includes(S.mode))await engineOptions();
     if(['options','options-history'].includes(S.tab))render();
   }catch(e){}
   finally{S.optLoading=false}
@@ -1227,8 +1228,8 @@ function spreadQty(pick){
 }
 /* Open one independent paper spread set. Both legs are entered together;
    only the net debit is at risk, so the position is defined-risk. */
-function optionOpen(setIdx,u,signal){
-  if(S.mode!=='PAPER'||S.emergencyStop)return false;
+async function optionOpen(setIdx,u,signal){
+  if(!['PAPER','TESTNET'].includes(S.mode)||S.emergencyStop)return false;
   const base=S.rows.find(r=>r.s===u);if(!base||!base.confirmed)return false;
   const set=S.optSets[setIdx];if(!set||set.status==='OPEN')return false;
   if(S.optSets.some((q,j)=>j!==setIdx&&q.status==='OPEN'&&q.symbol===u))return false;
@@ -1237,15 +1238,48 @@ function optionOpen(setIdx,u,signal){
   if(!Number.isFinite(qty)||qty<=0)return false;
   const entryFee=pick.debit*qty*pick.spot*F;
   const entryPx=pick.debit;
-  set.status='OPEN';set.symbol=u;set.side=signal;set.entry=entryPx;set.current=entryPx;set.qty=qty;
-  set.contract=pick.long.n+' / '+pick.short.n;set.longContract=pick.long.n;set.shortContract=pick.short.n;
-  set.expiry=pick.expiry;set.strike=pick.long.k;set.shortStrike=pick.short.k;set.pnl=-entryFee;set.entryFee=entryFee;
-  set.opened=Date.now();set.reason=pick.type+' · BUY '+pick.long.n+' / SELL '+pick.short.n;
-  S.hist.unshift({time:Date.now(),s:u,e:'OPTIONS',side:signal,action:'ENTRY',price:entryPx,qty,fees:entryFee,pnl:0,live:false,mode:'PAPER',reason:set.reason,optSet:setIdx+1,contract:set.contract,signalStage:base.stage,qualityScore:base.qualityScore});
-  save();return true;
+  if(S.mode==='PAPER'){
+    set.status='OPEN';set.symbol=u;set.side=signal;set.entry=entryPx;set.current=entryPx;set.qty=qty;
+    set.contract=pick.long.n+' / '+pick.short.n;set.longContract=pick.long.n;set.shortContract=pick.short.n;
+    set.expiry=pick.expiry;set.strike=pick.long.k;set.shortStrike=pick.short.k;set.pnl=-entryFee;set.entryFee=entryFee;
+    set.opened=Date.now();set.reason=pick.type+' · BUY '+pick.long.n+' / SELL '+pick.short.n;
+    S.hist.unshift({time:Date.now(),s:u,e:'OPTIONS',side:signal,action:'ENTRY',price:entryPx,qty,fees:entryFee,pnl:0,live:false,mode:'PAPER',reason:set.reason,optSet:setIdx+1,contract:set.contract,signalStage:base.stage,qualityScore:base.qualityScore});
+    save();return true;
+  }
+  try{
+    set.status='SIGNAL';set.symbol=u;set.side=signal;set.contract=pick.long.n+' / '+pick.short.n;
+    set.longContract=pick.long.n;set.shortContract=pick.short.n;set.expiry=pick.expiry;set.strike=pick.long.k;set.shortStrike=pick.short.k;
+    set.qty=qty;set.entry=entryPx;set.current=entryPx;set.entryFee=entryFee;set.reason=pick.type+' · TESTNET BUY '+pick.long.n+' / SELL '+pick.short.n;
+    const resp=await fetch(OPT_TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      action:'openSpread',symbol:u,side:signal,quantity:qty,longSymbol:pick.long.n,shortSymbol:pick.short.n,
+      longPrice:N(S.optData.marks[pick.long.n]?.ask)||pick.long.p,shortPrice:N(S.optData.marks[pick.short.n]?.bid)||pick.short.p,
+      expiry:pick.expiry
+    })});
+    const j=await resp.json();
+    if(!resp.ok)throw Error(j.error||j.msg||'Options TESTNET order failed');
+    set.status='OPEN';set.opened=Date.now();set.orderIds=(j.orders||[]).map(o=>o.orderId||o.clientOrderId);
+    set.current=N(j.netDebit)||entryPx;set.entry=N(j.netDebit)||entryPx;set.pnl=-(N(j.fees)||entryFee);set.entryFee=N(j.fees)||entryFee;
+    set.reason=(pick.type||'DEBIT SPREAD')+' · TESTNET';
+    S.hist.unshift({time:Date.now(),s:u,e:'OPTIONS',side:signal,action:'ENTRY',price:set.entry,qty,fees:set.entryFee,pnl:0,live:false,mode:'TESTNET',reason:set.reason,optSet:setIdx+1,contract:set.contract,signalStage:base.stage,qualityScore:base.qualityScore});
+    save();render();return true;
+  }catch(err){
+    set.status='ERROR';set.reason='TESTNET: '+err.message;set.symbol=u;render();return false;
+  }
 }
-function manageOptions(){
-  if(S.mode!=='PAPER')return;
+async function manageOptions(){
+  if(!['PAPER','TESTNET'].includes(S.mode))return;
+  if(S.mode==='TESTNET'){
+    try{
+      const resp=await fetch(OPT_TN_TR+'?action=state',{cache:'no-store'});
+      const j=await resp.json();
+      if(resp.ok&&j.available!==false){
+        for(const set of S.optSets.filter(s=>s.status==='OPEN')){
+          const a=(j.positions||[]).find(p=>p.setId===set.id||p.symbol===set.symbol);
+          if(a){set.current=N(a.netDebit)||set.current;set.pnl=N(a.pnl);set.orderIds=a.orderIds||set.orderIds}
+        }
+      }
+    }catch{}
+  }
   for(const set of S.optSets){
     if(set.status!=='OPEN')continue;
     const lm=S.optData.marks[set.longContract],sm=S.optData.marks[set.shortContract];
@@ -1259,15 +1293,21 @@ function manageOptions(){
     const pnlPct=set.entry>0?(set.current-set.entry)/set.entry:0;
     const hitSL=pnlPct<=-OPT_STOP,hitTP=pnlPct>=OPT_TP,expired=set.expiry&&Date.now()>=set.expiry;
     if(hitSL||hitTP||expired){
+      if(S.mode==='TESTNET'){
+        try{
+          const rr=await fetch(OPT_TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'closeSpread',setId:set.id,longSymbol:set.longContract,shortSymbol:set.shortContract,quantity:set.qty,longSide:'SELL',shortSide:'BUY'})});
+          const jj=await rr.json();if(!rr.ok)throw Error(jj.error||jj.msg||'Options TESTNET close failed');
+        }catch(err){set.reason='TESTNET close blocked: '+err.message;continue}
+      }
       S.real+=set.pnl;S.optReal+=set.pnl;S.eq+=set.pnl;S.fees+=set.entryFee+exitFee;S.optFees+=set.entryFee+exitFee;
-      S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:set.current,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:'PAPER',reason:expired?'Expiry':(hitSL?'Stop loss':'Take profit'),optSet:set.id,contract:set.contract,signalStage:'CONFIRMED',qualityScore:N((S.rows.find(r=>r.s===set.symbol)||{}).qualityScore)});
+      S.hist.unshift({time:Date.now(),s:set.symbol,e:'OPTIONS',side:set.side,action:'EXIT',entry:set.entry,exit:set.current,qty:set.qty,pnl:set.pnl,fees:set.entryFee+exitFee,live:false,mode:S.mode,reason:expired?'Expiry':(hitSL?'Stop loss':'Take profit'),optSet:set.id,contract:set.contract,signalStage:'CONFIRMED',qualityScore:N((S.rows.find(r=>r.s===set.symbol)||{}).qualityScore)});
       set.status='CLOSED';set.closed=Date.now();set.pnl=0;set.entry=0;set.current=0;set.qty=0;set.contract='';set.longContract='';set.shortContract='';set.entryFee=0;
     }
   }
   save();
 }
-function engineOptions(){
-  if(S.mode!=='PAPER'||!S.auto||S.emergencyStop)return;
+async function engineOptions(){
+  if(!['PAPER','TESTNET'].includes(S.mode)||!S.auto||S.emergencyStop)return;
   const active=S.optData.rows.filter(x=>x.signal!=='WATCH'&&S.rows.some(r=>r.s===x.u&&r.confirmed));
   if(!active.length)return;
   for(const row of active){
@@ -1281,7 +1321,7 @@ function engineOptions(){
       const pick=pickOptionSpread(row.u,row.signal);
       if(!pick){set.status='ERROR';set.reason='No liquid defined-risk spread (24h+ expiry)';continue}
       set.status='SIGNAL';set.symbol=row.u;set.side=row.signal;set.reason='Signal: '+row.signal+' on '+row.u+' ('+P(row.change)+' 24H)';
-      if(!optionOpen(i,row.u,row.signal))set.status='ERROR';
+      if(!(await optionOpen(i,row.u,row.signal)))set.status='ERROR';
       break;
     }
   }
@@ -1554,7 +1594,7 @@ function renderOptions(){
   const tbl=rows.slice(0,50).map((x,i)=>'<tr><td>'+(i+1)+'</td><td><span class="coin">'+E(x.u)+'</span></td><td>'+x.count+'</td><td class="'+cl(x.change)+'">'+P(x.change)+'</td><td>'+R(x.volume/1e6)+'M</td><td>'+(x.expiry?new Date(x.expiry).toLocaleDateString():'-')+'</td><td>'+(x.signal==='BUY'?'<span class="signal-badge buy">BUY</span>':x.signal==='SELL'?'<span class="signal-badge sell">SELL</span>':'<span class="signal-badge watch">WATCH</span>')+'</td><td><button class="btn sm blue" onclick="DD.optView=\''+E(x.u)+'\';DD.render()">Chain</button></td></tr>').join('');
   html+='<div class="table-scroll"><table class="term"><thead><tr><th>#</th><th>Underlying</th><th>Contracts</th><th>24H</th><th>Volume</th><th>Expiry</th><th>Signal</th><th>Action</th></tr></thead><tbody>'+tbl+'</tbody></table></div></div>';
   // Four independent option sets
-  html+='<div class="panel"><div class="panel-header"><div class="panel-title">Option Paper Trading Sets (1–4)</div><div class="panel-sub">Each set trades independently · PAPER mode only · confirmed defined-risk debit spreads · naked selling OFF</div></div>';
+  html+='<div class="panel"><div class="panel-header"><div class="panel-title">Option Trading Sets (1–4)</div><div class="panel-sub">Each set trades independently · PAPER/TESTNET · confirmed defined-risk debit spreads · naked selling OFF</div></div>';
   html+='<div class="opt-set-grid">';
   for(let i=0;i<OPT_SETS;i++){
     const set=S.optSets[i];

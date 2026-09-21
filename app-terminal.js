@@ -1259,7 +1259,10 @@ function fullHistoryTable(){
 function renderDashboard(){
   const unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
   const st=statsFor(S.hist);const today=new Date().toDateString();
+  // Dashboard trade KPIs use the same completed EXIT population and local calendar day.
+  // All-time statistics remain available in Analytics/PNL.
   const todayTrades=S.hist.filter(h=>h.action==='EXIT'&&new Date(N(h.time)).toDateString()===today);
+  const todayStats=statsFor(todayTrades);
   const todayPnl=todayTrades.reduce((s,h)=>s+N(h.pnl),0);
   const avail=S.mode==='LIVE'?(S.account?.availableBalance||0):S.mode==='TESTNET'?(S.testnetAccount?.availableBalance||S.eq):S.eq;
   const equity=S.mode==='TESTNET'
@@ -1270,8 +1273,8 @@ function renderDashboard(){
     {l:'Realized PNL',v:'₹'+PNL(S.real),c:pnlClass(S.real)},{l:'Unrealized PNL',v:'₹'+PNL(unreal),c:pnlClass(unreal)},
     {l:'Total PNL',v:'₹'+PNL(S.real+unreal),c:pnlClass(S.real+unreal)},{l:'Total Fees',v:'₹'+R(S.fees),c:''},
     {l:'Open Positions',v:S.pos.length+'',c:''},{l:"Today's Trades",v:todayTrades.length+'',c:''},
-    {l:'Winning Trades',v:st.wins+'',c:st.wins>0?'pos':''},{l:'Losing Trades',v:st.losses+'',c:st.losses>0?'neg':''},
-    {l:'Win Rate',v:st.winRate.toFixed(1)+'%',c:''},{l:"Today's PNL",v:'₹'+PNL(todayPnl),c:pnlClass(todayPnl)}
+    {l:"Today's Wins",v:todayStats.wins+'',c:todayStats.wins>0?'pos':''},{l:"Today's Losses",v:todayStats.losses+'',c:todayStats.losses>0?'neg':''},
+    {l:"Today's Win Rate",v:todayStats.winRate.toFixed(1)+'%',c:''},{l:"Today's PNL",v:'₹'+PNL(todayPnl),c:pnlClass(todayPnl)}
   ];
   const cards='<div class="kpi-grid">'+kpis.map(k=>'<div class="kpi-card '+(k.c||'')+'"><div class="kpi-label">'+k.l+'</div><div class="kpi-value">'+k.v+'</div></div>').join('')+'</div>';
   const banner=S.mode==='LIVE'?'<div class="mode-banner live"><b>LIVE TRADING '+(S.liveTrading?'ACTIVE':'OFF')+'</b> — Real Binance orders. Trade carefully.</div>'

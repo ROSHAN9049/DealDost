@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 const BASE=process.env.BINANCE_FUTURES_DEMO_BASE_URL||'https://demo-fapi.binance.com';
-const ALLOWED=new Set(['/fapi/v2/account','/fapi/v2/positionRisk','/fapi/v2/balance','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/allOrders','/fapi/v1/userTrades']);
+const ALLOWED=new Set(['/fapi/v2/account','/fapi/v2/positionRisk','/fapi/v2/balance','/fapi/v1/openOrders','/fapi/v1/allOrders','/fapi/v1/userTrades']);
 export default async function handler(req,res){
   if(req.method!=='GET')return res.status(405).json({error:'GET only'});
   if(process.env.BINANCE_TESTNET_API_KEY==null||process.env.BINANCE_TESTNET_API_SECRET==null)return res.status(503).json({error:'Binance Futures Demo credentials are not configured'});

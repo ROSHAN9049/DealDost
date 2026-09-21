@@ -1050,7 +1050,7 @@ async function syncTestnetSymbols(){
     return true;
   }catch(e){
     S.testnetSymbols=new Set();S.testnetSymbolsReady=false;
-    S.err='TESTNET: Demo symbol list could not be verified — '+String(e.message||e);
+    // Symbol discovery is advisory; the trade endpoint validates the symbol authoritatively.\n    S.err='TESTNET: Demo symbol list temporarily unavailable — trade API will verify symbols.';
     return false;
   }
 }

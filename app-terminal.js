@@ -1022,8 +1022,9 @@ async function syncTestnet(){
   }
 }
 async function checkTestnetStatus(){
+  // Status is a lightweight same-origin check only. Do not implicitly call
+  // Binance Demo exchangeInfo/account APIs from boot or scanner refresh.
   try{const r=await fetch(TN_STATUS,{cache:'no-store'});if(r.ok)S.testnetStatus=await r.json()}catch(e){S.testnetStatus=null}
-  if(S.mode==='TESTNET')await syncTestnetSymbols();
 }
 async function syncTestnetSymbols(){
   try{
@@ -1117,8 +1118,9 @@ async function scan(){
     // PAPER does not touch either exchange account.
     if(S.mode==='LIVE')await syncAccount();
     if(S.mode==='TESTNET'){
-      await syncTestnetSymbols();
-      await syncTestnet();
+      // Scanner refresh is market-data only. TESTNET account/symbol reconciliation
+      // is deliberately isolated from the scanner so market refreshes can never
+      // trigger Demo navigation or execution-side requests.
     }
     await managePaper();await engine();render();
   }catch(e){S.err='Market scan: '+e.message;render()}

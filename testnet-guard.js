@@ -102,19 +102,9 @@
   }catch(e){}
 
   // Remove/neutralize dynamically-created external links before they can be clicked.
-  const scrubExternalLinks=()=>{
-    try{
-      document.querySelectorAll('a[href]').forEach(link=>{
-        if(blockExternalDestination(link.href,'anchor.scan')){
-          link.removeAttribute('href');
-          link.removeAttribute('target');
-        }
-      });
-    }catch(e){}
-  };
-  const observer=new MutationObserver(()=>scrubExternalLinks());
-  try{observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['href','target']});}catch(e){}
-  setTimeout(scrubExternalLinks,0);
+  // Do not scrub external anchors: a real user click may intentionally open
+  // Binance Demo. Automatic/synthetic clicks are blocked below.
+  const scrubExternalLinks=()=>{};
 
   const originalAnchorClick=HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click=function(){
@@ -139,10 +129,10 @@
       const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
       if(link){
         const u=new URL(link.href,window.location.href);
-        if(u.origin!==window.location.origin){
+        if(u.origin!==window.location.origin && !event.isTrusted){
           event.preventDefault();
           event.stopImmediatePropagation();
-          console.warn('[DealDost] blocked external anchor navigation:',u.href);
+          console.warn('[DealDost] blocked synthetic external anchor navigation:',u.href);
         }
       }
     }catch(e){}
@@ -151,7 +141,7 @@
   document.addEventListener('click',(event)=>{
     try{
       const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
-      if(link&&blockNavigation(link.href,'anchor')){event.preventDefault();event.stopImmediatePropagation();}
+      if(link&&!event.isTrusted&&blockNavigation(link.href,'anchor')){event.preventDefault();event.stopImmediatePropagation();}
     }catch(e){}
   },true);
 

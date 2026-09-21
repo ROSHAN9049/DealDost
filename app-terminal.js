@@ -954,6 +954,18 @@ async function syncTestnet(){
       const registryMatch=reg&&(!reg.side||reg.side===side)&&['MOMENTUM','SCALPING'].includes(reg.e);
       const localMatch=local&&local.side===side&&['MOMENTUM','SCALPING'].includes(local.e);
       const engine=registryMatch?reg.e:(localMatch?local.e:'EXTERNAL');
+      const hasLocalRisk=local&&N(local.riskPct)>0&&N(local.riskAmount)>0;
+      const hasRegRisk=reg&&N(reg.riskPct)>0&&N(reg.riskAmount)>0;
+      const hasLocalStops=local&&N(local.sl)>0&&N(local.tp)>0;
+      const hasRegStops=reg&&N(reg.stopPct)>0&&N(reg.tpPct)>0;
+      const fallbackNotional=qty*Math.max(current,entry);
+      // Exchange positionRisk is authoritative for live position facts.
+      // Never display stale local notional/SL/TP on a reconciled position.
+      const exchangeNotional=Math.abs(qty*current);
+      const recoveredRiskPct=hasLocalRisk?N(local.riskPct):hasRegRisk?N(reg.riskPct):0;
+      const recoveredRiskAmount=hasLocalRisk?N(local.riskAmount):hasRegRisk?N(reg.riskAmount):0;
+      const recoveredStopPct=hasLocalStops?Math.abs(N(local.sl)-entry)/Math.max(entry,1e-9):hasRegStops?N(reg.stopPct):0;
+      const recoveredTpPct=hasLocalStops?Math.abs(N(local.tp)-entry)/Math.max(entry,1e-9):hasRegStops?N(reg.tpPct)*2:0;
       const p={
         ...(local||{}),
         id:local?.id||'tn-sync-'+symbol,s:symbol,e:engine,side,entry,current,q:qty,
@@ -962,10 +974,10 @@ async function syncTestnet(){
         opened:local?.opened||N(reg?.opened)||Date.now(),
         signalStage:local?.signalStage||reg?.signalStage||'CONFIRMED',
         qualityScore:N(local?.qualityScore)||N(reg?.qualityScore),
-        riskPct:N(local?.riskPct)||N(reg?.riskPct),riskAmount:N(local?.riskAmount)||N(reg?.riskAmount),notional:N(local?.notional)||N(reg?.notional)||qty*current,
-        stopPct:N(local?.stopPct)||N(reg?.stopPct),tpPct:N(local?.tpPct)||N(reg?.tpPct),
-        sl:N(local?.sl)||N(reg?.sl)||0,
-        tp:N(local?.tp)||N(reg?.tp)||0
+        riskPct:recoveredRiskPct,riskAmount:recoveredRiskAmount,notional:exchangeNotional,
+        stopPct:recoveredStopPct,tpPct:recoveredTpPct,
+        sl:hasLocalStops?N(local.sl):hasRegStops?N(reg.sl):0,
+        tp:hasLocalStops?N(local.tp):hasRegStops?N(reg.tp):0
       };
       if(engine!=='EXTERNAL'){
         managed[symbol]={...reg,s:symbol,e:engine,side,orderId:p.orderId||null,opened:p.opened,lastSeen:Date.now(),

@@ -23,7 +23,7 @@ const S={
   auto:true,liveAuto:false,liveTrading:false,
   emergencyStop:false,
   rotation:{enabled:true,lastRotation:0,events:0,rotationDate:'',lastEngine:'',lastClosed:'',lastOpened:'',lastReason:'',lastResult:'',lastAttemptKey:''},
-  tab:'dashboard',
+  tab:(localStorage.getItem('ddMode')==='TESTNET'?'testnet':localStorage.getItem('ddMode')==='PAPER'?'paper':localStorage.getItem('ddMode')==='LIVE'?'live':'dashboard'),
   wsStatus:'connecting',ws:null,wsTimer:null,
   t:{},rows:[],k:{},universe:[],stableUniverse:[],
   pos:[],hist:[],eq:10000,real:0,fees:0,optReal:0,optFees:0,

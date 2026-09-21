@@ -69,6 +69,9 @@ export default async function handler(req0,res){
       const longSymbol=String(b.longSymbol||'').toUpperCase(),shortSymbol=String(b.shortSymbol||'').toUpperCase(),qty=n(b.quantity);
       if(!longSymbol||!shortSymbol||qty<=0)throw Error('Invalid spread parameters');
       if(longSymbol===shortSymbol)throw Error('Long and short option legs must be different');
+      const longInfo=await symbolInfo(longSymbol),shortInfo=await symbolInfo(shortSymbol);
+      if(String(longInfo.side||'').toUpperCase()!=='CALL'&&String(longInfo.side||'').toUpperCase()!=='PUT')throw Error('Invalid long option type');
+      if(String(shortInfo.side||'').toUpperCase()!==String(longInfo.side||'').toUpperCase())throw Error('Spread legs must use the same option type');
       const long=await place(longSymbol,'BUY',qty,n(b.longPrice)),short=await place(shortSymbol,'SELL',qty,n(b.shortPrice));
       const lf=long.fills?.[0]?.price||long.avgPrice||b.longPrice,sf=short.fills?.[0]?.price||short.avgPrice||b.shortPrice;
       const longQty=n(long.executedQty||qty),shortQty=n(short.executedQty||qty);

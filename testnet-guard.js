@@ -2,49 +2,82 @@
  * Keeps scanner + Paper Trading working when Binance Demo Trading is
  * unavailable from the deployment location. It never bypasses Binance's
  * regional/eligibility controls and prevents repeated order requests.
+ *
+ * IMPORTANT: This guard must NEVER allow a background market-feed/scanner
+ * refresh to navigate the DealDost page to any Binance Demo/Testnet page.
  */
 (()=>{
   'use strict';
   const ACCOUNT='/api/binance-testnet-account?path=';
   const TRADE='/api/binance-testnet-trade';
   const KEY='ddTestnetRestrictedAt';
-  const MSG='Binance Futures Demo trading is unavailable from this deployment location or account eligibility.';
   const TTL=10*60*1000;
   const nativeFetch=window.fetch.bind(window);
   const nativeOpen=window.open.bind(window);
-  const isBinanceDemoUrl=(value)=>{
+
+  const isBlockedBinanceUrl=(value)=>{
     try{
       const u=new URL(String(value||''),window.location.href);
       const host=u.hostname.toLowerCase();
-      return host==='demo.binance.com'||host.endsWith('.demo.binance.com')||host==='testnet.binancefuture.com';
+      const path=u.pathname.toLowerCase();
+      // Block only external Binance Demo/Testnet destinations. Normal public
+      // market API calls made through DealDost's own /api routes are unaffected.
+      return (
+        host==='demo.binance.com' ||
+        host.endsWith('.demo.binance.com') ||
+        host==='testnet.binancefuture.com' ||
+        host==='testnet.binance.vision' ||
+        host==='demo-fapi.binance.com' ||
+        host==='demo-api.binance.com' ||
+        (host.endsWith('.binance.com') && (host.startsWith('demo-') || host.startsWith('testnet-'))) ||
+        (host==='www.binance.com' && /(^|\\/)testnet|(^|\\/)demo/i.test(path))
+      );
     }catch(e){return false}
   };
-  const blockBinanceNavigation=(value)=>isBinanceDemoUrl(value);
+
+  const blockNavigation=(value,source)=>{
+    if(!isBlockedBinanceUrl(value))return false;
+    console.warn('[DealDost] blocked automatic Binance Demo/Testnet navigation:',source||'',String(value||''));
+    return true;
+  };
 
   // The scanner must stay inside DealDost. Binance Demo is an API/account
   // execution environment, not a page that the terminal should auto-open.
   window.open=function(url,...args){
-    if(isBinanceDemoUrl(url)){
-      console.warn('[DealDost] blocked automatic Binance Demo navigation:',url);
-      return null;
-    }
+    if(blockNavigation(url,'window.open'))return null;
     return nativeOpen(url,...args);
   };
 
   const originalAnchorClick=HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click=function(){
-    try{if(blockBinanceNavigation(this.href)){console.warn('[DealDost] blocked programmatic Binance Demo link:',this.href);return;}}catch(e){}
+    try{if(blockNavigation(this.href,'anchor.click'))return;}catch(e){}
     return originalAnchorClick.apply(this,arguments);
+  };
+
+  const originalFormSubmit=HTMLFormElement.prototype.submit;
+  HTMLFormElement.prototype.submit=function(){
+    try{
+      if(blockNavigation(this.action,'form.submit')){
+        return;
+      }
+    }catch(e){}
+    return originalFormSubmit.apply(this,arguments);
   };
 
   document.addEventListener('click',(event)=>{
     try{
       const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
-      if(link&&isBinanceDemoUrl(link.href)){
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        console.warn('[DealDost] blocked Binance Demo link navigation:',link.href);
-      }
+      if(link&&blockNavigation(link.href,'anchor')){event.preventDefault();event.stopImmediatePropagation();}
+    }catch(e){}
+  },true);
+
+  // Also catch target=_blank links and synthetic navigation attempts before
+  // they leave the terminal. This is deliberately limited to blocked Binance
+  // Demo/Testnet URLs so normal site navigation is untouched.
+  document.addEventListener('auxclick',(event)=>{
+    try{
+      const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
+      if(link&&blockNavigation(link.href,'auxclick')){event.preventDefault();event.stopImmediatePropagation();}
     }catch(e){}
   },true);
 
@@ -61,11 +94,10 @@
   };
   const clearRestricted=()=>localStorage.removeItem(KEY);
 
+  const MSG='Binance Futures Demo trading is unavailable from this deployment location or account eligibility.';
+
   function disableTestnetAuto(){
     try{
-      /* The terminal keeps its trading state private, so use the existing UI
-       * control instead of touching Momentum/Scalping calculations. Only act
-       * while the visible terminal is in TESTNET mode and Auto is ON. */
       const text=(document.body?.innerText||'');
       if(!/Mode:\s*TESTNET/i.test(text))return;
       const els=[...document.querySelectorAll('button,[role="button"]')];

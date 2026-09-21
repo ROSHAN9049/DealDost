@@ -266,7 +266,10 @@ function signal(x,e){return e==='MOMENTUM'?x.momentum:x.scalp}
 if(!S.entryLocks)S.entryLocks={MOMENTUM:0,SCALPING:0,OPTIONS:0};
 if(!S.testnetPositionBlocked)S.testnetPositionBlocked={};
 function engineLimit(e){return e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC}
-function engineOpenCount(e){return S.pos.filter(p=>p&&p.e===e).length}
+function engineOpenCount(e){
+  const seen=new Set();
+  return S.pos.filter(p=>p&&p.e===e&&p.s&&!seen.has(p.s)&&seen.add(p.s)).length;
+}
 function reserveEntry(e){
   const limit=engineLimit(e);
   if(engineOpenCount(e)+N(S.entryLocks[e])>=limit)return false;
@@ -288,7 +291,7 @@ function canOpen(x,e){
   if(!x.confirmed)return false;
   if(S.emergencyStop)return false;
   if(S.pos.some(p=>p.s===x.s))return false;
-  if(S.pos.filter(p=>p.e===e).length>=(e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC))return false;
+  if(engineOpenCount(e)+N(S.entryLocks[e])>=engineLimit(e))return false;
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
   const last=N(S.lastTrade[x.s]||0);
   // Repair stale local cooldown timestamps that have no matching recorded
@@ -365,6 +368,11 @@ async function testnetOpen(x,e){
   // Demo listings can lag the public Futures feed; the server performs the
   // authoritative symbol preflight immediately before the order.
   if(S.testnetRejectedSymbols.has(x.s)){S.err='TESTNET: '+x.s+' was previously rejected by Demo; retrying preflight now.';S.testnetRejectedSymbols.delete(x.s)}
+  if(engineOpenCount(e)+N(S.entryLocks[e])>engineLimit(e)){
+    S.err='TESTNET: '+e+' position limit reached — no order placed.';
+    render();
+    return false;
+  }
   const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
   if(!Number.isFinite(r.q)||r.q<=0)return false;
   try{
@@ -449,8 +457,14 @@ async function liveOpen(x,e){
 }
 
 /* ===== Engine (confirmed-only entries + emergency stop + daily risk) ===== */
+let engineBusy=false;
+let rotationBusy=false;
+
 async function engine(){
+  if(engineBusy)return;
   if(!S.auto||S.emergencyStop)return;
+  engineBusy=true;
+  try{
   dailyRiskReset();
   // Refresh Demo symbols immediately before TESTNET execution. The Demo
   // exchangeInfo can change independently of the public futures feed; never
@@ -466,22 +480,25 @@ async function engine(){
   for(const x of arr){
     if(!dailyRiskOK())break;
     if(S.mode==='PAPER'){
-      if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)paperOpen(x,'MOMENTUM');
-      if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)paperOpen(x,'SCALPING');
+      if(x.momentum!=='WAIT'&&engineOpenCount('MOMENTUM')<MC)paperOpen(x,'MOMENTUM');
+      if(x.scalp!=='WAIT'&&engineOpenCount('SCALPING')<SC)paperOpen(x,'SCALPING');
     }else if(S.mode==='TESTNET'){
       // TESTNET: let the entry function itself decide eligibility. The old
       // outer signal/slot check could silently skip a CONFIRMED row before
       // testnetOpen() had a chance to report the real blocking reason.
       if(x.confirmed){
-        if(x.momentum!=='WAIT'&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await testnetOpen(x,'MOMENTUM');
-        if(x.scalp!=='WAIT'&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await testnetOpen(x,'SCALPING');
+        if(x.momentum!=='WAIT'&&engineOpenCount('MOMENTUM')<MC)await testnetOpen(x,'MOMENTUM');
+        if(x.scalp!=='WAIT'&&engineOpenCount('SCALPING')<SC)await testnetOpen(x,'SCALPING');
       }
     }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
-      if(liveGates(x,'MOMENTUM').pass&&S.pos.filter(p=>p.e==='MOMENTUM').length<MC)await liveOpen(x,'MOMENTUM');
-      if(liveGates(x,'SCALPING').pass&&S.pos.filter(p=>p.e==='SCALPING').length<SC)await liveOpen(x,'SCALPING');
+      if(liveGates(x,'MOMENTUM').pass&&engineOpenCount('MOMENTUM')<MC)await liveOpen(x,'MOMENTUM');
+      if(liveGates(x,'SCALPING').pass&&engineOpenCount('SCALPING')<SC)await liveOpen(x,'SCALPING');
     }
   }
   if(S.rotation.enabled&&!S.emergencyStop)await profitRotation();
+  }finally{
+    engineBusy=false;
+  }
 }
 
 /* ===== 16-Gate LIVE validation ===== */
@@ -499,7 +516,7 @@ function liveGates(x,e){
   const r=riskModel(x,e,S.account?.availableBalance||0);
   g(9,Number.isFinite(r.q)&&r.q>0,'Risk invalid');
   const limit=e==='MOMENTUM'?MC:e==='SCALPING'?SC:OC;
-  g(10,S.pos.filter(p=>p.e===e).length<limit,'Position limit reached');
+  g(10,engineOpenCount(e)<limit,'Position limit reached');
   g(11,!S.pos.some(p=>p.s===x.s),'Duplicate symbol');
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
   g(12,Date.now()-N(S.lastTrade[x.s]||0)>=cd,'Cooldown active');
@@ -536,7 +553,10 @@ async function closeForRotation(p){
 
 /* ===== Profit Rotation ===== */
 async function profitRotation(){
+  if(rotationBusy)return;
   if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
+  rotationBusy=true;
+  try{
   // Rotation must use a confirmed candidate that is actually eligible for
   // replacement. The previous logic always selected the highest-quality
   // confirmed row first; if that symbol was already open, rotation stopped
@@ -558,7 +578,7 @@ async function profitRotation(){
     const ce=candidate.momentum!=='WAIT'?'MOMENTUM':candidate.scalp!=='WAIT'?'SCALPING':'';
     if(!ce)continue;
     const limit=ce==='MOMENTUM'?MC:SC;
-    const enginePositions=S.pos.filter(p=>p.e===ce);
+    const enginePositions=S.pos.filter(p=>p&&p.e===ce&&p.s).filter((p,i,a)=>a.findIndex(q=>q.s===p.s)===i);
     if(enginePositions.length<limit)continue;
     const cd=ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     if(Date.now()-N(S.lastTrade[candidate.s]||0)<cd)continue;
@@ -601,9 +621,12 @@ async function profitRotation(){
     S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — replacement entry failed/blocked';S.rotation.lastAttemptKey=attemptKey;
   }
   save();render();
+  }finally{
+    rotationBusy=false;
+  }
 }
 
-/* ===== Position management (preserved) ===== */
+/* ===== Position management (preserved) */
 async function managePaper(){
   for(const p of [...S.pos]){
     // TESTNET positions are exchange-managed. Binance Demo owns the live
@@ -1172,8 +1195,8 @@ function renderDashboard(){
     '<button class="btn blue sm" onclick="DD.scan()">Refresh Scanner</button>'+
     '<button class="btn sm" onclick="DD.reconnect()">Reconnect WS</button></div>';
   /* System Status Panel */
-  const momCount=S.pos.filter(p=>p.e==='MOMENTUM').length;
-  const scalpCount=S.pos.filter(p=>p.e==='SCALPING').length;
+  const momCount=engineOpenCount('MOMENTUM');
+  const scalpCount=engineOpenCount('SCALPING');
   const optCount=S.optSets.filter(s=>s.status==='OPEN').length;
   const momStatus=momCount>=MC?'FULL':S.emergencyStop?'BLOCKED':'READY';
   const scalpStatus=scalpCount>=SC?'FULL':S.emergencyStop?'BLOCKED':'READY';

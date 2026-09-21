@@ -335,6 +335,28 @@ function canOpen(x,e,entryReserved=false){
   if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return false;
   return true;
 }
+function entrySafety(x,e){
+  if(!x||!['MOMENTUM','SCALPING'].includes(e))return{ok:false,reason:'invalid engine/symbol'};
+  if(!x.confirmed)return{ok:false,reason:'signal is not CONFIRMED'};
+  const z=signal(x,e);
+  if(!z||z==='WAIT')return{ok:false,reason:'engine signal is WAIT'};
+  const vg=volatilityGuard(x,e);
+  if(!vg.ok)return{ok:false,reason:'volatility '+P(vg.atrPct*100)+' exceeds '+P(vg.max*100)+' safety limit'};
+  const sg=spreadGuard(x);
+  if(!sg.ok)return{ok:false,reason:'spread '+P(sg.spreadPct*100)+' exceeds '+P(sg.max*100)+' safety limit'};
+  if(S.emergencyStop)return{ok:false,reason:'Emergency Stop is ACTIVE'};
+  if(S.pos.some(p=>p&&p.s===x.s))return{ok:false,reason:'duplicate symbol already open'};
+  const blockedUntil=N(S.testnetPositionBlocked?.[x.s]||0);
+  if(S.mode==='TESTNET'&&blockedUntil>Date.now())return{ok:false,reason:'temporary Demo position-limit block'};
+  const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
+  if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return{ok:false,reason:'cooldown active'};
+  if(engineOpenCount(e)>=engineLimit(e))return{ok:false,reason:e+' position limit reached'};
+  const equity=N(S.testnetAccount?.availableBalance)||N(S.eq);
+  const r=riskModel(x,e,equity);
+  if(!Number.isFinite(r.q)||r.q<=0)return{ok:false,reason:'risk sizing invalid'};
+  return{ok:true,side:z,risk:r,volatility:vg,spread:sg};
+}
+
 function dailyRiskReset(){
   const today=new Date().toDateString();
   if(S.dailyRiskDate!==today){S.dailyRiskDate=today;S.dailyRiskUsed=0}
@@ -366,11 +388,18 @@ function paperOpen(x,e){
   save();return true;
 }
 async function testnetPreflight(x,e){
-  if(S.mode!=='TESTNET'||!x||!x.confirmed||!['MOMENTUM','SCALPING'].includes(e))return false;
-  const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
-  if(!z||z==='WAIT'||!Number.isFinite(r.q)||r.q<=0)return false;
+  if(S.mode!=='TESTNET'||!x||!['MOMENTUM','SCALPING'].includes(e))return false;
+  // Preflight MUST use the same local safety gates as the real TESTNET entry.
+  // In particular, the ATR volatility guard is checked here so rotation can
+  // never close an existing position for a replacement that testnetOpen()
+  // will immediately reject.
+  const gate=entrySafety(x,e);
+  if(!gate.ok){
+    S.err='TESTNET: '+x.s+' replacement blocked — '+gate.reason+'. Existing position kept.';
+    render();return false;
+  }
   try{
-    const resp=await fetch(TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preflight',symbol:x.s,side:z,quantity:r.q})});
+    const resp=await fetch(TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preflight',symbol:x.s,side:gate.side,quantity:gate.risk.q})});
     const j=await resp.json();
     if(j.testnetUnavailable||j.restricted){
       S.testnetRestricted=true;S.auto=false;
@@ -388,10 +417,9 @@ async function testnetPreflight(x,e){
     return j.preflight===true;
   }catch(err){
     S.err='TESTNET: '+x.s+' replacement preflight failed — '+err.message+' Existing position kept.';
-    render();return false;
+    return false;
   }
 }
-
 async function testnetOpen(x,e){
   if(!['MOMENTUM','SCALPING'].includes(e)||!reserveEntry(e))return false;
   try{
@@ -655,6 +683,10 @@ async function profitRotation(){
     if(N(liveRow.pipelineVol)<VOL_FILTER*1.10)continue;
     if(N(liveRow.qualityScore)<QUALITY_MIN+5)continue;
     if(S.mode==='TESTNET'&&S.testnetPositionBlocked[liveRow.s]>Date.now())continue;
+    // Use the exact same local entry gate as testnetOpen(). This prevents a
+    // high-ATR candidate such as AKEUSDT from being selected for rotation.
+    const gate=entrySafety(liveRow,ce);
+    if(!gate.ok)continue;
     target=liveRow;e=ce;inEngine=enginePositions;break;
   }
   if(!target)return;
@@ -674,7 +706,7 @@ async function profitRotation(){
   // candidate changed from CONFIRMED to blocked while selection was running,
   // abort before touching the existing position.
   const finalRow=S.rows.find(r=>r.s===x.s);
-  if(!finalRow||finalRow.confirmed!==true||signal(finalRow,e)==='WAIT'||
+  if(!finalRow||!entrySafety(finalRow,e).ok||
      N(finalRow.pipelineVol)<VOL_FILTER*1.10||N(finalRow.qualityScore)<QUALITY_MIN+5){
     S.rotation.lastResult='BLOCKED';
     S.rotation.lastReason='Replacement signal changed/blocked — existing position kept';
@@ -701,7 +733,7 @@ async function profitRotation(){
 
   let opened=false;
   const replacement=S.rows.find(r=>r.s===x.s);
-  if(!replacement||replacement.confirmed!==true||signal(replacement,e)==='WAIT'){
+  if(!replacement||!entrySafety(replacement,e).ok){
     S.rotation.lastResult='FAILED';
     S.rotation.lastReason=reason+' — replacement became blocked after close';
   }else if(S.mode==='PAPER')opened=paperOpen(replacement,e);

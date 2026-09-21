@@ -1367,6 +1367,8 @@ function renderDashboard(){
     '<div class="kpi-card"><div class="kpi-label">SCALPING</div><div class="kpi-value" style="font-size:14px">'+scalpCount+'/'+SC+' '+scalpStatus+'</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">OPTIONS</div><div class="kpi-value" style="font-size:14px">'+optCount+'/'+OPT_SETS+' '+optStatus+'</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">PROFIT ROTATION</div><div class="kpi-value" style="font-size:14px;color:'+(S.rotation.enabled?'var(--green)':'var(--muted)')+'">'+(S.rotation.enabled?'ON':'OFF')+'</div><div class="kpi-sub">Events: '+S.rotation.events+'</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">MOM LOSS PAUSE</div><div class="kpi-value" style="font-size:14px;color:'+(lossPauseMs('MOMENTUM')?'var(--red)':'var(--green)')+'">'+(lossPauseMs('MOMENTUM')?Math.ceil(lossPauseMs('MOMENTUM')/60000)+'m':'READY')+'</div><div class="kpi-sub">3-loss protection</div></div>'+
+    '<div class="kpi-card"><div class="kpi-label">SCALP LOSS PAUSE</div><div class="kpi-value" style="font-size:14px;color:'+(lossPauseMs('SCALPING')?'var(--red)':'var(--green)')+'">'+(lossPauseMs('SCALPING')?Math.ceil(lossPauseMs('SCALPING')/60000)+'m':'READY')+'</div><div class="kpi-sub">3-loss protection</div></div>'+
     '</div></div>';
   const riskPanel='<div class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">Risk & Mode</div></div>'+
     '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">'+

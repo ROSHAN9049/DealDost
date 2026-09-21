@@ -337,6 +337,33 @@ function paperOpen(x,e){
   S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:S.mode==='LIVE',mode:S.mode,reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
   save();return true;
 }
+async function testnetPreflight(x,e){
+  if(S.mode!=='TESTNET'||!x||!x.confirmed||!['MOMENTUM','SCALPING'].includes(e))return false;
+  const z=signal(x,e),r=riskModel(x,e,N(S.testnetAccount?.availableBalance)||S.eq);
+  if(!z||z==='WAIT'||!Number.isFinite(r.q)||r.q<=0)return false;
+  try{
+    const resp=await fetch(TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preflight',symbol:x.s,side:z,quantity:r.q})});
+    const j=await resp.json();
+    if(j.testnetUnavailable||j.restricted){
+      S.testnetRestricted=true;S.auto=false;
+      S.err='TESTNET: '+(j.error||'Binance Futures Demo is unavailable.');
+      render();return false;
+    }
+    if(!resp.ok){
+      const msg=String(j.error||j.msg||'Testnet replacement preflight failed');
+      if(/maximum allowable position|position at current leverage|max position/i.test(msg)){
+        S.testnetPositionBlocked[x.s]=Date.now()+10*60*1000;
+        S.err='TESTNET: '+x.s+' replacement blocked — Binance Demo maximum position at current leverage. Existing position kept; no retry for 10m.';
+      }else S.err='TESTNET: '+x.s+' replacement preflight failed — '+msg+' Existing position kept.';
+      render();return false;
+    }
+    return j.preflight===true;
+  }catch(err){
+    S.err='TESTNET: '+x.s+' replacement preflight failed — '+err.message+' Existing position kept.';
+    render();return false;
+  }
+}
+
 async function testnetOpen(x,e){
   if(!['MOMENTUM','SCALPING'].includes(e)||!reserveEntry(e))return false;
   try{
@@ -620,6 +647,16 @@ async function profitRotation(){
      N(finalRow.pipelineVol)<VOL_FILTER*1.10||N(finalRow.qualityScore)<QUALITY_MIN+5){
     S.rotation.lastResult='BLOCKED';
     S.rotation.lastReason='Replacement signal changed/blocked — existing position kept';
+    S.rotation.lastAttemptKey=attemptKey;
+    save();render();return;
+  }
+
+  // TESTNET rotation is two-phase: validate the replacement with Binance Demo
+  // using a non-placing order test BEFORE closing the existing position.
+  // This prevents a rejected replacement from leaving rotation without a slot.
+  if(S.mode==='TESTNET'&&!(await testnetPreflight(x,e))){
+    S.rotation.lastResult='BLOCKED';
+    S.rotation.lastReason='Replacement preflight failed — existing position kept';
     S.rotation.lastAttemptKey=attemptKey;
     save();render();return;
   }

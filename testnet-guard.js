@@ -71,11 +71,50 @@
     return nativeOpen(url,...args);
   };
 
+  // HARD POPUP LOCK: no script/background refresh is allowed to open a new tab.
+  // DealDost does not need window.open for scanner, market feed, or execution.
+  window.open=function(){
+    console.warn('[DealDost] blocked popup/new-tab navigation');
+    return null;
+  };
+
   const nativeAnchorSetAttribute=HTMLAnchorElement.prototype.setAttribute;
   HTMLAnchorElement.prototype.setAttribute=function(name,value){
     if(String(name).toLowerCase()==='href' && blockExternalDestination(value,'anchor.setAttribute'))return;
     return nativeAnchorSetAttribute.apply(this,arguments);
   };
+
+  // Also intercept direct anchor.href assignments, which bypass setAttribute().
+  try{
+    const anchorProto=HTMLAnchorElement.prototype;
+    const hrefDesc=Object.getOwnPropertyDescriptor(anchorProto,'href');
+    if(hrefDesc&&hrefDesc.get&&hrefDesc.set){
+      Object.defineProperty(anchorProto,'href',{
+        configurable:hrefDesc.configurable,
+        enumerable:hrefDesc.enumerable,
+        get:hrefDesc.get,
+        set:function(value){
+          if(blockExternalDestination(value,'anchor.href='))return;
+          return hrefDesc.set.call(this,value);
+        }
+      });
+    }
+  }catch(e){}
+
+  // Remove/neutralize dynamically-created external links before they can be clicked.
+  const scrubExternalLinks=()=>{
+    try{
+      document.querySelectorAll('a[href]').forEach(link=>{
+        if(blockExternalDestination(link.href,'anchor.scan')){
+          link.removeAttribute('href');
+          link.removeAttribute('target');
+        }
+      });
+    }catch(e){}
+  };
+  const observer=new MutationObserver(()=>scrubExternalLinks());
+  try{observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['href','target']});}catch(e){}
+  setTimeout(scrubExternalLinks,0);
 
   const originalAnchorClick=HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click=function(){

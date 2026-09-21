@@ -671,11 +671,22 @@ async function profitRotation(){
     const now=Date.now();
     const ROTATION_COOLDOWN=5*60e3;
     const FAILED_COOLDOWN=2*60e3;
-    const MIN_IMPROVEMENT=10;
-    const PROFITABLE_MIN_IMPROVEMENT=20;
+    // V3.1 Rotation Stability: require a materially stronger replacement.
+    // Losses need +15 strength; profitable positions need +30.
+    const MIN_IMPROVEMENT=15;
+    const PROFITABLE_MIN_IMPROVEMENT=30;
+    // Avoid churn around flat/near-flat positions where the close/open PNL
+    // difference is too small to justify another exchange action.
+    const MIN_LOSS_MAGNITUDE=0.10;
+    const MIN_PROFIT_MAGNITUDE=0.10;
+    // The same candidate cannot be selected for rotation again for 30 minutes,
+    // even if it was closed later. This is separate from the normal symbol
+    // cooldown and protects against repeated rotation loops.
+    const CANDIDATE_COOLDOWN=30*60e3;
     const MAX_CANDIDATES=12;
     if(!S.rotation.lastByEngine||typeof S.rotation.lastByEngine!=='object')S.rotation.lastByEngine={};
     if(!S.rotation.failedByEngine||typeof S.rotation.failedByEngine!=='object')S.rotation.failedByEngine={};
+    if(!S.rotation.lastCandidateAt||typeof S.rotation.lastCandidateAt!=='object')S.rotation.lastCandidateAt={};
 
     const today=new Date().toDateString();
     if(S.rotation.rotationDate!==today){
@@ -728,6 +739,9 @@ async function profitRotation(){
         if(signal(liveRow,ce)==='WAIT')continue;
         if(now-N(S.lastTrade[liveRow.s]||0)<(ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN))continue;
         if(S.mode==='TESTNET'&&N(S.testnetPositionBlocked?.[liveRow.s]||0)>now)continue;
+        // V3.1 candidate reuse lock: do not repeatedly rotate into the same
+        // symbol within the stability window.
+        if(now-N(S.rotation.lastCandidateAt[liveRow.s]||0)<CANDIDATE_COOLDOWN)continue;
         if(N(liveRow.pipelineVol)<VOL_FILTER*1.10)continue;
         if(N(liveRow.qualityScore)<QUALITY_MIN+5)continue;
 
@@ -735,7 +749,14 @@ async function profitRotation(){
         if(!gate.ok)continue;
 
         const comparison=rotationImprovement(liveRow,closedPos,ce);
-        const required=N(closedPos.pnl)>0?PROFITABLE_MIN_IMPROVEMENT:MIN_IMPROVEMENT;
+        const closedPnl=N(closedPos.pnl);
+        const required=closedPnl>0?PROFITABLE_MIN_IMPROVEMENT:MIN_IMPROVEMENT;
+
+        // Flat/near-flat positions are not worth closing just for a tiny
+        // strength edge. Require a larger improvement when the current PNL
+        // is too close to zero.
+        if(closedPnl<=0 && Math.abs(closedPnl)<MIN_LOSS_MAGNITUDE && comparison.delta<20)continue;
+        if(closedPnl>0 && closedPnl<MIN_PROFIT_MAGNITUDE)continue;
         if(comparison.delta<required)continue;
 
         const score=comparison.delta*10+N(liveRow.qualityScore);
@@ -833,6 +854,7 @@ async function profitRotation(){
       S.rotation.lastReason=reason+' · strength '+best.comparison.oldScore+'→'+best.comparison.newScore+' · +'+best.comparison.delta;
       S.rotation.lastResult='SUCCESS';
       S.rotation.lastAttemptKey=attemptKey;
+      S.rotation.lastCandidateAt[x.s]=Date.now();
     }else{
       S.rotation.lastResult='FAILED';
       const detail=String(S.err||'').replace(/^TESTNET:\s*/,'').trim();

@@ -88,6 +88,39 @@
   };
 
   // Also intercept direct anchor.href assignments, which bypass setAttribute().
+  // Lock the Location.href setter too: some legacy/browser paths can navigate
+  // through window.location.href without calling assign()/replace().
+  try{
+    const lp=Location.prototype;
+    const hrefDesc=Object.getOwnPropertyDescriptor(lp,'href');
+    if(hrefDesc&&hrefDesc.get&&hrefDesc.set){
+      Object.defineProperty(lp,'href',{
+        configurable:hrefDesc.configurable,
+        enumerable:hrefDesc.enumerable,
+        get:hrefDesc.get,
+        set:function(value){
+          if(blockExternalDestination(value,'location.href'))return;
+          return hrefDesc.set.call(this,value);
+        }
+      });
+    }
+  }catch(e){
+    console.warn('[DealDost] Location.href guard install failed:',e);
+  }
+
+  // Catch programmatic anchor.click() directly as a second safety layer.
+  // Normal trusted user clicks are still handled by the capture-phase guard.
+  try{
+    const nativeAnchorClick=HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click=function(){
+      try{
+        if(blockExternalDestination(this.href,'anchor.click'))return;
+      }catch(e){}
+      return nativeAnchorClick.call(this);
+    };
+  }catch(e){
+    console.warn('[DealDost] anchor.click guard install failed:',e);
+  }
   try{
     const anchorProto=HTMLAnchorElement.prototype;
     const hrefDesc=Object.getOwnPropertyDescriptor(anchorProto,'href');

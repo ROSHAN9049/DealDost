@@ -29,7 +29,7 @@ const S={
   pos:[],hist:[],eq:10000,real:0,fees:0,optReal:0,optFees:0,
   dailyRiskUsed:0,dailyRiskDate:'',rotationId:0,
   account:null,testnetAccount:null,testnetStatus:null,testnetSymbols:new Set(),testnetSymbolsReady:false,testnetRestricted:false,testnetRejectedSymbols:new Set(),
-  err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
+  err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},lastTestnetSync:0,busy:false,
   optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',optTestnetStatus:{connected:false,locked:true,error:''},
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',longContract:'',shortContract:'',expiry:0,strike:0,shortStrike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
   scanTimer:null,manageTimer:null,optTimer:null,
@@ -896,6 +896,12 @@ async function managePaper(){
 }
 async function manageTestnet(){
   if(S.mode!=='TESTNET')return;
+  // Dedicated TESTNET reconciliation. Scanner refresh never calls Demo account APIs.
+  const now=Date.now();
+  if(now-N(S.lastTestnetSync)>=5000){
+    S.lastTestnetSync=now;
+    try{await syncTestnet()}catch{}
+  }
   for(const p of [...S.pos]){
     if(p.mode!=='TESTNET'||p.e==='EXTERNAL'||!N(p.tp))continue;
     const x=N(S.t[p.s]?.p); if(!x)continue;

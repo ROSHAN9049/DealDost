@@ -46,7 +46,7 @@ export default async function handler(req0,res){
   if(!KEY||!SECRET)return res.status(503).json({error:'Binance Futures Demo credentials are not configured'});
   try{
     const b=req0.body||{},action=String(b.action||'order'),symbol=String(b.symbol||'').toUpperCase();
-    if(!['order','close','cancelAll'].includes(action))return res.status(400).json({error:'Unsupported action'});
+    if(!['order','preflight','close','cancelAll'].includes(action))return res.status(400).json({error:'Unsupported action'});
     if(!/^[A-Z0-9_]{5,30}$/.test(symbol))return res.status(400).json({error:'Invalid symbol'});
     if(action==='cancelAll')return res.status(200).json(await req('DELETE','/fapi/v1/allOpenOrders',{symbol}));
     const info=await symbolInfo(symbol);
@@ -61,6 +61,11 @@ export default async function handler(req0,res){
     const requestedSide=String(b.side||'BUY').toUpperCase();
     if(!['BUY','SELL'].includes(requestedSide))return res.status(400).json({error:'Invalid side'});
     const side=action==='close'?(requestedSide==='BUY'?'SELL':'BUY'):requestedSide;
+    // Non-placing exchange preflight used by safe TESTNET rotation.
+    if(action==='preflight'){
+      await testOrder(symbol,side,quantity,false);
+      return res.status(200).json({preflight:true,symbol,side,quantity,serverPrice:px,notional:quantity*px});
+    }
     await testOrder(symbol,side,quantity,action==='close');
     const entryParams={symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'};if(action==='close')entryParams.reduceOnly='true';
     const entry=await req('POST','/fapi/v1/order',entryParams);

@@ -919,9 +919,10 @@ async function syncAccount(){
 async function syncTestnet(){
   if(S.mode!=='TESTNET')return;
   try{
-    const [a,pr]=await Promise.all([
+    const [a,pr,ao]=await Promise.all([
       api(TN_AC,'/fapi/v2/account'),
-      api(TN_AC,'/fapi/v2/positionRisk')
+      api(TN_AC,'/fapi/v2/positionRisk'),
+      api(TN_AC,'/fapi/v1/openAlgoOrders')
     ]);
     if(a.testnetUnavailable||a.restricted||pr?.testnetUnavailable||pr?.restricted){
       S.testnetRestricted=true;S.auto=false;
@@ -938,14 +939,17 @@ async function syncTestnet(){
       margin:N(a.totalMarginBalance)
     };
 
-    // Reconcile TESTNET positions by persistent DealDost ownership, not Binance
-    // positionRisk ordering. This prevents a managed position (e.g. USUALUSDT)
-    // from randomly becoming EXTERNAL after refresh/reconciliation.
+    // Reconcile TESTNET positions from Binance first, then restore DealDost
+    // ownership/risk metadata from the persistent registry. Binance positionRisk
+    // is authoritative for side/qty/entry/mark/UPNL; local metadata is only
+    // authoritative for engine ownership and strategy details.
     const remote=(Array.isArray(pr)?pr:[]).filter(p=>Math.abs(N(p.positionAmt))>0);
     const remoteBySymbol=new Map(remote.map(p=>[String(p.symbol),p]));
+    const algoRows=Array.isArray(ao)?ao:[];
     const localTest=S.pos.filter(p=>p.mode==='TESTNET');
     const managed=loadTestnetManaged();
     const next=[];
+
     for(const rp of remote){
       const symbol=String(rp.symbol),amt=N(rp.positionAmt);
       const side=amt>0?'BUY':'SELL',qty=Math.abs(amt),entry=N(rp.entryPrice),current=N(rp.markPrice)||entry;
@@ -954,6 +958,39 @@ async function syncTestnet(){
       const registryMatch=reg&&(!reg.side||reg.side===side)&&['MOMENTUM','SCALPING'].includes(reg.e);
       const localMatch=local&&local.side===side&&['MOMENTUM','SCALPING'].includes(local.e);
       const engine=registryMatch?reg.e:(localMatch?local.e:'EXTERNAL');
+      const row=S.rows.find(r=>r.s===symbol);
+
+      // Recover the actual exchange-side protective STOP_MARKET when available.
+      // Binance migrated Futures conditional orders to the Algo Order API, so
+      // ordinary openOrders alone is not sufficient for protection reconciliation.
+      const exitSide=side==='BUY'?'SELL':'BUY';
+      const stopOrder=algoRows
+        .filter(o=>String(o.symbol)===symbol&&String(o.side||'').toUpperCase()===exitSide)
+        .find(o=>/STOP/i.test(String(o.orderType||o.type||''))||/STOP/i.test(String(o.algoType||'')));
+      const exchangeSL=N(stopOrder?.triggerPrice||stopOrder?.stopPrice);
+
+      // Recover strategy metadata only when it is missing. Never overwrite a
+      // known local/r egistry value merely because the live market changed.
+      let stopPct=N(local?.stopPct)||N(reg?.stopPct);
+      let tpPct=N(local?.tpPct)||N(reg?.tpPct);
+      if(!(stopPct>0)&&row&&['MOMENTUM','SCALPING'].includes(engine)){
+        const rr=riskModel(row,engine,S.testnetAccount.availableBalance||S.eq);
+        stopPct=N(rr.stop);tpPct=N(rr.tp);
+      }
+      if(!(stopPct>0))stopPct=.006;
+      if(!(tpPct>0))tpPct=stopPct*2;
+
+      const sl=exchangeSL>0?exchangeSL:(N(local?.sl)||N(reg?.sl)||(
+        side==='BUY'?entry*(1-stopPct):entry*(1+stopPct)
+      ));
+      const tp=N(local?.tp)||N(reg?.tp)||(
+        side==='BUY'?entry*(1+tpPct):entry*(1-tpPct)
+      );
+      const actualNotional=Math.abs(qty*current);
+      const actualRisk=sl>0&&entry>0?Math.abs(entry-sl)*qty:0;
+      const actualRiskPct=thisRiskPct(actualRisk,S.testnetAccount.availableBalance);
+      const protectionStatus=exchangeSL>0?'EXCHANGE STOP ACTIVE':(local?.sl||reg?.sl?'LOCAL STOP KNOWN':'PROTECTION UNKNOWN');
+
       const p={
         ...(local||{}),
         id:local?.id||'tn-sync-'+symbol,s:symbol,e:engine,side,entry,current,q:qty,
@@ -962,20 +999,20 @@ async function syncTestnet(){
         opened:local?.opened||N(reg?.opened)||Date.now(),
         signalStage:local?.signalStage||reg?.signalStage||'CONFIRMED',
         qualityScore:N(local?.qualityScore)||N(reg?.qualityScore),
-        riskPct:N(local?.riskPct)||N(reg?.riskPct),riskAmount:N(local?.riskAmount)||N(reg?.riskAmount),notional:N(local?.notional)||N(reg?.notional)||qty*current,
-        stopPct:N(local?.stopPct)||N(reg?.stopPct),tpPct:N(local?.tpPct)||N(reg?.tpPct),
-        sl:N(local?.sl)||N(reg?.sl)||0,
-        tp:N(local?.tp)||N(reg?.tp)||0
+        riskPct:actualRiskPct,riskAmount:actualRisk,notional:actualNotional,
+        stopPct, tpPct, sl, tp, protectionStatus,
+        protectionOrderId:stopOrder?.algoId||stopOrder?.orderId||local?.protectionOrderId||reg?.protectionOrderId||null
       };
       if(engine!=='EXTERNAL'){
         managed[symbol]={...reg,s:symbol,e:engine,side,orderId:p.orderId||null,opened:p.opened,lastSeen:Date.now(),
-          signalStage:p.signalStage,qualityScore:p.qualityScore,riskPct:p.riskPct,riskAmount:p.riskAmount,notional:p.notional,stopPct:p.stopPct,tpPct:p.tpPct};
+          signalStage:p.signalStage,qualityScore:p.qualityScore,riskPct:p.riskPct,riskAmount:p.riskAmount,notional:p.notional,
+          stopPct:p.stopPct,tpPct:p.tpPct,sl:p.sl,tp:p.tp,protectionOrderId:p.protectionOrderId};
       }
       next.push(p);
     }
+
     // Brief grace period only for a known local managed position that Binance
-    // temporarily omits during reconciliation. Unknown/external positions are
-    // never retained as managed.
+    // temporarily omits during reconciliation.
     const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&
       ['MOMENTUM','SCALPING'].includes(p.e)&&Date.now()-N(p.opened)<60000);
     for(const p of stale)if(managed[p.s])managed[p.s].lastSeen=Date.now();
@@ -983,17 +1020,14 @@ async function syncTestnet(){
       if(!remoteBySymbol.has(s)&&Date.now()-N(m.lastSeen||m.opened)>60000)delete managed[s];
     }
     saveTestnetManaged(managed);
-    // Enforce engine ownership caps during reconciliation without ever
-    // force-closing a real Demo position. If an old/stale registry makes an
-    // engine appear over-cap, keep only the first limit positions managed by
-    // that engine and classify overflow as EXTERNAL until it is closed.
+
+    // Enforce engine ownership caps without ever force-closing a real Demo position.
     const managedByEngine={MOMENTUM:0,SCALPING:0};
     for(const p of next){
       if(['MOMENTUM','SCALPING'].includes(p.e)){
         if(managedByEngine[p.e] < engineLimit(p.e)) managedByEngine[p.e]++;
         else{
-          p.e='EXTERNAL';
-          p.qualityScore=0;
+          p.e='EXTERNAL';p.qualityScore=0;
           if(managed[p.s])delete managed[p.s];
         }
       }
@@ -1004,6 +1038,10 @@ async function syncTestnet(){
     const msg=String(e.message||e);
     S.err=/invalid symbol/i.test(msg)?'TESTNET account sync returned an unexpected Invalid symbol response. Trading is blocked until Demo account sync succeeds.':'Testnet sync: '+msg;
   }
+}
+function thisRiskPct(risk,balance){
+  const b=N(balance);
+  return risk>0&&b>0?risk/b:0;
 }
 async function checkTestnetStatus(){
   try{const r=await fetch(TN_STATUS,{cache:'no-store'});if(r.ok)S.testnetStatus=await r.json()}catch(e){S.testnetStatus=null}
@@ -1667,7 +1705,7 @@ function renderPositions(){
       const pnl=N(p.pnl),pnlPct=p.entry&&p.current?((p.current-p.entry)/p.entry*100*(p.side==='SELL'?-1:1)):0;
       const age=p.opened?Math.round((Date.now()-p.opened)/60000)+'m':'—';
       return '<div class="pos-card '+(p.side==='SELL'?'sell-side':'')+'"><div class="pos-head"><span class="pos-coin">'+E(p.s)+'</span><span class="pos-tag">'+E(p.e)+'</span><span class="pos-tag">'+E(p.side)+'</span><span class="pos-tag">'+E(p.mode||'PAPER')+'</span>'+(p.signalStage?'<span class="pos-tag">'+E(p.signalStage)+'</span>':'')+(p.sl?'<button class="btn sm red" onclick="DD.close(\''+E(p.s)+'\')">Close</button>':'')+'</div>'+
-        '<div class="pos-grid">'+posField('Entry',fmtPrice(p.entry))+posField('Mark',fmtPrice(p.current))+posField('Qty',fmtQty(p.q))+posField('Notional',R(N(p.notional)||N(p.entry)*N(p.q)))+posField('Risk',p.riskPct?P(p.riskPct*100):'—')+posField('SL',p.stopPct?P(p.stopPct*100):fmtPrice(p.sl))+posField('TP',p.tpPct?P(p.tpPct*100):fmtPrice(p.tp))+posField('Age',age)+posField('Quality',N(p.qualityScore)||'—')+'</div>'+
+        '<div class="pos-grid">'+posField('Entry',fmtPrice(p.entry))+posField('Mark',fmtPrice(p.current))+posField('Qty',fmtQty(p.q))+posField('Notional',R(N(p.notional)||N(p.entry)*N(p.q)))+posField('Risk',p.riskPct?P(p.riskPct*100):'—')+posField('SL',p.stopPct?P(p.stopPct*100):fmtPrice(p.sl))+posField('TP',p.tpPct?P(p.tpPct*100):fmtPrice(p.tp))+posField('Protection',p.mode==='TESTNET'?(p.protectionStatus||'UNKNOWN'):'—')+posField('Age',age)+posField('Quality',N(p.qualityScore)||'—')+'</div>'+
         '<div class="pos-pnl '+cl(pnl)+'">Net PNL: ₹'+PNL(p.pnl)+' ('+P(pnlPct)+')</div></div>';
     }).join('');
     html+='</div></div>';

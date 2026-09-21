@@ -55,10 +55,26 @@ async function cancelAll(symbol){try{return await req('DELETE','/eapi/v1/allOpen
 async function account(){return req('GET','/eapi/v1/marginAccount')}
 export default async function handler(req0,res){
   const b=req0.body||{}, action=String(req0.query?.action||b.action||'');
+  if(req0.method==='GET'&&action==='market'){
+    const path=String(req0.query?.path||'');
+    const allowed=new Set(['/eapi/v1/ping','/eapi/v1/time','/eapi/v1/exchangeInfo','/eapi/v1/mark','/eapi/v1/ticker']);
+    if(!allowed.has(path))return res.status(400).json({error:'Unsupported Options market path'});
+    try{
+      const r=await fetch(BASE+path,{cache:'no-store',headers:{accept:'application/json'}});
+      const text=await r.text();let data;try{data=JSON.parse(text)}catch{data={raw:text}};
+      if(!r.ok)return res.status(200).json({ok:false,available:false,baseUrl:BASE,path,error:data.msg||data.error||'Options Demo market request failed',code:data.code||null,status:r.status});
+      const out={ok:true,available:true,baseUrl:BASE,path,data};
+      if(path==='/eapi/v1/exchangeInfo')out.contractCount=Array.isArray(data.optionSymbols)?data.optionSymbols.filter(x=>String(x.status||'').toUpperCase()==='TRADING').length:0;
+      return res.status(200).json(out);
+    }catch(e){return res.status(200).json({ok:false,available:false,baseUrl:BASE,path,error:e.message});}
+  }
   if(req0.method==='GET'&&action==='state'){
     if(!KEY||!SECRET)return res.status(200).json({available:false,error:'Options TESTNET credentials are not configured'});
-    if(!UNLOCKED)return res.status(200).json({available:false,locked:true,error:'Options TESTNET execution is locked'});
-    try{const a=await account();return res.status(200).json({available:true,account:a})}
+    try{
+      const ping=await fetch(BASE+'/eapi/v1/ping',{cache:'no-store'});
+      if(!ping.ok)return res.status(200).json({available:false,connected:false,locked:!UNLOCKED,error:'Options Demo connectivity failed ('+ping.status+')'});
+      if(!UNLOCKED)return res.status(200).json({available:true,connected:true,locked:true,executionUnlocked:false});
+      const a=await account();return res.status(200).json({available:true,connected:true,locked:false,executionUnlocked:true,account:a})
     catch(e){return res.status(200).json({available:false,error:e.message,code:e.code||null})}
   }
   if(req0.method!=='POST')return res.status(405).json({error:'POST only'});

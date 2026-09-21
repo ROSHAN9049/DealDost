@@ -1907,14 +1907,33 @@ window.DD={
   },
   toggleLiveAuto(){if(S.mode!=='LIVE'||!S.liveTrading){S.liveAuto=false;S.err='LIVE AUTO blocked: LIVE Trading must be ON first.';render();return}if(!S.liveAuto){if(!confirm('Enable LIVE AUTO trading? This will place REAL orders on Binance automatically.'))return}S.liveAuto=!S.liveAuto;render()},toggleLiveTrading(){if(S.mode!=='LIVE'){S.liveTrading=false;render();return}if(!S.liveTrading&&!confirm('Enable LIVE TRADING? Real Binance orders may be placed only when all safety gates pass.'))return;S.liveTrading=!S.liveTrading;if(!S.liveTrading)S.liveAuto=false;render()},toggleEmergency(){S.emergencyStop=!S.emergencyStop;if(S.emergencyStop){S.liveAuto=false;S.auto=false}save();render()},
   setMode(m){
-    if(m===S.mode)return;
+    if(!['PAPER','TESTNET','LIVE'].includes(m))return;
+    // Clicking the active TESTNET/PAPER/LIVE mode button should still open
+    // that mode's dedicated dashboard. Previously the early return made the
+    // TESTNET button appear unresponsive when TESTNET was already selected.
+    if(m===S.mode){
+      if(m==='TESTNET')S.tab='testnet';
+      else if(m==='PAPER')S.tab='paper';
+      else if(m==='LIVE')S.tab='live';
+      render();
+      if(m==='TESTNET'){
+        syncTestnetSymbols().then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render).catch(()=>render());
+      }
+      return;
+    }
     if(m==='LIVE'&&!confirm('Switch to LIVE mode? Real Binance orders will be possible. Live Auto stays OFF until you enable it separately.'))return;
     // Save current mode state
     save();
     S.mode=m;S.liveAuto=false;S.liveTrading=false;
     localStorage.setItem('ddMode',m);
-    // Load new mode state
-    load();render();if(m==='LIVE')syncAccount();if(m==='TESTNET'){syncTestnetSymbols().then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render)}
+    // Load new mode state, then show the dedicated mode dashboard immediately.
+    load();
+    S.tab=m==='TESTNET'?'testnet':m==='PAPER'?'paper':'live';
+    render();
+    if(m==='LIVE')syncAccount();
+    if(m==='TESTNET'){
+      syncTestnetSymbols().then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render).catch(()=>render());
+    }
   },
   async close(sym){
     const p=S.pos.find(x=>x.s===sym);if(!p||p.closing)return false;

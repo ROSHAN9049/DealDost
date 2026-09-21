@@ -1820,6 +1820,8 @@ function renderSettings(){
 let _lastRender=0;
 function render(){
   const app=document.getElementById('app');if(!app)return;
+  try{
+
   let focusInfo=null;
   const ae=document.activeElement;
   if(ae&&ae!==document.body&&app.contains(ae)){focusInfo={tag:ae.tagName,id:ae.id||'',class:ae.className||'',selStart:ae.selectionStart,selEnd:ae.selectionEnd,value:ae.value||''}}
@@ -1863,6 +1865,10 @@ function render(){
     }catch(e){}
   }
   if(S.tab==='pnl')renderPnlCharts();
+  }catch(e){
+    console.error('[DealDost render]',e);
+    app.innerHTML='<div style="padding:24px;color:#ff5470;font-family:system-ui;background:#04080f;min-height:100vh"><b>DealDost render error</b><pre style="white-space:pre-wrap;margin-top:12px">'+E(e?.stack||e?.message||e)+'</pre><button style="margin-top:12px;padding:10px 14px" onclick="location.reload()">Reload</button></div>';
+  }
 }
 // Throttled render for high-frequency updates (WS ticks, manage intervals)
 function renderThrottled(){

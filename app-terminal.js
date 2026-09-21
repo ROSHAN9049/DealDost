@@ -1295,7 +1295,7 @@ async function manageOptions(){
     if(hitSL||hitTP||expired){
       if(S.mode==='TESTNET'){
         try{
-          const rr=await fetch(OPT_TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'closeSpread',setId:set.id,longSymbol:set.longContract,shortSymbol:set.shortContract,quantity:set.qty,longSide:'SELL',shortSide:'BUY'})});
+          const rr=await fetch(OPT_TN_TR,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'closeSpread',setId:set.id,longSymbol:set.longContract,shortSymbol:set.shortContract,quantity:set.qty,longPrice:N(S.optData.marks[set.longContract]?.bid)||N(S.optData.marks[set.longContract]?.p),shortPrice:N(S.optData.marks[set.shortContract]?.ask)||N(S.optData.marks[set.shortContract]?.p),longSide:'SELL',shortSide:'BUY'})});
           const jj=await rr.json();if(!rr.ok)throw Error(jj.error||jj.msg||'Options TESTNET close failed');
         }catch(err){set.reason='TESTNET close blocked: '+err.message;continue}
       }

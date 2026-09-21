@@ -127,7 +127,7 @@
       const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
       if(link){
         const u=new URL(link.href,window.location.href);
-        if(u.origin!==window.location.origin && !event.isTrusted){
+        if(u.origin!==window.location.origin){
           event.preventDefault();
           event.stopImmediatePropagation();
           console.warn('[DealDost] blocked synthetic external anchor navigation:',u.href);
@@ -139,7 +139,7 @@
   document.addEventListener('click',(event)=>{
     try{
       const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
-      if(link&&!event.isTrusted&&blockNavigation(link.href,'anchor')){event.preventDefault();event.stopImmediatePropagation();}
+      if(link&&blockNavigation(link.href,'anchor')){event.preventDefault();event.stopImmediatePropagation();}
     }catch(e){}
   },true);
 

@@ -1134,9 +1134,14 @@ async function scan(){
       }));
     }
     S.lastScan=Date.now();S.err='';
-    await syncAccount();
-    if(S.mode==='TESTNET')await syncTestnetSymbols();
-    await syncTestnet();
+    // Keep account reconciliation strictly mode-isolated. TESTNET refreshes
+    // only the Binance Futures Demo account; LIVE refreshes only the LIVE account.
+    // PAPER does not touch either exchange account.
+    if(S.mode==='LIVE')await syncAccount();
+    if(S.mode==='TESTNET'){
+      await syncTestnetSymbols();
+      await syncTestnet();
+    }
     await managePaper();await engine();render();
   }catch(e){S.err='Market scan: '+e.message;render()}
   finally{S.busy=false}

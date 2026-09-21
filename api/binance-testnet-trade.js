@@ -130,9 +130,13 @@ export default async function handler(req0,res){
       // this symbol are cleaned before entry/close so the account does not hit the
       // Demo max-algo-order limit from old protections.
       try{
-        const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:formatStep(sl,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
-        const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:formatStep(tp,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
-        protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'algoOrder'};
+        // Demo currently reports a max stop/algo-order limit when every
+        // position carries both SL and TP. Keep one exchange-side protective
+        // STOP_MARKET per position; TP is handled by DealDost's 3s TESTNET
+        // monitor and the normal close endpoint. This preserves hard downside
+        // protection without consuming two algo slots per position.
+        const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:formatStep(sl,tick),closePosition:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        protection={stopOrderId:so.algoId||so.orderId,stopPrice:sl,takeProfitPrice:tp,route:'algoOrder-stop-only',tpMode:'software'};
       }catch(secondErr){
         try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}
         throw Error('Demo entry protection failed; emergency close attempted. Algo: '+secondErr.message)

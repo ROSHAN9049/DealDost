@@ -11,7 +11,6 @@
   const MSG='Binance Futures Demo trading is unavailable from this deployment location or account eligibility.';
   const TTL=10*60*1000;
   const nativeFetch=window.fetch.bind(window);
-  const blockBinanceNavigation=(value)=>isBinanceDemoUrl(value);
   const nativeOpen=window.open.bind(window);
   const isBinanceDemoUrl=(value)=>{
     try{
@@ -20,6 +19,7 @@
       return host==='demo.binance.com'||host.endsWith('.demo.binance.com')||host==='testnet.binancefuture.com';
     }catch(e){return false}
   };
+  const blockBinanceNavigation=(value)=>isBinanceDemoUrl(value);
 
   // The scanner must stay inside DealDost. Binance Demo is an API/account
   // execution environment, not a page that the terminal should auto-open.

@@ -1,1 +1,11 @@
-{"name":"binance-command-center","private":true,"version":"1.0.0","scripts":{"build":"echo static-build"}}
+{
+  "name": "binance-command-center",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "echo static-build"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}

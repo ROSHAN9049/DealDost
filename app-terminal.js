@@ -1059,11 +1059,8 @@ async function syncTestnetSymbols(){
 async function scan(){
   if(S.busy)return;S.busy=true;
   try{
-    // TESTNET universe must be built only from symbols verified by Binance Futures Demo.
-    // The public market feed can contain contracts that Demo rejects for order placement.
-    if(S.mode==='TESTNET'&&!S.testnetSymbolsReady){
-      await syncTestnetSymbols();
-    }
+    // Scanner is independent of Binance Demo reconciliation.
+    // TESTNET symbol/account checks run only in the dedicated manager.
     const ex=await api(PUB,'/fapi/v1/exchangeInfo'),tt=await api(PUB,'/fapi/v1/ticker/24hr');
     const syms=new Set((ex.symbols||[]).filter(x=>x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING').map(x=>x.symbol));
     (Array.isArray(tt)?tt:[]).forEach(x=>{if(syms.has(x.symbol))S.t[x.symbol]={p:N(x.lastPrice),c:N(x.priceChangePercent),v:N(x.quoteVolume),bid:N(x.bidPrice),ask:N(x.askPrice)}});
@@ -1128,8 +1125,14 @@ async function scan(){
       // is deliberately isolated from the scanner so market refreshes can never
       // trigger Demo navigation or execution-side requests.
     }
-    await managePaper();await engine();render();
-  }catch(e){S.err='Market scan: '+e.message;render()}
+    // Publish the market/scanner result before any trading-engine work.
+    // This prevents an engine/reconciliation exception from replacing the dashboard
+    // immediately after Market Feed and Scanner finish loading.
+    try{render()}catch(e){console.error('[DealDost scan render]',e)}
+    try{await managePaper()}catch(e){console.error('[DealDost paper manager]',e)}
+    try{await engine()}catch(e){console.error('[DealDost engine]',e)}
+    try{render()}catch(e){console.error('[DealDost post-engine render]',e)}
+  }catch(e){S.err='Market scan: '+String(e?.message||e);try{render()}catch(err){console.error('[DealDost scan error render]',err)}}
   finally{S.busy=false}
 }
 

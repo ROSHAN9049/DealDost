@@ -10,7 +10,7 @@ function dec(v){const n=Number(v);return Number.isFinite(n)?n:0}
 function sign(params){const qs=new URLSearchParams(params);qs.set('signature',crypto.createHmac('sha256',SECRET).update(qs.toString()).digest('hex'));return qs.toString()}
 async function req(method,path,params={}){
   const q={...params,timestamp:String(Date.now()),recvWindow:'5000'};
-  const r=await fetch(BASE+path+(method==='GET'?'?'+sign(q):''),{method,headers:{'X-MBX-APIKEY':KEY,'Content-Type':'application/x-www-form-urlencoded',accept:'application/json'},...(method==='GET'?{}:{body:sign(q)}),cache:'no-store'});
+  const r=await fetch(BASE+path+(method==='GET'?'?'+sign(q):''),{method,headers:{'X-MBX-APIKEY':KEY,'Content-Type':'application/x-www-form-urlencoded',accept:'application/json'},...(method==='GET'?{}:{body:sign(q)}),cache:'no-store',redirect:'error'}});
   const text=await r.text();let j;try{j=JSON.parse(text)}catch{j={raw:text}}
   if(!r.ok){const e=Error(j.msg||j.error||'Binance Demo request failed');e.status=r.status;e.code=j.code;e.binanceMessage=j.msg||j.message||j.error;if(r.status===403||r.status===451)e.restricted=true;throw e}
   return j;
@@ -21,7 +21,7 @@ function ceilStep(v,step){if(!step||step<=0)return v;const p=stepPrecision(step)
 function priceStep(info){return dec((info.filters||[]).find(x=>x.filterType==='PRICE_FILTER')?.tickSize)}
 function formatStep(v,step){const p=stepPrecision(step);return Number(v).toFixed(p)}
 async function symbolInfo(symbol){
-  const r=await fetch(BASE+'/fapi/v1/exchangeInfo',{headers:{accept:'application/json'},cache:'no-store'});
+  const r=await fetch(BASE+'/fapi/v1/exchangeInfo',{headers:{accept:'application/json'},cache:'no-store',redirect:'error'});
   const text=await r.text();let e;try{e=JSON.parse(text)}catch{e={}}
   if(!r.ok){const err=Error(e.msg||e.error||('Demo exchangeInfo failed ('+r.status+')'));err.status=r.status;err.code=e.code;err.binanceMessage=e.msg||e.message||e.error;err.restricted=r.status===403||r.status===451;throw err}
   const s=(e.symbols||[]).find(x=>x.symbol===symbol);

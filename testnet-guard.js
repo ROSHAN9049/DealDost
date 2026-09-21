@@ -11,6 +11,7 @@
   const MSG='Binance Futures Demo trading is unavailable from this deployment location or account eligibility.';
   const TTL=10*60*1000;
   const nativeFetch=window.fetch.bind(window);
+  const blockBinanceNavigation=(value)=>isBinanceDemoUrl(value);
   const nativeOpen=window.open.bind(window);
   const isBinanceDemoUrl=(value)=>{
     try{
@@ -28,6 +29,12 @@
       return null;
     }
     return nativeOpen(url,...args);
+  };
+
+  const originalAnchorClick=HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click=function(){
+    try{if(blockBinanceNavigation(this.href)){console.warn('[DealDost] blocked programmatic Binance Demo link:',this.href);return;}}catch(e){}
+    return originalAnchorClick.apply(this,arguments);
   };
 
   document.addEventListener('click',(event)=>{

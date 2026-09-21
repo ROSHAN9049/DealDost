@@ -1897,7 +1897,18 @@ window.DD={
   get optView(){return S.optView},set optView(v){S.optView=v},
   get err(){return S.err},set err(v){S.err=v},
   render,scan,scanOptions,connectWS,
-  toggleAuto(){S.auto=!S.auto;render();if(S.auto)engine()},
+  toggleAuto(){
+    // TESTNET is API-only. Never start the browser-side execution engine
+    // directly from the UI toggle; this prevents any legacy/synthetic
+    // navigation path from opening Binance Demo in a new tab.
+    S.auto=!S.auto;
+    render();
+    if(S.auto && S.mode==='PAPER') engine();
+    if(S.auto && S.mode==='TESTNET'){
+      S.err='TESTNET Auto enabled — API execution only; browser navigation disabled.';
+      checkTestnetStatus().then(()=>{if(S.testnetRestricted){S.auto=false;}render()});
+    }
+  },
   toggleLiveAuto(){if(S.mode!=='LIVE'||!S.liveTrading){S.liveAuto=false;S.err='LIVE AUTO blocked: LIVE Trading must be ON first.';render();return}if(!S.liveAuto){if(!confirm('Enable LIVE AUTO trading? This will place REAL orders on Binance automatically.'))return}S.liveAuto=!S.liveAuto;render()},toggleLiveTrading(){if(S.mode!=='LIVE'){S.liveTrading=false;render();return}if(!S.liveTrading&&!confirm('Enable LIVE TRADING? Real Binance orders may be placed only when all safety gates pass.'))return;S.liveTrading=!S.liveTrading;if(!S.liveTrading)S.liveAuto=false;render()},toggleEmergency(){S.emergencyStop=!S.emergencyStop;if(S.emergencyStop){S.liveAuto=false;S.auto=false}save();render()},
   setMode(m){
     if(m===S.mode)return;

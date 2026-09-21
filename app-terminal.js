@@ -646,7 +646,11 @@ async function profitRotation(){
     S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);S.rotation.lastOpened=x.s;
     S.rotation.lastReason=reason;S.rotation.lastResult='SUCCESS';S.rotation.lastAttemptKey=attemptKey;
   }else{
-    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — replacement entry failed/blocked';S.rotation.lastAttemptKey=attemptKey;
+    S.rotation.lastResult='FAILED';
+    const detail=String(S.err||'').replace(/^TESTNET:\s*/,'').trim();
+    S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(detail?' · '+detail:'');
+    S.rotation.lastOpened='';
+    S.rotation.lastAttemptKey=attemptKey;
   }
   save();render();
   }finally{
@@ -1203,8 +1207,11 @@ function renderDashboard(){
   const todayTrades=S.hist.filter(h=>h.action==='EXIT'&&new Date(N(h.time)).toDateString()===today);
   const todayPnl=todayTrades.reduce((s,h)=>s+N(h.pnl),0);
   const avail=S.mode==='LIVE'?(S.account?.availableBalance||0):S.mode==='TESTNET'?(S.testnetAccount?.availableBalance||S.eq):S.eq;
+  const equity=S.mode==='TESTNET'
+    ? N(S.testnetAccount?.walletBalance||S.testnetAccount?.margin||S.eq)+N(S.testnetAccount?.unrealized||0)
+    : S.eq+unreal;
   const kpis=[
-    {l:'Total Equity',v:'₹'+R(S.eq+unreal),c:'acc'},{l:'Available Balance',v:'₹'+R(avail),c:''},
+    {l:'Total Equity',v:'₹'+R(equity),c:'acc'},{l:'Available Balance',v:'₹'+R(avail),c:''},
     {l:'Realized PNL',v:'₹'+PNL(S.real),c:pnlClass(S.real)},{l:'Unrealized PNL',v:'₹'+PNL(unreal),c:pnlClass(unreal)},
     {l:'Total PNL',v:'₹'+PNL(S.real+unreal),c:pnlClass(S.real+unreal)},{l:'Total Fees',v:'₹'+R(S.fees),c:''},
     {l:'Open Positions',v:S.pos.length+'',c:''},{l:"Today's Trades",v:todayTrades.length+'',c:''},

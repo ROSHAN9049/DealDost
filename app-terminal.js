@@ -435,8 +435,12 @@ async function testnetOpen(x,e){
     return false;
   }
   const vg=volatilityGuard(x,e),sg=spreadGuard(x);
-  if(!vg.ok){S.err='TESTNET: '+x.s+' blocked — volatility '+P(vg.atrPct*100)+' exceeds '+P(vg.max*100)+' safety limit.';render();return false}
-  if(!sg.ok){S.err='TESTNET: '+x.s+' blocked — spread '+P(sg.spreadPct*100)+' exceeds '+P(sg.max*100)+' safety limit.';render();return false}
+  // Expected local safety-filter rejections are NOT application errors.
+  // Keep the dashboard clean and let the scanner/engine continue evaluating
+  // other confirmed symbols. Real exchange/API failures are still reported
+  // through S.err below.
+  if(!vg.ok){render();return false}
+  if(!sg.ok){render();return false}
   if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e,true)){
     const last=N(S.lastTrade[x.s]||0),cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     const mins=last>0?Math.max(0,Math.ceil((cd-(Date.now()-last))/60000)):0;

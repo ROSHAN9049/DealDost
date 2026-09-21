@@ -71,10 +71,11 @@
     return nativeOpen(url,...args);
   };
 
-  // HARD POPUP LOCK: no script/background refresh is allowed to open a new tab.
-  // DealDost does not need window.open for scanner, market feed, or execution.
-  window.open=function(){
-    console.warn('[DealDost] blocked popup/new-tab navigation');
+  // HARD POPUP LOCK: DealDost background code must never create a new
+  // window/tab. Keep ONE authoritative window.open override; duplicate
+  // overrides can make the navigation guard order-dependent.
+  window.open=function(url,...args){
+    console.warn('[DealDost] blocked popup/new-tab navigation:',String(url||''));
     return null;
   };
 

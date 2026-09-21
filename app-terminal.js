@@ -1132,8 +1132,15 @@ async function scanOptions(){
     // PAPER uses Binance public Options market data. TESTNET uses the
     // dedicated Options Demo proxy so its contracts/quotes are never mixed
     // with mainnet Options data.
-    const optBase=S.mode==='TESTNET'?'/api/binance-options-testnet-market?path=':PUB;
-    const e=await api(optBase,'/eapi/v1/exchangeInfo');
+    const optBase=S.mode==='TESTNET'?'/api/binance-options-testnet-trade?action=market&path=':PUB;
+    const optGet=async path=>{
+      if(S.mode!=='TESTNET')return api(PUB,path);
+      const r=await fetch(optBase+encodeURIComponent(path),{cache:'no-store'});
+      const j=await r.json();
+      if(!r.ok||j.available===false||j.ok===false)throw Error(j.error||'Options TESTNET market data unavailable');
+      return j.data;
+    };
+    const e=await optGet('/eapi/v1/exchangeInfo');
     const raw=(e.optionSymbols||[]).map(o=>{
       const n=String(o.symbol||''),u=String(o.underlying||n.split('-')[0]).toUpperCase();
       const uu=/USDT$/.test(u)?u:u+'USDT';
@@ -1141,13 +1148,13 @@ async function scanOptions(){
       return{n,u:uu,side,k:N(o.strikePrice||o.strike),ex:N(o.expiryDate||o.expiry||o.expirationDate),status:String(o.status||'').toUpperCase()};
     });
     S.optData.contracts=raw.filter(x=>x.status==='TRADING');
-    const m=await api(optBase,'/eapi/v1/mark');S.optData.marks={};
+    const m=await optGet('/eapi/v1/mark');S.optData.marks={};
     (Array.isArray(m)?m:[]).forEach(x=>{S.optData.marks[x.symbol]={p:N(x.markPrice),d:N(x.delta),iv:N(x.markIV),g:N(x.gamma),t:N(x.theta),ve:N(x.vega),bid:N(x.bidPrice),ask:N(x.askPrice),oi:N(x.openInterest)||0,vol:N(x.volume)||0}});
     // Mark-price bid/ask can be zero for thin contracts. Enrich from the
     // official Options ticker so paper execution never pretends a zero-liquidity
     // contract can be filled. Binance documents bid/ask on /eapi/v1/ticker.
     try{
-      const ot=await api(optBase,'/eapi/v1/ticker');
+      const ot=await optGet('/eapi/v1/ticker');
       (Array.isArray(ot)?ot:[]).forEach(x=>{
         const q=S.optData.marks[x.symbol]||(S.optData.marks[x.symbol]={});
         q.bid=N(x.bidPrice)||q.bid||0;q.ask=N(x.askPrice)||q.ask||0;

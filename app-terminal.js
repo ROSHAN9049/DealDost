@@ -670,98 +670,116 @@ async function profitRotation(){
   try{
     const now=Date.now();
     const ROTATION_COOLDOWN=5*60e3;
+    const FAILED_COOLDOWN=2*60e3;
     const MIN_IMPROVEMENT=10;
-    const confirmed=S.rows
-      .filter(x=>x.confirmed===true&&!S.pos.some(p=>p.s===x.s))
-      .sort((a,b)=>N(b.qualityScore)-N(a.qualityScore));
-    if(!confirmed.length)return;
+    const PROFITABLE_MIN_IMPROVEMENT=20;
+    const MAX_CANDIDATES=12;
+    if(!S.rotation.lastByEngine||typeof S.rotation.lastByEngine!=='object')S.rotation.lastByEngine={};
+    if(!S.rotation.failedByEngine||typeof S.rotation.failedByEngine!=='object')S.rotation.failedByEngine={};
+
     const today=new Date().toDateString();
     if(S.rotation.rotationDate!==today){
       S.rotation.rotationDate=today;
       S.rotation.events=0;
       S.rotation.lastAttemptKey='';
+      S.rotation.lastByEngine={};
+      S.rotation.failedByEngine={};
     }
 
-    let target=null,e='',inEngine=[],targetComparison=null;
-    for(const candidate of confirmed){
-      const ce=candidate.momentum!=='WAIT'?'MOMENTUM':candidate.scalp!=='WAIT'?'SCALPING':'';
-      if(!ce)continue;
-      const limit=ce==='MOMENTUM'?MC:SC;
+    const candidates=S.rows
+      .filter(x=>x&&x.confirmed===true&&!S.pos.some(p=>p&&p.s===x.s))
+      .sort((a,b)=>N(b.qualityScore)-N(a.qualityScore))
+      .slice(0,MAX_CANDIDATES);
+
+    let best=null;
+
+    for(const ce of ['MOMENTUM','SCALPING']){
+      if(now-N(S.rotation.lastByEngine[ce]||0)<ROTATION_COOLDOWN)continue;
+      if(now-N(S.rotation.failedByEngine[ce]||0)<FAILED_COOLDOWN)continue;
+
       const enginePositions=S.pos
         .filter(p=>p&&p.e===ce&&p.s)
         .filter((p,i,a)=>a.findIndex(q=>q.s===p.s)===i);
-      if(enginePositions.length<limit)continue;
+      if(enginePositions.length<engineLimit(ce))continue;
 
-      const cd=ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
-      if(now-N(S.lastTrade[candidate.s]||0)<cd)continue;
-      if(now-N(S.rotation.lastRotation||0)<ROTATION_COOLDOWN)continue;
+      // V3 chooses the exact position that will be closed BEFORE scoring
+      // candidates. This removes the old mismatch where one position was
+      // compared but a different position was later closed.
+      const losses=enginePositions
+        .filter(p=>N(p.pnl)<=0)
+        .sort((a,b)=>{
+          const ap=N(a.pnl),bp=N(b.pnl);
+          if(ap!==bp)return ap-bp;
+          return N(a.qualityScore)-N(b.qualityScore);
+        });
+      const profitable=enginePositions
+        .filter(p=>N(p.pnl)>0)
+        .sort((a,b)=>{
+          const as=N(a.qualityScore),bs=N(b.qualityScore);
+          if(as!==bs)return as-bs;
+          return N(a.pnl)-N(b.pnl);
+        });
+      const closedPos=losses[0]||profitable[0];
+      if(!closedPos)continue;
 
-      const liveRow=S.rows.find(r=>r.s===candidate.s);
-      if(!liveRow||liveRow.confirmed!==true||signal(liveRow,ce)==='WAIT')continue;
-      if(N(liveRow.pipelineVol)<VOL_FILTER*1.10)continue;
-      if(N(liveRow.qualityScore)<QUALITY_MIN+5)continue;
-      if(S.mode==='TESTNET'&&S.testnetPositionBlocked[liveRow.s]>now)continue;
+      for(const candidate of candidates){
+        const liveRow=S.rows.find(r=>r.s===candidate.s);
+        if(!liveRow||liveRow.confirmed!==true)continue;
+        if(signal(liveRow,ce)==='WAIT')continue;
+        if(now-N(S.lastTrade[liveRow.s]||0)<(ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN))continue;
+        if(S.mode==='TESTNET'&&N(S.testnetPositionBlocked?.[liveRow.s]||0)>now)continue;
+        if(N(liveRow.pipelineVol)<VOL_FILTER*1.10)continue;
+        if(N(liveRow.qualityScore)<QUALITY_MIN+5)continue;
 
-      const gate=entrySafety(liveRow,ce,{allowRotationSlot:true});
-      if(!gate.ok)continue;
+        const gate=entrySafety(liveRow,ce,{allowRotationSlot:true});
+        if(!gate.ok)continue;
 
-      // Compare the candidate against the weakest existing position.
-      const ranked=enginePositions.slice().sort((a,b)=>{
-        const ap=a.pnl>0?1:0,bp=b.pnl>0?1:0;
-        if(ap!==bp)return ap-bp;
-        return N(a.pnl)-N(b.pnl);
-      });
-      const replacement=ranked[0];
-      const comparison=rotationImprovement(liveRow,replacement,ce);
-      if(comparison.delta<MIN_IMPROVEMENT)continue;
+        const comparison=rotationImprovement(liveRow,closedPos,ce);
+        const required=N(closedPos.pnl)>0?PROFITABLE_MIN_IMPROVEMENT:MIN_IMPROVEMENT;
+        if(comparison.delta<required)continue;
 
-      target=liveRow;
-      e=ce;
-      inEngine=enginePositions;
-      targetComparison=comparison;
-      break;
+        const score=comparison.delta*10+N(liveRow.qualityScore);
+        if(!best||score>best.score){
+          best={candidate:liveRow,engine:ce,enginePositions,closedPos,comparison,score,required};
+        }
+      }
     }
-    if(!target)return;
 
-    const x=target;
-    const attemptKey=[x.s,x.momentum,x.scalp,x.qualityScore,e].join('|');
+    if(!best)return;
+
+    const x=best.candidate,e=best.engine,closedPos=best.closedPos;
+    const attemptKey=[e,x.s,x.momentum,x.scalp,x.qualityScore,closedPos.s,closedPos.id,best.comparison.delta].join('|');
     if(S.rotation.lastResult==='FAILED'&&S.rotation.lastAttemptKey===attemptKey)return;
+
     if(!dailyRiskOK()){
       S.rotation.lastResult='BLOCKED';
-      S.rotation.lastReason='PROFIT ROTATION — daily risk gate blocked';
+      S.rotation.lastReason='PROFIT ROTATION — daily risk gate blocked; existing position kept';
       S.rotation.lastAttemptKey=attemptKey;
-      save();render();
-      return;
-    }
-    S.rotation.lastAttemptKey=attemptKey;
-
-    // Prefer closing a profitable position only when the replacement is
-    // materially stronger; otherwise replace the weakest/largest-loss setup.
-    const profitable=inEngine.filter(p=>N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
-    const losses=inEngine.filter(p=>N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
-    const closedPos=profitable.length?profitable[0]:losses[0];
-    if(!closedPos){
-      S.rotation.lastResult='FAILED';
-      S.rotation.lastReason='PROFIT ROTATION — no replaceable position';
+      S.rotation.failedByEngine[e]=now;
       save();render();
       return;
     }
 
-    // Final market/safety validation immediately before the destructive close.
+    // Final safety check is against the SAME candidate and SAME position selected
+    // above. No destructive close occurs if any gate changes.
     const finalRow=S.rows.find(r=>r.s===x.s);
     const finalGate=finalRow?entrySafety(finalRow,e,{allowRotationSlot:true}):{ok:false,reason:'candidate disappeared'};
     if(!finalRow||!finalGate.ok||
        N(finalRow.pipelineVol)<VOL_FILTER*1.10||
        N(finalRow.qualityScore)<QUALITY_MIN+5){
       S.rotation.lastResult='FAILED';
-      S.rotation.lastReason='PROFIT ROTATION — candidate failed final safety check'+(finalGate.reason?' · '+finalGate.reason:'');
+      S.rotation.lastReason='PROFIT ROTATION — candidate failed final safety check'+(finalGate.reason?' · '+finalGate.reason:'')+'; existing position kept';
+      S.rotation.lastAttemptKey=attemptKey;
+      S.rotation.failedByEngine[e]=now;
       save();render();
       return;
     }
 
-    if(S.mode==='TESTNET'&&!(await testnetPreflight(x,e))){
+    if(S.mode==='TESTNET'&&!(await testnetPreflight(finalRow,e))){
       S.rotation.lastResult='FAILED';
-      S.rotation.lastReason='PROFIT ROTATION — Testnet preflight blocked replacement';
+      S.rotation.lastReason='PROFIT ROTATION — Testnet preflight blocked replacement; existing position kept';
+      S.rotation.lastAttemptKey=attemptKey;
+      S.rotation.failedByEngine[e]=now;
       save();render();
       return;
     }
@@ -769,9 +787,13 @@ async function profitRotation(){
     S.rotationId++;
     const rotId=S.rotationId;
     const reason=N(closedPos.pnl)>0?'PROFIT ROTATION':'WORST LOSS ROTATION';
+
+    // Close exactly the position used in the strength comparison.
     if(!(await closeForRotation(closedPos))){
       S.rotation.lastResult='FAILED';
-      S.rotation.lastReason=reason+' — existing position close failed';
+      S.rotation.lastReason=reason+' — existing position close failed; no replacement attempted';
+      S.rotation.lastAttemptKey=attemptKey;
+      S.rotation.failedByEngine[e]=now;
       save();render();
       return;
     }
@@ -779,16 +801,18 @@ async function profitRotation(){
     let opened=false;
     const replacement=S.rows.find(r=>r.s===x.s);
     const replacementGate=replacement?entrySafety(replacement,e):{ok:false,reason:'replacement disappeared'};
+
     if(!replacement||!replacementGate.ok){
       S.rotation.lastResult='FAILED';
-      S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(replacementGate.reason?' · '+replacementGate.reason:'');
+      S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(replacementGate.reason?' · '+replacementGate.reason:'')+'; rotation locked temporarily';
     }else if(S.mode==='PAPER'){
       opened=paperOpen(replacement,e);
     }else if(S.mode==='TESTNET'){
+      // Do not bypass any TESTNET exchange/risk gate after the close.
       opened=await testnetOpen(replacement,e);
     }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
-      const g=liveGates(x,e);
-      if(g.pass)opened=await liveOpen(x,e);
+      const g=liveGates(replacement,e);
+      if(g.pass)opened=await liveOpen(replacement,e);
       else S.err='LIVE rotation blocked: '+g.failed.join('; ');
     }
 
@@ -796,23 +820,26 @@ async function profitRotation(){
       const newHist=S.hist[0];
       if(newHist){
         newHist.rotationId=rotId;
-        newHist.rotationScore=targetComparison?.newScore||rotationStrength(x,e);
-        newHist.rotationImprovement=targetComparison?.delta||0;
+        newHist.rotationScore=best.comparison.newScore;
+        newHist.rotationImprovement=best.comparison.delta;
       }
       S.rotation.lastRotation=Date.now();
+      S.rotation.lastByEngine[e]=Date.now();
+      S.rotation.failedByEngine[e]=0;
       S.rotation.events++;
       S.rotation.lastEngine=e;
       S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);
       S.rotation.lastOpened=x.s;
-      S.rotation.lastReason=reason+' · strength '+(targetComparison?.oldScore||0)+'→'+(targetComparison?.newScore||0);
+      S.rotation.lastReason=reason+' · strength '+best.comparison.oldScore+'→'+best.comparison.newScore+' · +'+best.comparison.delta;
       S.rotation.lastResult='SUCCESS';
       S.rotation.lastAttemptKey=attemptKey;
     }else{
       S.rotation.lastResult='FAILED';
       const detail=String(S.err||'').replace(/^TESTNET:\s*/,'').trim();
-      S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(detail?' · '+detail:'');
+      S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(detail?' · '+detail:'')+'; retry protected';
       S.rotation.lastOpened='';
       S.rotation.lastAttemptKey=attemptKey;
+      S.rotation.failedByEngine[e]=Date.now();
     }
     save();render();
   }finally{

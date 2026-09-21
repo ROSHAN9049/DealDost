@@ -1749,7 +1749,7 @@ function renderPaper(){
     '<div class="kpi-grid">'+kpiCard('Virtual Capital','₹'+R(S.settings.paperCapital),'acc')+kpiCard('Available Balance','₹'+R(S.eq),'acc')+kpiCard('Used Margin','₹'+R(usedMargin))+kpiCard('Current Exposure','₹'+R(exposure))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Unrealized PNL','₹'+PNL(unreal),pnlClass(unreal))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
     '<div class="panel"><div class="panel-header"><div class="panel-title">Per-Engine Accounts</div><div class="panel-sub">Selective entries · closed candles · equity-based sizing</div></div><div class="acct-grid">'+ec+'</div></div>'+
     '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">Option Sets (4 Independent)</div><div class="panel-sub">Cooldown '+OPT_COOLDOWN/60e3+'m · Stop '+OPT_STOP*100+'% · Target '+OPT_TP*100+'%</div></div><div class="acct-grid">'+optSetHtml+'</div></div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn green sm" onclick="DD.toggleAuto()">Auto Trading: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan Now</button><button class="btn sm" onclick="DD.resetPaper()">Reset Paper</button></div>';
+    '<div class="btn-row" style="margin-top:8px"><button class="btn green sm" onclick="DD.toggleAuto()">Auto Trading: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan Now</button><button class="btn sm" onclick="DD.resetPaper()">Reset Paper</button><a class="btn sm" href="https://demo.binance.com/" target="_blank" rel="noopener noreferrer">Open Binance Demo</a></div>';
 }
 
 function renderTestnet(){
@@ -1766,7 +1766,7 @@ function renderTestnet(){
   return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+
     statusNote+
     '<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+' ('+managedPositions+' managed)'+(externalPositions?' · '+externalPositions+' external':''))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>';
+    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button><a class="btn sm" href="https://demo.binance.com/" target="_blank" rel="noopener noreferrer">Open Binance Demo</a></div>';
 }
 
 function renderLive(){

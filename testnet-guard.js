@@ -15,6 +15,20 @@
   const nativeFetch=window.fetch.bind(window);
   const nativeOpen=window.open.bind(window);
 
+  // HARD NAVIGATION LOCK: DealDost must remain a single-origin terminal.
+  const SAME_ORIGIN=window.location.origin;
+  const blockExternalDestination=(value,source)=>{
+    try{
+      const u=new URL(String(value||''),window.location.href);
+      if(u.origin!==SAME_ORIGIN){
+        console.warn('[DealDost] blocked external navigation:',source||'',u.href);
+        return true;
+      }
+    }catch(e){return true}
+    return false;
+  };
+
+
   const isBlockedBinanceUrl=(value)=>{
     try{
       const u=new URL(String(value||''),window.location.href);
@@ -55,6 +69,12 @@
     }catch(e){}
     if(blockNavigation(url,'window.open'))return null;
     return nativeOpen(url,...args);
+  };
+
+  const nativeAnchorSetAttribute=HTMLAnchorElement.prototype.setAttribute;
+  HTMLAnchorElement.prototype.setAttribute=function(name,value){
+    if(String(name).toLowerCase()==='href' && blockExternalDestination(value,'anchor.setAttribute'))return;
+    return nativeAnchorSetAttribute.apply(this,arguments);
   };
 
   const originalAnchorClick=HTMLAnchorElement.prototype.click;

@@ -1284,19 +1284,10 @@ async function optionOpen(setIdx,u,signal){
   }
 }
 async function manageOptions(){
+  // Binance Options execution is PAPER-only in DealDost. TESTNET has no
+  // documented Binance Options order endpoint, so never attempt execution
+  // or state reconciliation there.
   if(S.mode!=='PAPER')return;
-  if(false){
-    try{
-      const resp=await fetch(OPT_TN_TR+'?action=state',{cache:'no-store'});
-      const j=await resp.json();
-      if(resp.ok&&j.available!==false){
-        for(const set of S.optSets.filter(s=>s.status==='OPEN')){
-          const a=(j.positions||[]).find(p=>p.setId===set.id||p.symbol===set.symbol);
-          if(a){set.current=N(a.netDebit)||set.current;set.pnl=N(a.pnl);set.orderIds=a.orderIds||set.orderIds}
-        }
-      }
-    }catch{}
-  }
   for(const set of S.optSets){
     if(set.status!=='OPEN')continue;
     const lm=S.optData.marks[set.longContract],sm=S.optData.marks[set.shortContract];
@@ -1601,7 +1592,7 @@ function renderOptions(){
   const optOpen=S.optSets.filter(s=>s.status==='OPEN').length;
   const optUnreal=S.optSets.filter(s=>s.status==='OPEN').reduce((a,s)=>a+N(s.pnl),0);
   const optClosed=S.hist.filter(h=>h.e==='OPTIONS'&&h.action==='EXIT').length;
-  const optTestStatus=S.mode==='TESTNET'?('<div class="note warn">Options TESTNET: public Binance Options market data connected · execution LOCKED · Binance does not currently document an Options Testnet/Demo order endpoint'+(S.optTestnetStatus.error?' · '+E(S.optTestnetStatus.error):'')+'</div>'):'<div class="note info">Options PAPER: Binance public Options market data · simulated execution</div>';
+  const optTestStatus=S.mode==='TESTNET'?('<div class="note warn">Options TESTNET: public Binance Options market data · execution LOCKED (no documented Binance Options Testnet/Demo order endpoint)'+(S.optTestnetStatus.error?' · '+E(S.optTestnetStatus.error):'')+'</div>'):'<div class="note info">Options PAPER: Binance public Options market data · simulated execution · 4 independent spread slots</div>';
   const optMetrics='<div class="kpi-grid">'+kpiCard('Options Open',optOpen+'/'+OPT_SETS)+kpiCard('Options Closed',optClosed)+kpiCard('Options Realized PNL','₹'+PNL(S.optReal),pnlClass(S.optReal))+kpiCard('Options Unrealized PNL','₹'+PNL(optUnreal),pnlClass(optUnreal))+kpiCard('Options Fees','₹'+R(S.optFees))+kpiCard('Net Contribution','₹'+PNL(S.optReal+optUnreal-S.optFees),pnlClass(S.optReal+optUnreal-S.optFees))+'</div>';
   let html='<div class="panel"><div class="panel-header"><div class="panel-title">Binance Options Radar</div><div class="panel-sub">All underlyings · defined-risk spreads · naked selling OFF</div></div>';
   html=optTestStatus+optMetrics+html;

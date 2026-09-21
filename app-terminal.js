@@ -1237,7 +1237,7 @@ function historyTable(arr){
       '<td>'+E(h.mode||'PAPER')+'</td><td>'+E(h.e)+'</td><td class="'+(h.side==='BUY'?'buy':'sell')+'">'+h.side+'</td>'+
       '<td>'+fmtPrice(h.entry||h.price)+'</td><td>'+fmtPrice(h.exit||0)+'</td><td>'+fmtQty(h.qty)+'</td><td>'+E(h.signalStage||'—')+'</td><td>'+(h.qualityScore!=null?N(h.qualityScore):'—')+'</td><td>'+E(h.rotationId||'—')+'</td>'+
       '<td>₹'+R(h.fees)+'</td><td>₹'+R(N(h.pnl)+N(h.fees))+'</td><td class="'+cl(pnl)+'">₹'+PNL(pnl)+'</td>'+
-      '<td class="'+cl(pnl)+'">'+P(pnlPct)+'</td><td>'+(pnl>0?'<span class="buy">WIN</span>':'<span class="sell">LOSS</span>')+'</td></tr>';
+      '<td class="'+(h.action==='ENTRY'?'':cl(pnl))+'">'+(h.action==='ENTRY'?'—':P(pnlPct))+'</td><td>'+(h.action==='ENTRY'?'<span class="watch">OPEN</span>':pnl>0?'<span class="buy">WIN</span>':pnl<0?'<span class="sell">LOSS</span>':'<span class="neutral-text">BREAKEVEN</span>')+'</td></tr>';
   }).join('');
   return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>Time</th><th>Coin</th><th>Mode</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>Stage</th><th>Quality</th><th>Rotation ID</th><th>Fees</th><th>Gross PNL</th><th>Net PNL</th><th>PNL%</th><th>Result</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
@@ -1266,7 +1266,7 @@ function fullHistoryTable(){
       '<td>'+E(h.mode||'PAPER')+'</td><td>'+E(h.e)+'</td><td class="'+(h.side==='BUY'?'buy':'sell')+'">'+h.side+'</td>'+
       '<td>'+fmtPrice(h.entry||h.price)+'</td><td>'+fmtPrice(h.exit||0)+'</td><td>'+fmtQty(h.qty)+'</td>'+
       '<td>₹'+R(h.fees)+'</td><td>₹'+R(N(h.pnl)+N(h.fees))+'</td><td class="'+cl(pnl)+'">₹'+PNL(pnl)+'</td>'+
-      '<td class="'+cl(pnl)+'">'+P(pnlPct)+'</td><td>'+(pnl>0?'<span class="buy">WIN</span>':'<span class="sell">LOSS</span>')+'</td></tr>';
+      '<td class="'+(h.action==='ENTRY'?'':cl(pnl))+'">'+(h.action==='ENTRY'?'—':P(pnlPct))+'</td><td>'+(h.action==='ENTRY'?'<span class="watch">OPEN</span>':pnl>0?'<span class="buy">WIN</span>':pnl<0?'<span class="sell">LOSS</span>':'<span class="neutral-text">BREAKEVEN</span>')+'</td></tr>';
   }).join('');
   return fb+'<div class="table-scroll"><table class="term"><thead><tr><th>Time</th><th>Coin</th><th>Mode</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>Stage</th><th>Quality</th><th>Rotation ID</th><th>Fees</th><th>Gross PNL</th><th>Net PNL</th><th>PNL%</th><th>Result</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }

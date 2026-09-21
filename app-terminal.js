@@ -335,7 +335,7 @@ function canOpen(x,e,entryReserved=false){
   if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return false;
   return true;
 }
-function entrySafety(x,e){
+function entrySafety(x,e,opts={}){
   if(!x||!['MOMENTUM','SCALPING'].includes(e))return{ok:false,reason:'invalid engine/symbol'};
   if(!x.confirmed)return{ok:false,reason:'signal is not CONFIRMED'};
   const z=signal(x,e);
@@ -350,7 +350,7 @@ function entrySafety(x,e){
   if(S.mode==='TESTNET'&&blockedUntil>Date.now())return{ok:false,reason:'temporary Demo position-limit block'};
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
   if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return{ok:false,reason:'cooldown active'};
-  if(engineOpenCount(e)>=engineLimit(e))return{ok:false,reason:e+' position limit reached'};
+  // Rotation validates a replacement before closing one existing position.\n  // In that pre-close phase one slot is intentionally reserved for the replacement.\n  if(!opts.allowRotationSlot&&engineOpenCount(e)>=engineLimit(e))return{ok:false,reason:e+' position limit reached'};
   const equity=N(S.testnetAccount?.availableBalance)||N(S.eq);
   const r=riskModel(x,e,equity);
   if(!Number.isFinite(r.q)||r.q<=0)return{ok:false,reason:'risk sizing invalid'};
@@ -393,7 +393,7 @@ async function testnetPreflight(x,e){
   // In particular, the ATR volatility guard is checked here so rotation can
   // never close an existing position for a replacement that testnetOpen()
   // will immediately reject.
-  const gate=entrySafety(x,e);
+  const gate=entrySafety(x,e,{allowRotationSlot:true});
   if(!gate.ok){
     S.err='TESTNET: '+x.s+' replacement blocked — '+gate.reason+'. Existing position kept.';
     render();return false;
@@ -685,7 +685,7 @@ async function profitRotation(){
     if(S.mode==='TESTNET'&&S.testnetPositionBlocked[liveRow.s]>Date.now())continue;
     // Use the exact same local entry gate as testnetOpen(). This prevents a
     // high-ATR candidate such as AKEUSDT from being selected for rotation.
-    const gate=entrySafety(liveRow,ce);
+    const gate=entrySafety(liveRow,ce,{allowRotationSlot:true});
     if(!gate.ok)continue;
     target=liveRow;e=ce;inEngine=enginePositions;break;
   }
@@ -706,7 +706,7 @@ async function profitRotation(){
   // candidate changed from CONFIRMED to blocked while selection was running,
   // abort before touching the existing position.
   const finalRow=S.rows.find(r=>r.s===x.s);
-  if(!finalRow||!entrySafety(finalRow,e).ok||
+  if(!finalRow||!entrySafety(finalRow,e,{allowRotationSlot:true}).ok||
      N(finalRow.pipelineVol)<VOL_FILTER*1.10||N(finalRow.qualityScore)<QUALITY_MIN+5){
     S.rotation.lastResult='BLOCKED';
     S.rotation.lastReason='Replacement signal changed/blocked — existing position kept';

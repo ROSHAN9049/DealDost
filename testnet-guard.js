@@ -82,7 +82,8 @@
 
   const nativeAnchorSetAttribute=HTMLAnchorElement.prototype.setAttribute;
   HTMLAnchorElement.prototype.setAttribute=function(name,value){
-    if(String(name).toLowerCase()==='href' && blockExternalDestination(value,'anchor.setAttribute'))return;
+    // Do not block creation of a manual external link. The capture-phase click
+    // guard below blocks only untrusted/synthetic navigation attempts.
     return nativeAnchorSetAttribute.apply(this,arguments);
   };
 
@@ -96,7 +97,8 @@
         enumerable:hrefDesc.enumerable,
         get:hrefDesc.get,
         set:function(value){
-          if(blockExternalDestination(value,'anchor.href='))return;
+          // Allow manual external anchors to exist. Synthetic activation is
+          // blocked by the capture-phase click handler.
           return hrefDesc.set.call(this,value);
         }
       });
@@ -107,12 +109,6 @@
   // Do not scrub external anchors: a real user click may intentionally open
   // Binance Demo. Automatic/synthetic clicks are blocked below.
   const scrubExternalLinks=()=>{};
-
-  const originalAnchorClick=HTMLAnchorElement.prototype.click;
-  HTMLAnchorElement.prototype.click=function(){
-    try{if(blockNavigation(this.href,'anchor.click'))return;}catch(e){}
-    return originalAnchorClick.apply(this,arguments);
-  };
 
   const originalFormSubmit=HTMLFormElement.prototype.submit;
   HTMLFormElement.prototype.submit=function(){

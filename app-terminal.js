@@ -350,7 +350,9 @@ function entrySafety(x,e,opts={}){
   if(S.mode==='TESTNET'&&blockedUntil>Date.now())return{ok:false,reason:'temporary Demo position-limit block'};
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
   if(Date.now()-N(S.lastTrade[x.s]||0)<cd)return{ok:false,reason:'cooldown active'};
-  // Rotation validates a replacement before closing one existing position.\n  // In that pre-close phase one slot is intentionally reserved for the replacement.\n  if(!opts.allowRotationSlot&&engineOpenCount(e)>=engineLimit(e))return{ok:false,reason:e+' position limit reached'};
+  // Rotation validates a replacement before closing one existing position.
+  // In that pre-close phase one slot is intentionally reserved for the replacement.
+  if(!opts.allowRotationSlot&&engineOpenCount(e)>=engineLimit(e))return{ok:false,reason:e+' position limit reached'};
   const equity=N(S.testnetAccount?.availableBalance)||N(S.eq);
   const r=riskModel(x,e,equity);
   if(!Number.isFinite(r.q)||r.q<=0)return{ok:false,reason:'risk sizing invalid'};
@@ -644,359 +646,179 @@ async function closeForRotation(p){
 }
 
 /* ===== Profit Rotation ===== */
+function rotationStrength(x,e){
+  if(!x)return 0;
+  const q=N(x.qualityScore);
+  const sig=e==='MOMENTUM'?x.momentum:x.scalp;
+  const tf=e==='MOMENTUM'
+    ?((x.momentum!=='WAIT'?25:0)+(x.momentum===x.scalp&&x.scalp!=='WAIT'?10:0))
+    :((x.scalp!=='WAIT'?25:0)+(x.momentum===x.scalp&&x.momentum!=='WAIT'?10:0));
+  const vol=Math.min(15,Math.max(0,(N(x.pipelineVol)-VOL_FILTER)*25));
+  const move=Math.min(10,Math.abs(N(x.c))*8);
+  return Math.round(q*.40+tf+vol+move+(sig==='WAIT'?0:10));
+}
+function rotationImprovement(newRow,oldPos,e){
+  const ns=rotationStrength(newRow,e);
+  const oldScore=N(oldPos?.qualityScore);
+  const oldStrength=oldPos?.rotationScore!=null?N(oldPos.rotationScore):oldScore;
+  return{newScore:ns,oldScore:oldStrength,delta:ns-oldStrength};
+}
 async function profitRotation(){
   if(rotationBusy)return;
   if(!S.auto||S.emergencyStop||!S.rotation.enabled)return;
   rotationBusy=true;
   try{
-  // Rotation must use a confirmed candidate that is actually eligible for
-  // replacement. The previous logic always selected the highest-quality
-  // confirmed row first; if that symbol was already open, rotation stopped
-  // with "Confirmed coin already open" even when another eligible signal existed.
-  // In TESTNET, do not use the client-side symbol cache as an execution gate;
-  // testnetOpen() performs the authoritative server-side preflight.
-  const confirmed=S.rows
-    .filter(x=>x.confirmed===true&&!S.pos.some(p=>p.s===x.s))
-    .sort((a,b)=>b.qualityScore-a.qualityScore);
-  if(!confirmed.length)return;
-  const today=new Date().toDateString();
-  if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
+    const now=Date.now();
+    const ROTATION_COOLDOWN=5*60e3;
+    const MIN_IMPROVEMENT=10;
+    const confirmed=S.rows
+      .filter(x=>x.confirmed===true&&!S.pos.some(p=>p.s===x.s))
+      .sort((a,b)=>N(b.qualityScore)-N(a.qualityScore));
+    if(!confirmed.length)return;
+    const today=new Date().toDateString();
+    if(S.rotation.rotationDate!==today){
+      S.rotation.rotationDate=today;
+      S.rotation.events=0;
+      S.rotation.lastAttemptKey='';
+    }
 
-  // Find a replacement that is not merely CONFIRMED, but has enough
-  // current pipeline headroom to survive a small market-data update while
-  // the exchange close request is in flight. Rotation must never close a
-  // position for a candidate that is already near a blocking threshold.
-  let target=null,e='',inEngine=[];
-  for(const candidate of confirmed){
-    const ce=candidate.momentum!=='WAIT'?'MOMENTUM':candidate.scalp!=='WAIT'?'SCALPING':'';
-    if(!ce)continue;
-    const limit=ce==='MOMENTUM'?MC:SC;
-    const enginePositions=S.pos.filter(p=>p&&p.e===ce&&p.s).filter((p,i,a)=>a.findIndex(q=>q.s===p.s)===i);
-    if(enginePositions.length<limit)continue;
-    const cd=ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
-    if(Date.now()-N(S.lastTrade[candidate.s]||0)<cd)continue;
-    // Re-read the current row rather than trusting a stale object from a
-    // previous render/scan. Require volume and quality margin as well as
-    // CONFIRMED so transient volume drops do not cause a close-with-no-replacement.
-    const liveRow=S.rows.find(r=>r.s===candidate.s);
-    if(!liveRow||liveRow.confirmed!==true||signal(liveRow,ce)==='WAIT')continue;
-    if(N(liveRow.pipelineVol)<VOL_FILTER*1.10)continue;
-    if(N(liveRow.qualityScore)<QUALITY_MIN+5)continue;
-    if(S.mode==='TESTNET'&&S.testnetPositionBlocked[liveRow.s]>Date.now())continue;
-    // Use the exact same local entry gate as testnetOpen(). This prevents a
-    // high-ATR candidate such as AKEUSDT from being selected for rotation.
-    const gate=entrySafety(liveRow,ce,{allowRotationSlot:true});
-    if(!gate.ok)continue;
-    target=liveRow;e=ce;inEngine=enginePositions;break;
-  }
-  if(!target)return;
+    let target=null,e='',inEngine=[],targetComparison=null;
+    for(const candidate of confirmed){
+      const ce=candidate.momentum!=='WAIT'?'MOMENTUM':candidate.scalp!=='WAIT'?'SCALPING':'';
+      if(!ce)continue;
+      const limit=ce==='MOMENTUM'?MC:SC;
+      const enginePositions=S.pos
+        .filter(p=>p&&p.e===ce&&p.s)
+        .filter((p,i,a)=>a.findIndex(q=>q.s===p.s)===i);
+      if(enginePositions.length<limit)continue;
 
-  const x=target;
-  const attemptKey=[x.s,x.momentum,x.scalp,x.qualityScore].join('|');
-  if(S.rotation.lastResult==='FAILED'&&S.rotation.lastAttemptKey===attemptKey)return;
-  if(!dailyRiskOK()){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='Daily risk limit';S.rotation.lastAttemptKey=attemptKey;save();return}
-  S.rotation.lastAttemptKey=attemptKey;
+      const cd=ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
+      if(now-N(S.lastTrade[candidate.s]||0)<cd)continue;
+      if(now-N(S.rotation.lastRotation||0)<ROTATION_COOLDOWN)continue;
 
-  const profitable=inEngine.filter(p=>N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
-  const candidates=profitable.length?profitable:inEngine.filter(p=>N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
-  const closedPos=candidates[0];
-  if(!closedPos){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='No position to rotate';save();return}
+      const liveRow=S.rows.find(r=>r.s===candidate.s);
+      if(!liveRow||liveRow.confirmed!==true||signal(liveRow,ce)==='WAIT')continue;
+      if(N(liveRow.pipelineVol)<VOL_FILTER*1.10)continue;
+      if(N(liveRow.qualityScore)<QUALITY_MIN+5)continue;
+      if(S.mode==='TESTNET'&&S.testnetPositionBlocked[liveRow.s]>now)continue;
 
-  // Final no-close safety check. A rotation close is destructive: if the
-  // candidate changed from CONFIRMED to blocked while selection was running,
-  // abort before touching the existing position.
-  const finalRow=S.rows.find(r=>r.s===x.s);
-  if(!finalRow||!entrySafety(finalRow,e,{allowRotationSlot:true}).ok||
-     N(finalRow.pipelineVol)<VOL_FILTER*1.10||N(finalRow.qualityScore)<QUALITY_MIN+5){
-    S.rotation.lastResult='BLOCKED';
-    S.rotation.lastReason='Replacement signal changed/blocked — existing position kept';
+      const gate=entrySafety(liveRow,ce,{allowRotationSlot:true});
+      if(!gate.ok)continue;
+
+      // Compare the candidate against the weakest existing position.
+      const ranked=enginePositions.slice().sort((a,b)=>{
+        const ap=a.pnl>0?1:0,bp=b.pnl>0?1:0;
+        if(ap!==bp)return ap-bp;
+        return N(a.pnl)-N(b.pnl);
+      });
+      const replacement=ranked[0];
+      const comparison=rotationImprovement(liveRow,replacement,ce);
+      if(comparison.delta<MIN_IMPROVEMENT)continue;
+
+      target=liveRow;
+      e=ce;
+      inEngine=enginePositions;
+      targetComparison=comparison;
+      break;
+    }
+    if(!target)return;
+
+    const x=target;
+    const attemptKey=[x.s,x.momentum,x.scalp,x.qualityScore,e].join('|');
+    if(S.rotation.lastResult==='FAILED'&&S.rotation.lastAttemptKey===attemptKey)return;
+    if(!dailyRiskOK()){
+      S.rotation.lastResult='BLOCKED';
+      S.rotation.lastReason='PROFIT ROTATION — daily risk gate blocked';
+      S.rotation.lastAttemptKey=attemptKey;
+      save();render();
+      return;
+    }
     S.rotation.lastAttemptKey=attemptKey;
-    save();render();return;
-  }
 
-  // TESTNET rotation is two-phase: validate the replacement with Binance Demo
-  // using a non-placing order test BEFORE closing the existing position.
-  // This prevents a rejected replacement from leaving rotation without a slot.
-  if(S.mode==='TESTNET'&&!(await testnetPreflight(x,e))){
-    S.rotation.lastResult='BLOCKED';
-    S.rotation.lastReason='Replacement preflight failed — existing position kept';
-    S.rotation.lastAttemptKey=attemptKey;
-    save();render();return;
-  }
+    // Prefer closing a profitable position only when the replacement is
+    // materially stronger; otherwise replace the weakest/largest-loss setup.
+    const profitable=inEngine.filter(p=>N(p.pnl)>0).sort((a,b)=>N(b.pnl)-N(a.pnl));
+    const losses=inEngine.filter(p=>N(p.pnl)<=0).sort((a,b)=>N(a.pnl)-N(b.pnl));
+    const closedPos=profitable.length?profitable[0]:losses[0];
+    if(!closedPos){
+      S.rotation.lastResult='FAILED';
+      S.rotation.lastReason='PROFIT ROTATION — no replaceable position';
+      save();render();
+      return;
+    }
 
-  S.rotationId++;
-  const rotId=S.rotationId;
-  const reason=profitable.length?'PROFIT ROTATION':'WORST LOSS ROTATION';
-  if(!(await closeForRotation(closedPos))){
-    S.rotation.lastResult='FAILED';S.rotation.lastReason=reason+' — close failed';save();return;
-  }
+    // Final market/safety validation immediately before the destructive close.
+    const finalRow=S.rows.find(r=>r.s===x.s);
+    const finalGate=finalRow?entrySafety(finalRow,e,{allowRotationSlot:true}):{ok:false,reason:'candidate disappeared'};
+    if(!finalRow||!finalGate.ok||
+       N(finalRow.pipelineVol)<VOL_FILTER*1.10||
+       N(finalRow.qualityScore)<QUALITY_MIN+5){
+      S.rotation.lastResult='FAILED';
+      S.rotation.lastReason='PROFIT ROTATION — candidate failed final safety check'+(finalGate.reason?' · '+finalGate.reason:'');
+      save();render();
+      return;
+    }
 
-  let opened=false;
-  const replacement=S.rows.find(r=>r.s===x.s);
-  if(!replacement||!entrySafety(replacement,e).ok){
-    S.rotation.lastResult='FAILED';
-    S.rotation.lastReason=reason+' — replacement became blocked after close';
-  }else if(S.mode==='PAPER')opened=paperOpen(replacement,e);
-  else if(S.mode==='TESTNET')opened=await testnetOpen(replacement,e);
-  else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
-    const g=liveGates(x,e);
-    if(g.pass)opened=await liveOpen(x,e); else S.err='LIVE rotation blocked: '+g.failed.join('; ');
-  }
+    if(S.mode==='TESTNET'&&!(await testnetPreflight(x,e))){
+      S.rotation.lastResult='FAILED';
+      S.rotation.lastReason='PROFIT ROTATION — Testnet preflight blocked replacement';
+      save();render();
+      return;
+    }
 
-  if(opened){
-    const newHist=S.hist[0];if(newHist)newHist.rotationId=rotId;
-    S.rotation.lastRotation=Date.now();S.rotation.events++;S.rotation.lastEngine=e;
-    S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);S.rotation.lastOpened=x.s;
-    S.rotation.lastReason=reason;S.rotation.lastResult='SUCCESS';S.rotation.lastAttemptKey=attemptKey;
-  }else{
-    S.rotation.lastResult='FAILED';
-    const detail=String(S.err||'').replace(/^TESTNET:\s*/,'').trim();
-    S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(detail?' · '+detail:'');
-    S.rotation.lastOpened='';
-    S.rotation.lastAttemptKey=attemptKey;
-  }
-  save();render();
+    S.rotationId++;
+    const rotId=S.rotationId;
+    const reason=N(closedPos.pnl)>0?'PROFIT ROTATION':'WORST LOSS ROTATION';
+    if(!(await closeForRotation(closedPos))){
+      S.rotation.lastResult='FAILED';
+      S.rotation.lastReason=reason+' — existing position close failed';
+      save();render();
+      return;
+    }
+
+    let opened=false;
+    const replacement=S.rows.find(r=>r.s===x.s);
+    const replacementGate=replacement?entrySafety(replacement,e):{ok:false,reason:'replacement disappeared'};
+    if(!replacement||!replacementGate.ok){
+      S.rotation.lastResult='FAILED';
+      S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(replacementGate.reason?' · '+replacementGate.reason:'');
+    }else if(S.mode==='PAPER'){
+      opened=paperOpen(replacement,e);
+    }else if(S.mode==='TESTNET'){
+      opened=await testnetOpen(replacement,e);
+    }else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
+      const g=liveGates(x,e);
+      if(g.pass)opened=await liveOpen(x,e);
+      else S.err='LIVE rotation blocked: '+g.failed.join('; ');
+    }
+
+    if(opened){
+      const newHist=S.hist[0];
+      if(newHist){
+        newHist.rotationId=rotId;
+        newHist.rotationScore=targetComparison?.newScore||rotationStrength(x,e);
+        newHist.rotationImprovement=targetComparison?.delta||0;
+      }
+      S.rotation.lastRotation=Date.now();
+      S.rotation.events++;
+      S.rotation.lastEngine=e;
+      S.rotation.lastClosed=closedPos.s+' ₹'+PNL(closedPos.pnl);
+      S.rotation.lastOpened=x.s;
+      S.rotation.lastReason=reason+' · strength '+(targetComparison?.oldScore||0)+'→'+(targetComparison?.newScore||0);
+      S.rotation.lastResult='SUCCESS';
+      S.rotation.lastAttemptKey=attemptKey;
+    }else{
+      S.rotation.lastResult='FAILED';
+      const detail=String(S.err||'').replace(/^TESTNET:\s*/,'').trim();
+      S.rotation.lastReason=reason+' — replacement entry failed/blocked'+(detail?' · '+detail:'');
+      S.rotation.lastOpened='';
+      S.rotation.lastAttemptKey=attemptKey;
+    }
+    save();render();
   }finally{
     rotationBusy=false;
   }
 }
-
-/* ===== Position management (preserved) */
-async function managePaper(){
-  for(const p of [...S.pos]){
-    // TESTNET positions are exchange-managed. Binance Demo owns the live
-    // mark/SL/TP lifecycle, so the local paper manager must NEVER simulate
-    // exits for TESTNET positions. This is especially important for EXTERNAL
-    // positions, which have no DealDost SL/TP and must remain informational.
-    if(p.mode==='LIVE'||p.mode==='TESTNET')continue;
-    const x=N(S.t[p.s]?.p);if(!x)continue;
-    p.current=x;
-    const gross=p.side==='BUY'?(x-p.entry)*p.q:(p.entry-x)*p.q,ef=x*p.q*F;
-    p.pnl=gross-p.entryFee-ef;
-    const hit=p.side==='BUY'?(x<=p.sl||x>=p.tp):(x>=p.sl||x<=p.tp);
-    if(hit){
-      S.real+=p.pnl;S.eq+=p.pnl;S.fees+=p.entryFee+ef;
-      S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:x,pnl:p.pnl,fees:p.entryFee+ef,live:p.mode==='LIVE',mode:p.mode,reason:p.reason,signalStage:p.signalStage||'',qualityScore:N(p.qualityScore)});
-      S.lastTrade[p.s]=Date.now();S.pos=S.pos.filter(q=>q.id!==p.id);save();
-    }
-  }
-  manageOptions();
-}
-async function manageTestnet(){
-  if(S.mode!=='TESTNET')return;
-  for(const p of [...S.pos]){
-    if(p.mode!=='TESTNET'||p.e==='EXTERNAL'||!N(p.tp))continue;
-    const x=N(S.t[p.s]?.p); if(!x)continue;
-    const hit=p.side==='BUY'?x>=p.tp:x<=p.tp;
-    if(!hit)continue;
-    try{
-      await close(p);
-      p.tp=0;
-      save();
-    }catch{}
-  }
-}
-
-/* ===== Account sync ===== */
-async function syncAccount(){
-  if(S.mode!=='LIVE')return;
-  if(Date.now()-S.lastAccount<2500)return;
-  S.lastAccount=Date.now();
-  try{
-    const a=await api(AC,'/fapi/v2/account');const bal=(a.assets||[]).find(x=>x.asset==='USDT');
-    S.account={availableBalance:N(a.availableBalance||bal?.availableBalance),walletBalance:N(a.totalWalletBalance||bal?.walletBalance),unrealized:N(a.totalUnrealizedProfit),margin:N(a.totalMarginBalance),apiReady:true};
-    if(S.mode==='LIVE')S.pos=(a.positions||[]).filter(p=>Math.abs(N(p.positionAmt))>0).map(p=>({id:'live-'+p.symbol,s:p.symbol,e:'LIVE',side:N(p.positionAmt)>0?'BUY':'SELL',entry:N(p.entryPrice),current:N(p.markPrice),q:Math.abs(N(p.positionAmt)),pnl:N(p.unRealizedProfit),sl:0,tp:0,mode:'LIVE'}));
-  }catch(e){S.account={apiReady:false,error:e.message};S.err='Account sync: '+e.message}
-}
-async function syncTestnet(){
-  if(S.mode!=='TESTNET')return;
-  try{
-    const [a,pr]=await Promise.all([
-      api(TN_AC,'/fapi/v2/account'),
-      api(TN_AC,'/fapi/v2/positionRisk')
-    ]);
-    if(a.testnetUnavailable||a.restricted||pr?.testnetUnavailable||pr?.restricted){
-      S.testnetRestricted=true;S.auto=false;
-      try{localStorage.setItem('ddTestnetRestrictedAt',String(Date.now()))}catch(e){}
-      S.err='TESTNET: '+(a.error||pr?.error||'Binance Futures Demo is unavailable from this deployment location.');
-      return;
-    }
-    S.testnetRestricted=false;
-    const bal=(a.assets||[]).find(x=>x.asset==='USDT');
-    S.testnetAccount={
-      availableBalance:N(a.availableBalance||bal?.availableBalance),
-      walletBalance:N(a.totalWalletBalance||bal?.walletBalance),
-      unrealized:N(a.totalUnrealizedProfit),
-      margin:N(a.totalMarginBalance)
-    };
-
-    // Reconcile TESTNET positions by persistent DealDost ownership, not Binance
-    // positionRisk ordering. This prevents a managed position (e.g. USUALUSDT)
-    // from randomly becoming EXTERNAL after refresh/reconciliation.
-    const remote=(Array.isArray(pr)?pr:[]).filter(p=>Math.abs(N(p.positionAmt))>0);
-    const remoteBySymbol=new Map(remote.map(p=>[String(p.symbol),p]));
-    const localTest=S.pos.filter(p=>p.mode==='TESTNET');
-    const managed=loadTestnetManaged();
-    const next=[];
-    for(const rp of remote){
-      const symbol=String(rp.symbol),amt=N(rp.positionAmt);
-      const side=amt>0?'BUY':'SELL',qty=Math.abs(amt),entry=N(rp.entryPrice),current=N(rp.markPrice)||entry;
-      const local=localTest.find(p=>p.s===symbol);
-      const reg=managed[symbol];
-      const registryMatch=reg&&(!reg.side||reg.side===side)&&['MOMENTUM','SCALPING'].includes(reg.e);
-      const localMatch=local&&local.side===side&&['MOMENTUM','SCALPING'].includes(local.e);
-      const engine=registryMatch?reg.e:(localMatch?local.e:'EXTERNAL');
-      const p={
-        ...(local||{}),
-        id:local?.id||'tn-sync-'+symbol,s:symbol,e:engine,side,entry,current,q:qty,
-        pnl:N(rp.unRealizedProfit),mode:'TESTNET',
-        orderId:local?.orderId||reg?.orderId||null,
-        opened:local?.opened||N(reg?.opened)||Date.now(),
-        signalStage:local?.signalStage||reg?.signalStage||'CONFIRMED',
-        qualityScore:N(local?.qualityScore)||N(reg?.qualityScore),
-        riskPct:N(local?.riskPct)||N(reg?.riskPct),riskAmount:N(local?.riskAmount)||N(reg?.riskAmount),notional:N(local?.notional)||N(reg?.notional)||qty*current,
-        stopPct:N(local?.stopPct)||N(reg?.stopPct),tpPct:N(local?.tpPct)||N(reg?.tpPct),
-        sl:N(local?.sl)||N(reg?.sl)||0,
-        tp:N(local?.tp)||N(reg?.tp)||0
-      };
-      if(engine!=='EXTERNAL'){
-        managed[symbol]={...reg,s:symbol,e:engine,side,orderId:p.orderId||null,opened:p.opened,lastSeen:Date.now(),
-          signalStage:p.signalStage,qualityScore:p.qualityScore,riskPct:p.riskPct,riskAmount:p.riskAmount,notional:p.notional,stopPct:p.stopPct,tpPct:p.tpPct};
-      }
-      next.push(p);
-    }
-    // Brief grace period only for a known local managed position that Binance
-    // temporarily omits during reconciliation. Unknown/external positions are
-    // never retained as managed.
-    const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&
-      ['MOMENTUM','SCALPING'].includes(p.e)&&Date.now()-N(p.opened)<60000);
-    for(const p of stale)if(managed[p.s])managed[p.s].lastSeen=Date.now();
-    for(const [s,m] of Object.entries(managed)){
-      if(!remoteBySymbol.has(s)&&Date.now()-N(m.lastSeen||m.opened)>60000)delete managed[s];
-    }
-    saveTestnetManaged(managed);
-    // Enforce engine ownership caps during reconciliation without ever
-    // force-closing a real Demo position. If an old/stale registry makes an
-    // engine appear over-cap, keep only the first limit positions managed by
-    // that engine and classify overflow as EXTERNAL until it is closed.
-    const managedByEngine={MOMENTUM:0,SCALPING:0};
-    for(const p of next){
-      if(['MOMENTUM','SCALPING'].includes(p.e)){
-        if(managedByEngine[p.e] < engineLimit(p.e)) managedByEngine[p.e]++;
-        else{
-          p.e='EXTERNAL';
-          p.qualityScore=0;
-          if(managed[p.s])delete managed[p.s];
-        }
-      }
-    }
-    const keep=[...next,...stale];
-    S.pos=[...S.pos.filter(p=>p.mode!=='TESTNET'),...keep];
-  }catch(e){
-    const msg=String(e.message||e);
-    S.err=/invalid symbol/i.test(msg)?'TESTNET account sync returned an unexpected Invalid symbol response. Trading is blocked until Demo account sync succeeds.':'Testnet sync: '+msg;
-  }
-}
-async function checkTestnetStatus(){
-  try{const r=await fetch(TN_STATUS,{cache:'no-store'});if(r.ok)S.testnetStatus=await r.json()}catch(e){S.testnetStatus=null}
-  if(S.mode==='TESTNET')await syncTestnetSymbols();
-}
-async function syncTestnetSymbols(){
-  try{
-    const r=await fetch(TN_SYMS+'?ts='+Date.now(),{cache:'no-store'});const j=await r.json();
-    if(j.testnetUnavailable||j.restricted){S.testnetSymbolsReady=false;S.testnetRestricted=true;S.auto=false;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
-    if(!r.ok)throw Error(j.error||'Testnet symbol list failed');
-    S.testnetSymbols=new Set(Array.isArray(j.symbols)?j.symbols:[]);
-    // A symbol rejected by an actual Demo order remains blocked even if it still
-    // appears in exchangeInfo; only a later symbol refresh that removes/re-adds
-    // it should change that state.
-    for(const s of [...S.testnetRejectedSymbols]){
-      if(!S.testnetSymbols.has(s))S.testnetRejectedSymbols.delete(s);
-    }
-    S.testnetSymbolsReady=S.testnetSymbols.size>0;
-    if(S.testnetSymbolsReady&&S.testnetRestricted){S.testnetRestricted=false}
-    if(S.testnetSymbolsReady&&S.mode==='TESTNET'&&/invalid symbol|not supported by Binance Futures Demo/i.test(String(S.err||'')))S.err='';
-    return true;
-  }catch(e){
-    S.testnetSymbols=new Set();S.testnetSymbolsReady=false;
-    S.err='TESTNET: Demo symbol list could not be verified — '+String(e.message||e);
-    return false;
-  }
-}
-
-/* ===== Scanner (preserved, ranking by absolute 24h change) ===== */
-async function scan(){
-  if(S.busy)return;S.busy=true;
-  try{
-    // TESTNET universe must be built only from symbols verified by Binance Futures Demo.
-    // The public market feed can contain contracts that Demo rejects for order placement.
-    if(S.mode==='TESTNET'&&!S.testnetSymbolsReady){
-      await syncTestnetSymbols();
-    }
-    const ex=await api(PUB,'/fapi/v1/exchangeInfo'),tt=await api(PUB,'/fapi/v1/ticker/24hr');
-    const syms=new Set((ex.symbols||[]).filter(x=>x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING').map(x=>x.symbol));
-    (Array.isArray(tt)?tt:[]).forEach(x=>{if(syms.has(x.symbol))S.t[x.symbol]={p:N(x.lastPrice),c:N(x.priceChangePercent),v:N(x.quoteVolume),bid:N(x.bidPrice),ask:N(x.askPrice)}});
-    // Stable universe: pin first scan's top coins, then only update prices for those
-    const count=N(S.settings.coinCount)||50;
-    if(!S.stableUniverse.length){
-      S.stableUniverse=[...syms].sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c))).slice(0,count);
-      try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
-    }
-    const demoOK=s=>S.mode!=='TESTNET'||(S.testnetSymbolsReady&&S.testnetSymbols.has(s)&&!S.testnetRejectedSymbols.has(s));
-    const validStable=S.stableUniverse.filter(s=>syms.has(s)&&demoOK(s)&&/^[A-Z0-9_]{1,30}$/.test(s));
-    if(validStable.length<count){
-      const extras=[...syms].filter(s=>demoOK(s)&&/^[A-Z0-9_]{1,30}$/.test(s)&&!validStable.includes(s))
-        .sort((a,b)=>Math.abs(N(S.t[b]?.c))-Math.abs(N(S.t[a]?.c)));
-      validStable.push(...extras.slice(0,count-validStable.length));
-      S.stableUniverse=validStable.slice(0,count);
-      try{localStorage.setItem('dd_stable_universe_v1',JSON.stringify(S.stableUniverse))}catch(e){}
-    }
-    const top=validStable.slice(0,count);
-    S.universe=top;
-    if(S.mode==='TESTNET'&&S.err&&/Binance Futures Demo rejected (?:this symbol|the symbol)|skipped.*Binance Futures Demo.*rejected|not supported by Binance Futures Demo/i.test(String(S.err))){
-      S.err='';
-    }
-    // Keep the last valid calculation visible during a refresh. Replacing all
-    // 50 rows with "Loading" on every scan made transient API failures look like
-    // permanent scanner failures.
-    const previousRows=new Map(S.rows.map(x=>[x.s,x]));
-    S.rows=top.map(s=>previousRows.get(s)||({s,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),m:0,sc:0,momentum:'WAIT',scalp:'WAIT',atr:0,support:0,resistance:0,trend:'NEUTRAL',funding:0,oi:0,stage:'WATCH',confirmed:false,qualityScore:0,confirmReasons:'',reasons:'Loading'}));
-    // Core scanner data is only the three candle streams. Keep concurrency low
-    // because every request passes through the market-data server route. Binance
-    // explicitly requires clients to back off after 429 responses.
-    const batchSize=2;
-    for(let b=0;b<top.length;b+=batchSize){
-      const batch=top.slice(b,b+batchSize);
-      await Promise.all(batch.map(async s=>{
-        try{
-          // Sequential interval fetches avoid a 3x burst per symbol while still
-          // processing two symbols at a time.
-          const m5=await api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=5m&limit=100');
-          const m15=await api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=15m&limit=100');
-          const m1=await api(PUB,'/fapi/v1/klines?symbol='+s+'&interval=1m&limit=100');
-          S.k[s]={m5,m15,m1};
-          const r=calc(s),i=S.rows.findIndex(x=>x.s===s);if(i>=0)S.rows[i]=r;
-        }catch(e){
-          const i=S.rows.findIndex(x=>x.s===s);
-          if(i>=0){
-            const prior=S.rows[i];
-            S.rows[i]=prior&&prior.reasons!=='Loading'
-              ?{...prior,p:N(S.t[s]?.p),c:N(S.t[s]?.c),v:N(S.t[s]?.v),reasons:'Candle refresh retry: '+String(e.message||'request failed').slice(0,70)}
-              :{...prior,reasons:'Feed unavailable: '+String(e.message||'request failed').slice(0,80)};
-          }
-        }
-      }));
-    }
-    S.lastScan=Date.now();S.err='';
-    await syncAccount();
-    if(S.mode==='TESTNET')await syncTestnetSymbols();
-    await syncTestnet();
-    await managePaper();await engine();render();
-  }catch(e){S.err='Market scan: '+e.message;render()}
-  finally{S.busy=false}
-}
-
-/* ===== WebSocket (dedup guard) ===== */
 function connectWS(){
   if(S.ws){try{S.ws.close()}catch(e){}}
   try{

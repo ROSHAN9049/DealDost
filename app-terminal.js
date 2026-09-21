@@ -21,7 +21,6 @@ const S={
   mode:(localStorage.getItem('ddMode')||'PAPER'),
   auto:true,liveAuto:false,liveTrading:false,
   emergencyStop:false,
-  enginePause:{MOMENTUM:0,SCALPING:0},
   rotation:{enabled:true,lastRotation:0,events:0,rotationDate:'',lastEngine:'',lastClosed:'',lastOpened:'',lastReason:'',lastResult:'',lastAttemptKey:''},
   tab:'dashboard',
   wsStatus:'connecting',ws:null,wsTimer:null,
@@ -109,7 +108,7 @@ function forgetTestnetManaged(p){
 }
 function save(){
   try{
-    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop,enginePause:S.enginePause,optReal:S.optReal,optFees:S.optFees});
+    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop,optReal:S.optReal,optFees:S.optFees});
     localStorage.setItem('ddSettings',JSON.stringify(S.settings));
   }catch(e){}
 }
@@ -129,7 +128,6 @@ function load(){
       S.rotation.lastRotation=0;S.rotation.lastEngine='';S.rotation.lastClosed='';S.rotation.lastOpened='';S.rotation.lastReason='';S.rotation.lastResult='';S.rotation.lastAttemptKey='';
     }
     S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
-    S.enginePause={MOMENTUM:N(q.enginePause?.MOMENTUM),SCALPING:N(q.enginePause?.SCALPING)};
     try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
     try{const rj=JSON.parse(localStorage.getItem('dd_testnet_rejected_v1')||'[]');if(Array.isArray(rj))S.testnetRejectedSymbols=new Set(rj.map(String))}catch(e){}
   }catch(e){}
@@ -297,14 +295,6 @@ function spreadGuard(x){
   const spread=(ask-bid)/mid;
   return{spreadPct:spread,max:.0035,ok:spread<=.0035};
 }
-function lossPauseMs(e){
-  const exits=S.hist.filter(h=>h&&h.action==='EXIT'&&h.e===e).sort((a,b)=>N(b.time)-N(a.time));
-  if(exits.length<3)return 0;
-  const streak=exits.slice(0,3).every(h=>N(h.pnl)<0);
-  if(!streak)return 0;
-  const left=15*60*1000-(Date.now()-N(exits[0].time));
-  return Math.max(0,left);
-}
 function riskModel(x,e,equity){
   const raw=(x.atr||x.p*.006)/Math.max(x.p,1e-9),
     stop=e==='SCALPING'?Math.min(Math.max(raw,.004),.008):Math.min(Math.max(raw*.95,.0055),.012),
@@ -325,7 +315,6 @@ function canOpen(x,e,entryReserved=false){
   if(S.pos.some(p=>p.s===x.s))return false;
   const vg=volatilityGuard(x,e);if(!vg.ok)return false;
   const sg=spreadGuard(x);if(!sg.ok)return false;
-  const pause=lossPauseMs(e);if(pause>0)return false;
   // A TESTNET entry reserves a slot before the async exchange request to
   // prevent races. Once that reservation exists, do not count the same
   // reservation a second time inside canOpen().
@@ -410,7 +399,7 @@ async function testnetOpen(x,e){
     S.err='TESTNET: '+(x?.s||'Unknown symbol')+' skipped — signal is not CONFIRMED. No order was placed.';
     return false;
   }
-  const vg=volatilityGuard(x,e),sg=spreadGuard(x),pause=lossPauseMs(e);
+  const vg=volatilityGuard(x,e),sg=spreadGuard(x);
   if(!vg.ok){S.err='TESTNET: '+x.s+' blocked — volatility '+P(vg.atrPct*100)+' exceeds '+P(vg.max*100)+' safety limit.';render();return false}
   if(!sg.ok){S.err='TESTNET: '+x.s+' blocked — spread '+P(sg.spreadPct*100)+' exceeds '+P(sg.max*100)+' safety limit.';render();return false}
   if(pause>0){S.err='TESTNET: '+e+' paused after 3 consecutive losses — resume in '+Math.ceil(pause/60000)+'m.';render();return false}
@@ -1367,8 +1356,6 @@ function renderDashboard(){
     '<div class="kpi-card"><div class="kpi-label">SCALPING</div><div class="kpi-value" style="font-size:14px">'+scalpCount+'/'+SC+' '+scalpStatus+'</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">OPTIONS</div><div class="kpi-value" style="font-size:14px">'+optCount+'/'+OPT_SETS+' '+optStatus+'</div></div>'+
     '<div class="kpi-card"><div class="kpi-label">PROFIT ROTATION</div><div class="kpi-value" style="font-size:14px;color:'+(S.rotation.enabled?'var(--green)':'var(--muted)')+'">'+(S.rotation.enabled?'ON':'OFF')+'</div><div class="kpi-sub">Events: '+S.rotation.events+'</div></div>'+
-    '<div class="kpi-card"><div class="kpi-label">MOM LOSS PAUSE</div><div class="kpi-value" style="font-size:14px;color:'+(lossPauseMs('MOMENTUM')?'var(--red)':'var(--green)')+'">'+(lossPauseMs('MOMENTUM')?Math.ceil(lossPauseMs('MOMENTUM')/60000)+'m':'READY')+'</div><div class="kpi-sub">3-loss protection</div></div>'+
-    '<div class="kpi-card"><div class="kpi-label">SCALP LOSS PAUSE</div><div class="kpi-value" style="font-size:14px;color:'+(lossPauseMs('SCALPING')?'var(--red)':'var(--green)')+'">'+(lossPauseMs('SCALPING')?Math.ceil(lossPauseMs('SCALPING')/60000)+'m':'READY')+'</div><div class="kpi-sub">3-loss protection</div></div>'+
     '</div></div>';
   const riskPanel='<div class="panel" style="margin-bottom:8px"><div class="panel-header"><div class="panel-title">Risk & Mode</div></div>'+
     '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">'+

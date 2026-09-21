@@ -89,6 +89,22 @@ async function api(base,path){
 
 /* ===== Storage with mode isolation ===== */
 function storageKey(){return 'ddv5_'+S.mode}
+const TESTNET_MANAGED_KEY='dd_testnet_managed_v2';
+function loadTestnetManaged(){
+  try{const q=JSON.parse(localStorage.getItem(TESTNET_MANAGED_KEY)||'{}');return q&&typeof q==='object'?q:{}}catch(e){return{}}
+}
+function saveTestnetManaged(q){try{localStorage.setItem(TESTNET_MANAGED_KEY,JSON.stringify(q||{}))}catch(e){}}
+function rememberTestnetManaged(p){
+  if(!p||!p.s||!['MOMENTUM','SCALPING'].includes(p.e))return;
+  const q=loadTestnetManaged();
+  q[p.s]={s:p.s,e:p.e,side:p.side,orderId:p.orderId||null,opened:N(p.opened)||Date.now(),
+    signalStage:p.signalStage||'CONFIRMED',qualityScore:N(p.qualityScore),lastSeen:Date.now()};
+  saveTestnetManaged(q);
+}
+function forgetTestnetManaged(p){
+  if(!p?.s)return;
+  const q=loadTestnetManaged();delete q[p.s];saveTestnetManaged(q);
+}
 function save(){
   try{
     localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop,optReal:S.optReal,optFees:S.optFees});
@@ -406,9 +422,11 @@ async function testnetOpen(x,e){
       throw Error(msg);
     }
     const ent=j.entry||j,fillPx=N(ent.avgPrice)||x.p;
-    S.pos.push({id:'tn-'+Date.now(),s:x.s,e,side:z,entry:fillPx,current:fillPx,q:N(j.quantity)||r.q,
+    const managedPos={id:'tn-'+Date.now(),s:x.s,e,side:z,entry:fillPx,current:fillPx,q:N(j.quantity)||r.q,
       sl:z==='BUY'?fillPx*(1-r.stop):fillPx*(1+r.stop),tp:z==='BUY'?fillPx*(1+2*r.stop):fillPx*(1-2*r.stop),
-      entryFee:0,pnl:0,feeRate:F,mode:'TESTNET',orderId:ent.orderId,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore});
+      entryFee:0,pnl:0,feeRate:F,mode:'TESTNET',orderId:ent.orderId,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore};
+    S.pos.push(managedPos);
+    rememberTestnetManaged(managedPos);
     recordDailyRisk(r.risk,S.eq);
     S.lastTrade[x.s]=Date.now();
     S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:fillPx,qty:N(j.quantity)||r.q,pnl:0,fees:0,live:true,mode:'TESTNET',reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
@@ -640,30 +658,47 @@ async function syncTestnet(){
       margin:N(a.totalMarginBalance)
     };
 
-    // Reconcile the local TESTNET positions with Binance Demo after every account sync.
-    // This keeps the dashboard alive across refreshes and prevents stale local positions.
+    // Reconcile TESTNET positions by persistent DealDost ownership, not Binance
+    // positionRisk ordering. This prevents a managed position (e.g. USUALUSDT)
+    // from randomly becoming EXTERNAL after refresh/reconciliation.
     const remote=(Array.isArray(pr)?pr:[]).filter(p=>Math.abs(N(p.positionAmt))>0);
     const remoteBySymbol=new Map(remote.map(p=>[String(p.symbol),p]));
     const localTest=S.pos.filter(p=>p.mode==='TESTNET');
+    const managed=loadTestnetManaged();
     const next=[];
-    let momUsed=0,scalpUsed=0;
     for(const rp of remote){
-      const symbol=String(rp.symbol),amt=N(rp.positionAmt),local=localTest.find(p=>p.s===symbol);
+      const symbol=String(rp.symbol),amt=N(rp.positionAmt);
       const side=amt>0?'BUY':'SELL',qty=Math.abs(amt),entry=N(rp.entryPrice),current=N(rp.markPrice)||entry;
-      let engine=local?.e;
-      if(engine==='MOMENTUM' && momUsed<MC)momUsed++;
-      else if(engine==='SCALPING' && scalpUsed<SC)scalpUsed++;
-      else engine='EXTERNAL';
-      next.push({
+      const local=localTest.find(p=>p.s===symbol);
+      const reg=managed[symbol];
+      const registryMatch=reg&&(!reg.side||reg.side===side)&&['MOMENTUM','SCALPING'].includes(reg.e);
+      const localMatch=local&&local.side===side&&['MOMENTUM','SCALPING'].includes(local.e);
+      const engine=registryMatch?reg.e:(localMatch?local.e:'EXTERNAL');
+      const p={
         ...(local||{}),
-        id:local?.id||'tn-sync-'+symbol,
-        s:symbol,e:engine||'EXTERNAL',side,entry,current,q:qty,
+        id:local?.id||'tn-sync-'+symbol,s:symbol,e:engine,side,entry,current,q:qty,
         pnl:N(rp.unRealizedProfit),mode:'TESTNET',
-        orderId:local?.orderId||null,
-        opened:local?.opened||Date.now()
-      });
+        orderId:local?.orderId||reg?.orderId||null,
+        opened:local?.opened||N(reg?.opened)||Date.now(),
+        signalStage:local?.signalStage||reg?.signalStage||'CONFIRMED',
+        qualityScore:N(local?.qualityScore)||N(reg?.qualityScore)
+      };
+      if(engine!=='EXTERNAL'){
+        managed[symbol]={...reg,s:symbol,e:engine,side,orderId:p.orderId||null,opened:p.opened,lastSeen:Date.now(),
+          signalStage:p.signalStage,qualityScore:p.qualityScore};
+      }
+      next.push(p);
     }
-    const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&Date.now()-N(p.opened)<60000);
+    // Brief grace period only for a known local managed position that Binance
+    // temporarily omits during reconciliation. Unknown/external positions are
+    // never retained as managed.
+    const stale=localTest.filter(p=>!remoteBySymbol.has(p.s)&&
+      ['MOMENTUM','SCALPING'].includes(p.e)&&Date.now()-N(p.opened)<60000);
+    for(const p of stale)if(managed[p.s])managed[p.s].lastSeen=Date.now();
+    for(const [s,m] of Object.entries(managed)){
+      if(!remoteBySymbol.has(s)&&Date.now()-N(m.lastSeen||m.opened)>60000)delete managed[s];
+    }
+    saveTestnetManaged(managed);
     const keep=[...next,...stale];
     S.pos=[...S.pos.filter(p=>p.mode!=='TESTNET'),...keep];
   }catch(e){
@@ -1492,6 +1527,7 @@ window.DD={
         p.pnl=gross-N(p.entryFee)-ef;S.real+=p.pnl;S.eq+=p.pnl;S.fees+=N(p.entryFee)+ef;
         S.hist.unshift({time:Date.now(),s:p.s,e:p.e,side:p.side,action:'EXIT',entry:p.entry,exit:px,qty:p.q,pnl:p.pnl,fees:N(p.entryFee)+ef,live:p.mode==='LIVE',mode:p.mode,reason:'Manual close',signalStage:p.signalStage||'',qualityScore:N(p.qualityScore)});
         S.pos=S.pos.filter(q=>q.id!==p.id);S.lastTrade[sym]=Date.now();
+        if(p.mode==='TESTNET')forgetTestnetManaged(p);
         if(p.mode==='TESTNET')await syncTestnet();else await syncAccount();
       }else{
         const gross=p.side==='BUY'?(x-p.entry)*p.q:(p.entry-x)*p.q,ef=x*p.q*F;

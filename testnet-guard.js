@@ -11,6 +11,35 @@
   const MSG='Binance Futures Demo trading is unavailable from this deployment location or account eligibility.';
   const TTL=10*60*1000;
   const nativeFetch=window.fetch.bind(window);
+  const nativeOpen=window.open.bind(window);
+  const isBinanceDemoUrl=(value)=>{
+    try{
+      const u=new URL(String(value||''),window.location.href);
+      const host=u.hostname.toLowerCase();
+      return host==='demo.binance.com'||host.endsWith('.demo.binance.com')||host==='testnet.binancefuture.com';
+    }catch(e){return false}
+  };
+
+  // The scanner must stay inside DealDost. Binance Demo is an API/account
+  // execution environment, not a page that the terminal should auto-open.
+  window.open=function(url,...args){
+    if(isBinanceDemoUrl(url)){
+      console.warn('[DealDost] blocked automatic Binance Demo navigation:',url);
+      return null;
+    }
+    return nativeOpen(url,...args);
+  };
+
+  document.addEventListener('click',(event)=>{
+    try{
+      const link=event.target&&event.target.closest?event.target.closest('a[href]'):null;
+      if(link&&isBinanceDemoUrl(link.href)){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        console.warn('[DealDost] blocked Binance Demo link navigation:',link.href);
+      }
+    }catch(e){}
+  },true);
 
   const restrictedNow=()=>{
     const t=Number(localStorage.getItem(KEY)||0);

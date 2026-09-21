@@ -40,6 +40,47 @@ async function testOrder(symbol,side,quantity,reduceOnly=false){
     throw e;
   }
 }
+async function positionAmount(symbol){
+  const rows=await req('GET','/fapi/v2/positionRisk',{symbol});
+  const row=Array.isArray(rows)?rows.find(x=>x.symbol===symbol):rows;
+  return dec(row?.positionAmt);
+}
+async function cancelAlgoOrders(symbol){
+  let canceled=0;
+  try{
+    const rows=await req('GET','/fapi/v1/openAlgoOrders',{symbol});
+    for(const o of Array.isArray(rows)?rows:[]){
+      const id=o.algoId||o.orderId;
+      if(id==null)continue;
+      try{await req('DELETE','/fapi/v1/algoOrder',{algoId:String(id)});canceled++}catch{}
+    }
+  }catch(e){
+    // Demo may briefly reject the algo query during maintenance; do not hide
+    // the primary trade error, but keep the cleanup best-effort.
+  }
+  return canceled;
+}
+async function cancelLegacyStopOrders(symbol){
+  let canceled=0;
+  try{
+    const rows=await req('GET','/fapi/v1/openOrders',{symbol});
+    for(const o of Array.isArray(rows)?rows:[]){
+      if(!['STOP','STOP_MARKET','TAKE_PROFIT','TAKE_PROFIT_MARKET'].includes(String(o.type||'').toUpperCase()))continue;
+      try{await req('DELETE','/fapi/v1/order',{symbol,orderId:String(o.orderId)});canceled++}catch{}
+    }
+  }catch{}
+  return canceled;
+}
+async function cleanupProtection(symbol){
+  const a=await cancelAlgoOrders(symbol);
+  const l=await cancelLegacyStopOrders(symbol);
+  return a+l;
+}
+async function ensureFlatAndClean(symbol){
+  const amt=await positionAmount(symbol);
+  if(Math.abs(amt)>0)throw Error('Existing Binance Demo position on '+symbol+'; entry blocked until that position is closed.');
+  return cleanupProtection(symbol);
+}
 export default async function handler(req0,res){
   if(req0.method!=='POST')return res.status(405).json({error:'POST only'});
   if(!UNLOCKED)return res.status(403).json({error:'Binance Futures Demo trading is locked'});
@@ -64,7 +105,13 @@ export default async function handler(req0,res){
     // Non-placing exchange preflight used by safe TESTNET rotation.
     if(action==='preflight'){
       await testOrder(symbol,side,quantity,false);
+      if(Math.abs(await positionAmount(symbol))>0)throw Error('Existing Binance Demo position on '+symbol+'; replacement entry blocked.');
       return res.status(200).json({preflight:true,symbol,side,quantity,serverPrice:px,notional:quantity*px});
+    }
+    if(action==='close'){
+      await cleanupProtection(symbol);
+    }else{
+      await ensureFlatAndClean(symbol);
     }
     await testOrder(symbol,side,quantity,action==='close');
     const entryParams={symbol,side,type:'MARKET',quantity:String(quantity),newOrderRespType:'RESULT'};if(action==='close')entryParams.reduceOnly='true';
@@ -78,23 +125,17 @@ export default async function handler(req0,res){
     if(!tick||sl<=0||tp<=0)return res.status(400).json({error:'Binance price filter is unavailable for '+symbol});
     let protection=null;
     if(process.env.TESTNET_PROTECT_ORDERS!=='false'){
-      // Demo environments can reject the newer /fapi/v1/algoOrder route even
-      // when normal Futures orders are accepted. Try the standard conditional
-      // order endpoint first; fall back to algoOrder only if needed. Never leave
-      // an automatic TESTNET position unprotected.
+      // Since Binance migrated Futures conditional orders to the Algo Order API,
+      // never send STOP/TAKE_PROFIT through /fapi/v1/order. Stale protections for
+      // this symbol are cleaned before entry/close so the account does not hit the
+      // Demo max-algo-order limit from old protections.
       try{
-        const so=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),stopPrice:formatStep(sl,tick),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
-        const to=await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),stopPrice:formatStep(tp,tick),reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
-        protection={stopOrderId:so.orderId,takeProfitOrderId:to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'standard'};
-      }catch(firstErr){
-        try{
-          const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:formatStep(sl,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
-          const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:formatStep(tp,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE'});
-          protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'algoOrder'};
-        }catch(secondErr){
-          try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}
-          throw Error('Demo entry protection failed; emergency close attempted. Standard: '+firstErr.message+'; Algo: '+secondErr.message)
-        }
+        const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:formatStep(sl,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        const to=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'TAKE_PROFIT_MARKET',quantity:String(quantity),triggerPrice:formatStep(tp,tick),closePosition:'false',reduceOnly:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        protection={stopOrderId:so.algoId||so.orderId,takeProfitOrderId:to.algoId||to.orderId,stopPrice:sl,takeProfitPrice:tp,route:'algoOrder'};
+      }catch(secondErr){
+        try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}
+        throw Error('Demo entry protection failed; emergency close attempted. Algo: '+secondErr.message)
       }
     }
     return res.status(200).json({entry,protection,serverPrice:px,quantity,notional:quantity*fill});

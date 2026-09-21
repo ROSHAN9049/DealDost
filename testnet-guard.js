@@ -180,15 +180,12 @@
 
   const MSG='Binance Futures Demo trading is unavailable from this deployment location or account eligibility.';
 
-  function disableTestnetAuto(){
-    try{
-      const text=(document.body?.innerText||'');
-      if(!/Mode:\s*TESTNET/i.test(text))return;
-      const els=[...document.querySelectorAll('button,[role="button"]')];
-      const b=els.find(x=>/Auto\s*[: ]\s*ON/i.test((x.textContent||'').trim()));
-      if(b)b.click();
-    }catch(e){}
-  }
+  // IMPORTANT: never programmatically click the Auto button.
+  // The previous guard used b.click() here; if the terminal's Auto handler
+  // opens the Binance Demo/Testnet UI, that synthetic click creates the exact
+  // unwanted new-tab behavior during background scanner/account updates.
+  // Testnet restriction is enforced at the API boundary instead.
+  function disableTestnetAuto(){}
 
   window.fetch=async function(input,init){
     const url=typeof input==='string'?input:(input&&input.url)||'';

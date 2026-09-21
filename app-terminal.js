@@ -1533,7 +1533,7 @@ function renderPaper(){
     }else if(set.reason){
       detail='<div class="acct-row"><span>Note</span><b style="font-size:10px">'+E(set.reason)+'</b></div>';
     }
-    const closeBtn=set.status==='OPEN'?'<button class="btn sm red" onclick="DD.closeOptSet('+set.id+')">Close</button>':'';
+    const closeBtn=set.status==='OPEN'?'<button class="btn sm red" onclick="DD.closeOptSet('+(set.id-1)+')">Close</button>':'';
     return '<div class="acct-card"><h4>Set '+set.id+'</h4><div class="acct-row"><span>Status</span><b class="'+stCls+'">'+set.status+'</b></div>'+(set.symbol?'<div class="acct-row"><span>Symbol</span><b>'+E(set.symbol)+'</b></div>':'')+(set.side?'<div class="acct-row"><span>Side</span><b class="'+(set.side==='BUY'?'buy':'sell')+'">'+set.side+'</b></div>':'')+detail+closeBtn+'</div>';
   }).join('');
   return '<div class="mode-banner paper"><b>PAPER TRADING</b> — Local simulation · Real orders OFF · Risk-controlled entries</div>'+

@@ -286,12 +286,15 @@ function riskModel(x,e,equity){
     q=Math.min(rawQ,maxNotional/Math.max(x.p,1e-9));
   return{stop,risk,q};
 }
-function canOpen(x,e){
+function canOpen(x,e,entryReserved=false){
   if(!x||!x.p||signal(x,e)==='WAIT')return false;
   if(!x.confirmed)return false;
   if(S.emergencyStop)return false;
   if(S.pos.some(p=>p.s===x.s))return false;
-  if(engineOpenCount(e)+N(S.entryLocks[e])>=engineLimit(e))return false;
+  // A TESTNET entry reserves a slot before the async exchange request to
+  // prevent races. Once that reservation exists, do not count the same
+  // reservation a second time inside canOpen().
+  if(engineOpenCount(e)+(entryReserved?0:N(S.entryLocks[e]))>=engineLimit(e))return false;
   const cd=e==='MOMENTUM'?MOM_COOLDOWN:e==='SCALPING'?SCALP_COOLDOWN:COOLDOWN;
   const last=N(S.lastTrade[x.s]||0);
   // Repair stale local cooldown timestamps that have no matching recorded
@@ -345,7 +348,7 @@ async function testnetOpen(x,e){
     S.err='TESTNET: '+(x?.s||'Unknown symbol')+' skipped — signal is not CONFIRMED. No order was placed.';
     return false;
   }
-  if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e)){
+  if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e,true)){
     const last=N(S.lastTrade[x.s]||0),cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     const mins=last>0?Math.max(0,Math.ceil((cd-(Date.now()-last))/60000)):0;
     const slot=e==='MOMENTUM'?MC:SC;
@@ -368,7 +371,7 @@ async function testnetOpen(x,e){
   // Demo listings can lag the public Futures feed; the server performs the
   // authoritative symbol preflight immediately before the order.
   if(S.testnetRejectedSymbols.has(x.s)){S.err='TESTNET: '+x.s+' was previously rejected by Demo; retrying preflight now.';S.testnetRejectedSymbols.delete(x.s)}
-  if(engineOpenCount(e)+N(S.entryLocks[e])>engineLimit(e)){
+  if(engineOpenCount(e)>=engineLimit(e)){
     S.err='TESTNET: '+e+' position limit reached — no order placed.';
     render();
     return false;

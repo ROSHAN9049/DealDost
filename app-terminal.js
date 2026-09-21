@@ -1778,7 +1778,10 @@ function renderTestnet(){
   return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+
     statusNote+
     '<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+' ('+managedPositions+' managed)'+(externalPositions?' · '+externalPositions+' external':''))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>';
+    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>'+
+    '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">TESTNET Live Scanner</div><div class="panel-sub">Stable '+(S.rows.length||0)+' · Market feed only · Demo execution isolated</div></div>'+
+    '<div class="two-col"><div><div class="panel-header" style="border-top:0"><div class="panel-title">Momentum</div><div class="panel-sub">'+S.pos.filter(p=>p.e==='MOMENTUM').length+'/'+MC+'</div></div>'+scannerTable('M')+'</div>'+
+    '<div><div class="panel-header" style="border-top:0"><div class="panel-title">Scalping</div><div class="panel-sub">'+S.pos.filter(p=>p.e==='SCALPING').length+'/'+SC+'</div></div>'+scannerTable('S')+'</div></div></div>';
 }
 
 function renderLive(){

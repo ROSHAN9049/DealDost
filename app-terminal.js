@@ -588,8 +588,11 @@ async function profitRotation(){
 /* ===== Position management (preserved) ===== */
 async function managePaper(){
   for(const p of [...S.pos]){
-    if(p.mode==='LIVE')continue;
-    if(p.mode==='TESTNET'&&p.orderId)continue;
+    // TESTNET positions are exchange-managed. Binance Demo owns the live
+    // mark/SL/TP lifecycle, so the local paper manager must NEVER simulate
+    // exits for TESTNET positions. This is especially important for EXTERNAL
+    // positions, which have no DealDost SL/TP and must remain informational.
+    if(p.mode==='LIVE'||p.mode==='TESTNET')continue;
     const x=N(S.t[p.s]?.p);if(!x)continue;
     p.current=x;
     const gross=p.side==='BUY'?(x-p.entry)*p.q:(p.entry-x)*p.q,ef=x*p.q*F;

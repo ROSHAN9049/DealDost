@@ -21,6 +21,7 @@ const S={
   mode:(localStorage.getItem('ddMode')||'PAPER'),
   auto:true,liveAuto:false,liveTrading:false,
   emergencyStop:false,
+  enginePause:{MOMENTUM:0,SCALPING:0},
   rotation:{enabled:true,lastRotation:0,events:0,rotationDate:'',lastEngine:'',lastClosed:'',lastOpened:'',lastReason:'',lastResult:'',lastAttemptKey:''},
   tab:'dashboard',
   wsStatus:'connecting',ws:null,wsTimer:null,
@@ -98,7 +99,8 @@ function rememberTestnetManaged(p){
   if(!p||!p.s||!['MOMENTUM','SCALPING'].includes(p.e))return;
   const q=loadTestnetManaged();
   q[p.s]={s:p.s,e:p.e,side:p.side,orderId:p.orderId||null,opened:N(p.opened)||Date.now(),
-    signalStage:p.signalStage||'CONFIRMED',qualityScore:N(p.qualityScore),lastSeen:Date.now()};
+    signalStage:p.signalStage||'CONFIRMED',qualityScore:N(p.qualityScore),riskPct:N(p.riskPct),riskAmount:N(p.riskAmount),notional:N(p.notional),
+    stopPct:N(p.stopPct),tpPct:N(p.tpPct),lastSeen:Date.now()};
   saveTestnetManaged(q);
 }
 function forgetTestnetManaged(p){
@@ -107,7 +109,7 @@ function forgetTestnetManaged(p){
 }
 function save(){
   try{
-    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop,optReal:S.optReal,optFees:S.optFees});
+    localStorage[storageKey()]=JSON.stringify({pos:S.pos,hist:S.hist.slice(0,500),eq:S.eq,real:S.real,fees:S.fees,lastTrade:S.lastTrade,optSets:S.optSets,dailyRiskUsed:S.dailyRiskUsed,dailyRiskDate:S.dailyRiskDate,rotationEvents:S.rotation.events,rotationEnabled:S.rotation.enabled,rotation:S.rotation,rotationId:S.rotationId,emergencyStop:S.emergencyStop,enginePause:S.enginePause,optReal:S.optReal,optFees:S.optFees});
     localStorage.setItem('ddSettings',JSON.stringify(S.settings));
   }catch(e){}
 }
@@ -127,6 +129,7 @@ function load(){
       S.rotation.lastRotation=0;S.rotation.lastEngine='';S.rotation.lastClosed='';S.rotation.lastOpened='';S.rotation.lastReason='';S.rotation.lastResult='';S.rotation.lastAttemptKey='';
     }
     S.rotationId=N(q.rotationId);S.liveTrading=false;S.liveAuto=false;S.emergencyStop=q.emergencyStop===true;
+    S.enginePause={MOMENTUM:N(q.enginePause?.MOMENTUM),SCALPING:N(q.enginePause?.SCALPING)};
     try{const u=JSON.parse(localStorage.getItem('dd_stable_universe_v1')||'[]');if(Array.isArray(u)&&u.length)S.stableUniverse=u}catch(e){}
     try{const rj=JSON.parse(localStorage.getItem('dd_testnet_rejected_v1')||'[]');if(Array.isArray(rj))S.testnetRejectedSymbols=new Set(rj.map(String))}catch(e){}
   }catch(e){}
@@ -277,20 +280,52 @@ function reserveEntry(e){
   return true;
 }
 function releaseEntry(e){S.entryLocks[e]=Math.max(0,N(S.entryLocks[e])-1)}
+function qualityRiskPct(x){
+  const q=N(x?.qualityScore);
+  if(q>=90)return .0045;
+  if(q>=80)return .0035;
+  return .0025;
+}
+function volatilityGuard(x,e){
+  const atrPct=N(x?.atr)/Math.max(N(x?.p),1e-9);
+  const max=e==='SCALPING'?.012:.020;
+  return{atrPct,max,ok:!atrPct||atrPct<=max};
+}
+function spreadGuard(x){
+  const bid=N(S.t[x?.s]?.bid),ask=N(S.t[x?.s]?.ask),mid=N(x?.p);
+  if(!(bid>0&&ask>0&&mid>0))return{spreadPct:0,ok:true};
+  const spread=(ask-bid)/mid;
+  return{spreadPct:spread,max:.0035,ok:spread<=.0035};
+}
+function lossPauseMs(e){
+  const exits=S.hist.filter(h=>h&&h.action==='EXIT'&&h.e===e).sort((a,b)=>N(b.time)-N(a.time));
+  if(exits.length<3)return 0;
+  const streak=exits.slice(0,3).every(h=>N(h.pnl)<0);
+  if(!streak)return 0;
+  const left=15*60*1000-(Date.now()-N(exits[0].time));
+  return Math.max(0,left);
+}
 function riskModel(x,e,equity){
   const raw=(x.atr||x.p*.006)/Math.max(x.p,1e-9),
     stop=e==='SCALPING'?Math.min(Math.max(raw,.004),.008):Math.min(Math.max(raw*.95,.0055),.012),
-    risk=Math.max(N(equity)*.004,5),
+    riskPct=qualityRiskPct(x),
+    risk=Math.max(N(equity)*riskPct,5),
     maxNotional=Math.max(N(equity)*.12,100),
     rawQ=risk/Math.max(x.p*stop,1e-9),
-    q=Math.min(rawQ,maxNotional/Math.max(x.p,1e-9));
-  return{stop,risk,q};
+    q=Math.min(rawQ,maxNotional/Math.max(x.p,1e-9)),
+    notional=q*Math.max(N(x.p),0),
+    tp=stop*2;
+  return{stop,risk,riskPct,q,notional,tp};
 }
 function canOpen(x,e,entryReserved=false){
+
   if(!x||!x.p||signal(x,e)==='WAIT')return false;
   if(!x.confirmed)return false;
   if(S.emergencyStop)return false;
   if(S.pos.some(p=>p.s===x.s))return false;
+  const vg=volatilityGuard(x,e);if(!vg.ok)return false;
+  const sg=spreadGuard(x);if(!sg.ok)return false;
+  const pause=lossPauseMs(e);if(pause>0)return false;
   // A TESTNET entry reserves a slot before the async exchange request to
   // prevent races. Once that reservation exists, do not count the same
   // reservation a second time inside canOpen().
@@ -331,10 +366,10 @@ function paperOpen(x,e){
   const entryPx=x.p+(z==='BUY'?slip:-slip);
   S.pos.push({id:Date.now()+Math.random(),s:x.s,e,side:z,entry:entryPx,current:x.p,q:r.q,
     sl:z==='BUY'?entryPx*(1-r.stop):entryPx*(1+r.stop),tp:z==='BUY'?entryPx*(1+2*r.stop):entryPx*(1-2*r.stop),
-    entryFee:ef,pnl:-ef,feeRate:F,mode:S.mode,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore});
+    entryFee:ef,pnl:-ef,feeRate:F,mode:S.mode,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore,riskPct:r.riskPct,riskAmount:r.risk,notional:r.notional,stopPct:r.stop,tpPct:r.tp});
   recordDailyRisk(r.risk,S.eq);
   S.lastTrade[x.s]=Date.now();
-  S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:S.mode==='LIVE',mode:S.mode,reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore});
+  S.hist.unshift({time:Date.now(),s:x.s,e,side:z,action:'ENTRY',price:entryPx,qty:r.q,pnl:0,fees:ef,live:S.mode==='LIVE',mode:S.mode,reason:x.reasons,signalStage:x.stage,qualityScore:x.qualityScore,riskPct:r.riskPct,riskAmount:r.risk,notional:r.notional,stopPct:r.stop,tpPct:r.tp});
   save();return true;
 }
 async function testnetPreflight(x,e){
@@ -375,6 +410,10 @@ async function testnetOpen(x,e){
     S.err='TESTNET: '+(x?.s||'Unknown symbol')+' skipped — signal is not CONFIRMED. No order was placed.';
     return false;
   }
+  const vg=volatilityGuard(x,e),sg=spreadGuard(x),pause=lossPauseMs(e);
+  if(!vg.ok){S.err='TESTNET: '+x.s+' blocked — volatility '+P(vg.atrPct*100)+' exceeds '+P(vg.max*100)+' safety limit.';render();return false}
+  if(!sg.ok){S.err='TESTNET: '+x.s+' blocked — spread '+P(sg.spreadPct*100)+' exceeds '+P(sg.max*100)+' safety limit.';render();return false}
+  if(pause>0){S.err='TESTNET: '+e+' paused after 3 consecutive losses — resume in '+Math.ceil(pause/60000)+'m.';render();return false}
   if(!['MOMENTUM','SCALPING'].includes(e)||!canOpen(x,e,true)){
     const last=N(S.lastTrade[x.s]||0),cd=e==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     const mins=last>0?Math.max(0,Math.ceil((cd-(Date.now()-last))/60000)):0;
@@ -462,7 +501,7 @@ async function testnetOpen(x,e){
     const ent=j.entry||j,fillPx=N(ent.avgPrice)||x.p;
     const managedPos={id:'tn-'+Date.now(),s:x.s,e,side:z,entry:fillPx,current:fillPx,q:N(j.quantity)||r.q,
       sl:z==='BUY'?fillPx*(1-r.stop):fillPx*(1+r.stop),tp:z==='BUY'?fillPx*(1+2*r.stop):fillPx*(1-2*r.stop),
-      entryFee:0,pnl:0,feeRate:F,mode:'TESTNET',orderId:ent.orderId,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore};
+      entryFee:0,pnl:0,feeRate:F,mode:'TESTNET',orderId:ent.orderId,reason:x.reasons,opened:Date.now(),signalStage:x.stage,qualityScore:x.qualityScore,riskPct:r.riskPct,riskAmount:r.risk,notional:N(j.quantity||r.q)*fillPx,stopPct:r.stop,tpPct:r.tp};
     S.pos.push(managedPos);
     rememberTestnetManaged(managedPos);
     recordDailyRisk(r.risk,S.eq);
@@ -791,12 +830,14 @@ async function syncTestnet(){
         opened:local?.opened||N(reg?.opened)||Date.now(),
         signalStage:local?.signalStage||reg?.signalStage||'CONFIRMED',
         qualityScore:N(local?.qualityScore)||N(reg?.qualityScore),
+        riskPct:N(local?.riskPct)||N(reg?.riskPct),riskAmount:N(local?.riskAmount)||N(reg?.riskAmount),notional:N(local?.notional)||N(reg?.notional)||qty*current,
+        stopPct:N(local?.stopPct)||N(reg?.stopPct),tpPct:N(local?.tpPct)||N(reg?.tpPct),
         sl:N(local?.sl)||N(reg?.sl)||0,
         tp:N(local?.tp)||N(reg?.tp)||0
       };
       if(engine!=='EXTERNAL'){
         managed[symbol]={...reg,s:symbol,e:engine,side,orderId:p.orderId||null,opened:p.opened,lastSeen:Date.now(),
-          signalStage:p.signalStage,qualityScore:p.qualityScore};
+          signalStage:p.signalStage,qualityScore:p.qualityScore,riskPct:p.riskPct,riskAmount:p.riskAmount,notional:p.notional,stopPct:p.stopPct,tpPct:p.tpPct};
       }
       next.push(p);
     }
@@ -870,7 +911,7 @@ async function scan(){
     }
     const ex=await api(PUB,'/fapi/v1/exchangeInfo'),tt=await api(PUB,'/fapi/v1/ticker/24hr');
     const syms=new Set((ex.symbols||[]).filter(x=>x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'&&x.status==='TRADING').map(x=>x.symbol));
-    (Array.isArray(tt)?tt:[]).forEach(x=>{if(syms.has(x.symbol))S.t[x.symbol]={p:N(x.lastPrice),c:N(x.priceChangePercent),v:N(x.quoteVolume)}});
+    (Array.isArray(tt)?tt:[]).forEach(x=>{if(syms.has(x.symbol))S.t[x.symbol]={p:N(x.lastPrice),c:N(x.priceChangePercent),v:N(x.quoteVolume),bid:N(x.bidPrice),ask:N(x.askPrice)}});
     // Stable universe: pin first scan's top coins, then only update prices for those
     const count=N(S.settings.coinCount)||50;
     if(!S.stableUniverse.length){
@@ -1446,7 +1487,7 @@ function renderPositions(){
       const pnl=N(p.pnl),pnlPct=p.entry&&p.current?((p.current-p.entry)/p.entry*100*(p.side==='SELL'?-1:1)):0;
       const age=p.opened?Math.round((Date.now()-p.opened)/60000)+'m':'—';
       return '<div class="pos-card '+(p.side==='SELL'?'sell-side':'')+'"><div class="pos-head"><span class="pos-coin">'+E(p.s)+'</span><span class="pos-tag">'+E(p.e)+'</span><span class="pos-tag">'+E(p.side)+'</span><span class="pos-tag">'+E(p.mode||'PAPER')+'</span>'+(p.signalStage?'<span class="pos-tag">'+E(p.signalStage)+'</span>':'')+(p.sl?'<button class="btn sm red" onclick="DD.close(\''+E(p.s)+'\')">Close</button>':'')+'</div>'+
-        '<div class="pos-grid">'+posField('Entry',fmtPrice(p.entry))+posField('Mark',fmtPrice(p.current))+posField('Qty',fmtQty(p.q))+posField('SL',fmtPrice(p.sl))+posField('TP',fmtPrice(p.tp))+posField('Fees','₹'+R(p.entryFee))+posField('Age',age)+posField('Quality',N(p.qualityScore)||'—')+'</div>'+
+        '<div class="pos-grid">'+posField('Entry',fmtPrice(p.entry))+posField('Mark',fmtPrice(p.current))+posField('Qty',fmtQty(p.q))+posField('Notional',R(N(p.notional)||N(p.entry)*N(p.q)))+posField('Risk',p.riskPct?P(p.riskPct*100):'—')+posField('SL',p.stopPct?P(p.stopPct*100):fmtPrice(p.sl))+posField('TP',p.tpPct?P(p.tpPct*100):fmtPrice(p.tp))+posField('Age',age)+posField('Quality',N(p.qualityScore)||'—')+'</div>'+
         '<div class="pos-pnl '+cl(pnl)+'">Net PNL: ₹'+PNL(p.pnl)+' ('+P(pnlPct)+')</div></div>';
     }).join('');
     html+='</div></div>';

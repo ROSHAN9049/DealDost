@@ -719,6 +719,20 @@ async function managePaper(){
   }
   manageOptions();
 }
+async function manageTestnet(){
+  if(S.mode!=='TESTNET')return;
+  for(const p of [...S.pos]){
+    if(p.mode!=='TESTNET'||p.e==='EXTERNAL'||!N(p.tp))continue;
+    const x=N(S.t[p.s]?.p); if(!x)continue;
+    const hit=p.side==='BUY'?x>=p.tp:x<=p.tp;
+    if(!hit)continue;
+    try{
+      await close(p);
+      p.tp=0;
+      save();
+    }catch{}
+  }
+}
 
 /* ===== Account sync ===== */
 async function syncAccount(){
@@ -776,7 +790,9 @@ async function syncTestnet(){
         orderId:local?.orderId||reg?.orderId||null,
         opened:local?.opened||N(reg?.opened)||Date.now(),
         signalStage:local?.signalStage||reg?.signalStage||'CONFIRMED',
-        qualityScore:N(local?.qualityScore)||N(reg?.qualityScore)
+        qualityScore:N(local?.qualityScore)||N(reg?.qualityScore),
+        sl:N(local?.sl)||N(reg?.sl)||0,
+        tp:N(local?.tp)||N(reg?.tp)||0
       };
       if(engine!=='EXTERNAL'){
         managed[symbol]={...reg,s:symbol,e:engine,side,orderId:p.orderId||null,opened:p.opened,lastSeen:Date.now(),
@@ -1709,7 +1725,7 @@ function boot(){
   // Timers (dedup guarded)
   clearTimers();
   S.scanTimer=setInterval(()=>{scan()},(N(S.settings.scanInterval)||30)*1000);
-  S.manageTimer=setInterval(()=>{managePaper();manageOptions();if(['dashboard','positions','options'].includes(S.tab))renderThrottled()},3000);
+  S.manageTimer=setInterval(()=>{managePaper();manageTestnet();manageOptions();if(['dashboard','positions','options'].includes(S.tab))renderThrottled()},3000);
   S.optTimer=setInterval(()=>{scanOptions()},30000);
 }
 // Start only once

@@ -12,7 +12,7 @@ export default async function handler(req,res){
     q.set('timestamp',String(Date.now()));q.set('recvWindow','5000');
     const sig=crypto.createHmac('sha256',process.env.BINANCE_TESTNET_API_SECRET).update(q.toString()).digest('hex');
     q.set('signature',sig);
-    const r=await fetch(BASE+path+'?'+q.toString(),{headers:{'X-MBX-APIKEY':process.env.BINANCE_TESTNET_API_KEY,accept:'application/json'},cache:'no-store'});
+    const r=await fetch(BASE+path+'?'+q.toString(),{headers:{'X-MBX-APIKEY':process.env.BINANCE_TESTNET_API_KEY,accept:'application/json'},cache:'no-store',redirect:'error'});
     const text=await r.text();
     res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');
     // Binance can reject Demo Trading from restricted regions with HTTP 403/451.

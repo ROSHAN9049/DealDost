@@ -30,7 +30,7 @@ const S={
   dailyRiskUsed:0,dailyRiskDate:'',rotationId:0,
   account:null,testnetAccount:null,testnetStatus:null,testnetSymbols:new Set(),testnetSymbolsReady:false,testnetRestricted:false,testnetRejectedSymbols:new Set(),
   err:'',lastScan:0,lastAccount:0,lastWsMsg:0,lastTrade:{},busy:false,
-  optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',
+  optData:{contracts:[],marks:{},underlying:{},rows:[]},optLoading:false,optView:'',optTestnetStatus:{connected:false,locked:true,error:''},
   optSets:Array.from({length:OPT_SETS},(_,i)=>({id:i+1,status:'WAITING',symbol:'',side:'',entry:0,current:0,qty:0,contract:'',longContract:'',shortContract:'',expiry:0,strike:0,shortStrike:0,pnl:0,entryFee:0,opened:0,closed:0,reason:''})),
   scanTimer:null,manageTimer:null,optTimer:null,
   settings:(()=>{try{const v=JSON.parse(localStorage.getItem('ddSettings')||'{}');return v&&typeof v==='object'?v:{}}catch(e){return{}}})(),
@@ -1137,6 +1137,7 @@ async function scanOptions(){
       if(S.mode!=='TESTNET')return api(PUB,path);
       const r=await fetch(optBase+encodeURIComponent(path),{cache:'no-store'});
       const j=await r.json();
+      S.optTestnetStatus={connected:j.available===true,locked:j.executionUnlocked!==true,error:j.error||''};
       if(!r.ok||j.available===false||j.ok===false)throw Error(j.error||'Options TESTNET market data unavailable');
       return j.data;
     };
@@ -1166,7 +1167,9 @@ async function scanOptions(){
     buildOptions();
     if(S.auto&&['PAPER','TESTNET'].includes(S.mode))await engineOptions();
     if(['options','options-history'].includes(S.tab))render();
-  }catch(e){}
+  }catch(e){
+    if(S.mode==='TESTNET')S.optTestnetStatus={...S.optTestnetStatus,connected:false,error:String(e.message||e)};
+  }
   finally{S.optLoading=false}
 }
 function buildOptions(){
@@ -1595,9 +1598,10 @@ function renderOptions(){
   const optOpen=S.optSets.filter(s=>s.status==='OPEN').length;
   const optUnreal=S.optSets.filter(s=>s.status==='OPEN').reduce((a,s)=>a+N(s.pnl),0);
   const optClosed=S.hist.filter(h=>h.e==='OPTIONS'&&h.action==='EXIT').length;
+  const optTestStatus=S.mode==='TESTNET'?('<div class="note '+(S.optTestnetStatus.connected?'info':'warn')+'">Options TESTNET: '+(S.optTestnetStatus.connected?'Demo market connected':'Demo market unavailable')+(S.optTestnetStatus.locked?' · execution locked':' · execution unlocked')+(S.optTestnetStatus.error?' · '+E(S.optTestnetStatus.error):'')+'</div>'):'<div class="note info">Options PAPER: Binance public Options market data</div>';
   const optMetrics='<div class="kpi-grid">'+kpiCard('Options Open',optOpen+'/'+OPT_SETS)+kpiCard('Options Closed',optClosed)+kpiCard('Options Realized PNL','₹'+PNL(S.optReal),pnlClass(S.optReal))+kpiCard('Options Unrealized PNL','₹'+PNL(optUnreal),pnlClass(optUnreal))+kpiCard('Options Fees','₹'+R(S.optFees))+kpiCard('Net Contribution','₹'+PNL(S.optReal+optUnreal-S.optFees),pnlClass(S.optReal+optUnreal-S.optFees))+'</div>';
   let html='<div class="panel"><div class="panel-header"><div class="panel-title">Binance Options Radar</div><div class="panel-sub">All underlyings · defined-risk spreads · naked selling OFF</div></div>';
-  html=optMetrics+html;
+  html=optTestStatus+optMetrics+html;
   if(S.optLoading&&!rows.length)return html+'<div class="note">Loading options radar…</div></div>';
   if(!rows.length)return html+'<div class="note">No option data. <button class="btn sm" onclick="DD.scanOptions()">Scan Options</button></div></div>';
   const active=rows.filter(x=>x.signal!=='WATCH');

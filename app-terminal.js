@@ -1847,7 +1847,7 @@ function render(){
     '<div class="stat-badge"><span>Mode:</span><span class="v">'+S.mode+'</span></div>'+
     '<div class="stat-badge"><span>Auto:</span><span class="v">'+(S.auto?'ON':'OFF')+'</span></div>'+
     '<div class="stat-badge"><span>Update:</span><span class="v">'+(S.lastScan?new Date(S.lastScan).toLocaleTimeString('en-IN'):'—')+'</span></div></div>'+
-    '<div class="mode-switch"><button class="mode-btn '+(S.mode==='PAPER'?'active':'')+'" onclick="DD.setMode(\'PAPER\')">PAPER</button><button class="mode-btn '+(S.mode==='TESTNET'?'active':'')+'" onclick="DD.setMode(\'TESTNET\')">TESTNET</button><button class="mode-btn live '+(S.mode==='LIVE'?'active live':'')+'" onclick="DD.setMode(\'LIVE\')">LIVE</button></div></div>';
+    '<div class="mode-switch"><button type="button" class="mode-btn '+(S.mode==='PAPER'?'active':'')+'" onclick="DD.openModeDashboard(\'PAPER\')">PAPER</button><button type="button" class="mode-btn '+(S.mode==='TESTNET'?'active':'')+'" onclick="DD.openModeDashboard(\'TESTNET\')">TESTNET</button><button type="button" class="mode-btn live '+(S.mode==='LIVE'?'active live':'')+'" onclick="DD.openModeDashboard(\'LIVE\')">LIVE</button></div></div>';
   const navbar='<div class="navbar">'+NAV.map(n=>'<button class="nav-btn '+(S.tab===n?'active':'')+'" onclick="DD.tab=\''+n+'\';DD.render()">'+NAV_LABELS[n]+'</button>').join('')+'</div>';
   const bottomNav='<div class="bottom-nav">'+BOTTOM_NAV.map(n=>'<button class="bn-btn '+(S.tab===n?'active':'')+'" onclick="DD.tab=\''+n+'\';DD.render()"><span class="bn-icon">'+(BN_ICONS[n]||'?')+'</span>'+NAV_LABELS[n]+'</button>').join('')+'</div>';
   const err=S.err?'<div class="error-banner"><span>'+E(S.err)+'</span><button class="btn sm" onclick="DD.err=\'\';DD.render();DD.scan()">Retry</button></div>':'';
@@ -1893,6 +1893,24 @@ window.DD={
   get optView(){return S.optView},set optView(v){S.optView=v},
   get err(){return S.err},set err(v){S.err=v},
   render,scan,scanOptions,connectWS,
+  openModeDashboard(m){
+    if(!['PAPER','TESTNET','LIVE'].includes(m))return;
+    if(m==='LIVE'&&!confirm('Switch to LIVE mode? Real Binance orders will be possible. Live Auto stays OFF until you enable it separately.'))return;
+    S.mode=m;
+    S.liveAuto=false;
+    S.liveTrading=false;
+    localStorage.setItem('ddMode',m);
+    load();
+    S.mode=m;
+    S.tab=m==='TESTNET'?'testnet':m==='PAPER'?'paper':'live';
+    S.err='';
+    render();
+    if(m==='TESTNET'){
+      Promise.resolve().then(()=>syncTestnetSymbols()).then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render).catch(()=>render());
+    }else if(m==='LIVE'){
+      syncAccount().catch(()=>{});
+    }
+  },
   toggleAuto(){
     // TESTNET is API-only. Never start the browser-side execution engine
     // directly from the UI toggle; this prevents any legacy/synthetic

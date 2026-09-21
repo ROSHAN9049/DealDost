@@ -570,9 +570,10 @@ async function profitRotation(){
   const today=new Date().toDateString();
   if(S.rotation.rotationDate!==today){S.rotation.rotationDate=today;S.rotation.events=0}
 
-  // Find the first confirmed signal whose engine is full and whose own
-  // cooldown is clear. This keeps rotation alive when the top signal is
-  // already occupied or temporarily blocked.
+  // Find a replacement that is not merely CONFIRMED, but has enough
+  // current pipeline headroom to survive a small market-data update while
+  // the exchange close request is in flight. Rotation must never close a
+  // position for a candidate that is already near a blocking threshold.
   let target=null,e='',inEngine=[];
   for(const candidate of confirmed){
     const ce=candidate.momentum!=='WAIT'?'MOMENTUM':candidate.scalp!=='WAIT'?'SCALPING':'';
@@ -582,7 +583,15 @@ async function profitRotation(){
     if(enginePositions.length<limit)continue;
     const cd=ce==='MOMENTUM'?MOM_COOLDOWN:SCALP_COOLDOWN;
     if(Date.now()-N(S.lastTrade[candidate.s]||0)<cd)continue;
-    target=candidate;e=ce;inEngine=enginePositions;break;
+    // Re-read the current row rather than trusting a stale object from a
+    // previous render/scan. Require volume and quality margin as well as
+    // CONFIRMED so transient volume drops do not cause a close-with-no-replacement.
+    const liveRow=S.rows.find(r=>r.s===candidate.s);
+    if(!liveRow||liveRow.confirmed!==true||signal(liveRow,ce)==='WAIT')continue;
+    if(N(liveRow.pipelineVol)<VOL_FILTER*1.10)continue;
+    if(N(liveRow.qualityScore)<QUALITY_MIN+5)continue;
+    if(S.mode==='TESTNET'&&S.testnetPositionBlocked[liveRow.s]>Date.now())continue;
+    target=liveRow;e=ce;inEngine=enginePositions;break;
   }
   if(!target)return;
 
@@ -597,6 +606,18 @@ async function profitRotation(){
   const closedPos=candidates[0];
   if(!closedPos){S.rotation.lastResult='BLOCKED';S.rotation.lastReason='No position to rotate';save();return}
 
+  // Final no-close safety check. A rotation close is destructive: if the
+  // candidate changed from CONFIRMED to blocked while selection was running,
+  // abort before touching the existing position.
+  const finalRow=S.rows.find(r=>r.s===x.s);
+  if(!finalRow||finalRow.confirmed!==true||signal(finalRow,e)==='WAIT'||
+     N(finalRow.pipelineVol)<VOL_FILTER*1.10||N(finalRow.qualityScore)<QUALITY_MIN+5){
+    S.rotation.lastResult='BLOCKED';
+    S.rotation.lastReason='Replacement signal changed/blocked — existing position kept';
+    S.rotation.lastAttemptKey=attemptKey;
+    save();render();return;
+  }
+
   S.rotationId++;
   const rotId=S.rotationId;
   const reason=profitable.length?'PROFIT ROTATION':'WORST LOSS ROTATION';
@@ -605,8 +626,12 @@ async function profitRotation(){
   }
 
   let opened=false;
-  if(S.mode==='PAPER')opened=paperOpen(x,e);
-  else if(S.mode==='TESTNET')opened=await testnetOpen(x,e);
+  const replacement=S.rows.find(r=>r.s===x.s);
+  if(!replacement||replacement.confirmed!==true||signal(replacement,e)==='WAIT'){
+    S.rotation.lastResult='FAILED';
+    S.rotation.lastReason=reason+' — replacement became blocked after close';
+  }else if(S.mode==='PAPER')opened=paperOpen(replacement,e);
+  else if(S.mode==='TESTNET')opened=await testnetOpen(replacement,e);
   else if(S.mode==='LIVE'&&S.liveAuto&&S.liveTrading){
     const g=liveGates(x,e);
     if(g.pass)opened=await liveOpen(x,e); else S.err='LIVE rotation blocked: '+g.failed.join('; ');

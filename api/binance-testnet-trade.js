@@ -135,7 +135,7 @@ export default async function handler(req0,res){
         // STOP_MARKET per position; TP is handled by DealDost's 3s TESTNET
         // monitor and the normal close endpoint. This preserves hard downside
         // protection without consuming two algo slots per position.
-        const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',quantity:String(quantity),triggerPrice:formatStep(sl,tick),closePosition:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
+        const so=await req('POST','/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol,side:exitSide,type:'STOP_MARKET',triggerPrice:formatStep(sl,tick),closePosition:'true',workingType:'MARK_PRICE',newOrderRespType:'RESULT'});
         protection={stopOrderId:so.algoId||so.orderId,stopPrice:sl,takeProfitPrice:tp,route:'algoOrder-stop-only',tpMode:'software'};
       }catch(secondErr){
         try{await req('POST','/fapi/v1/order',{symbol,side:exitSide,type:'MARKET',quantity:String(quantity),reduceOnly:'true',newOrderRespType:'RESULT'})}catch{}

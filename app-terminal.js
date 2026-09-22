@@ -1780,19 +1780,18 @@ function renderPaper(){
 }
 
 function renderTestnet(){
-  const st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
+  const ta=S.testnetAccount,st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
   const managedPositions=S.pos.filter(p=>['MOMENTUM','SCALPING','OPTIONS'].includes(p.e)).length;
   const externalPositions=S.pos.filter(p=>p.e==='EXTERNAL').length;
-  const statusNote='<div class="note warn"><b>TESTNET API TEMPORARILY DISABLED</b> — Binance Demo account/status/symbol/order API calls are paused for stability. Market scanner remains active. No TESTNET order is being placed or modified. PAPER Trading remains fully functional.</div>';
-  return '<div class="mode-banner testnet"><b>TESTNET SCANNER</b> — API OFF · Market data only</div>'+
+  const statusNote='<div class="note info"><b>TESTNET API paused</b> — Scanner/market data remains active. Demo account/order API is temporarily disabled for stability. No TESTNET order will be placed or modified.</div>';
+  return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+
     statusNote+
-    '<div class="kpi-grid">'+kpiCard('Wallet Balance','—','acc')+kpiCard('Available Balance','—','acc')+kpiCard('Margin','—')+kpiCard('Unrealized PNL','—')+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Local Positions',S.pos.length+' ('+managedPositions+' managed)'+(externalPositions?' · '+externalPositions+' external':''))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn sm" disabled>Testnet Auto: OFF</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">API Status: OFF</button></div>'+
-    '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">TESTNET Live Scanner</div><div class="panel-sub">Stable '+(S.rows.length||0)+' · Market feed only · Demo API paused</div></div>'+
+    '<div class="kpi-grid">'+kpiCard('Wallet Balance','—','acc')+kpiCard('Available Balance','—','acc')+kpiCard('Margin','—')+kpiCard('Unrealized PNL','—')+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+' ('+managedPositions+' managed)'+(externalPositions?' · '+externalPositions+' external':''))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
+    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>'+
+    '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">TESTNET Live Scanner</div><div class="panel-sub">Stable '+(S.rows.length||0)+' · Market feed only · Demo execution isolated</div></div>'+
     '<div class="two-col"><div><div class="panel-header" style="border-top:0"><div class="panel-title">Momentum</div><div class="panel-sub">'+S.pos.filter(p=>p.e==='MOMENTUM').length+'/'+MC+'</div></div>'+scannerTable('M')+'</div>'+
     '<div><div class="panel-header" style="border-top:0"><div class="panel-title">Scalping</div><div class="panel-sub">'+S.pos.filter(p=>p.e==='SCALPING').length+'/'+SC+'</div></div>'+scannerTable('S')+'</div></div></div>';
 }
-
 function renderLive(){
   const la=S.account,st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
   return '<div class="mode-banner live"><b>LIVE TRADING</b> — Real Binance Futures · Real money at risk</div>'+

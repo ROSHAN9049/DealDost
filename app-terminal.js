@@ -2035,8 +2035,25 @@ window.DD={
   },
   reconnect(){connectWS()},
   syncAcc(){syncAccount().then(render)},
-  checkTestnet(){checkTestnetStatus().then(()=>{syncTestnet();render()})},
-  retryTestnet(){S.testnetRestricted=false;try{localStorage.removeItem('ddTestnetRestrictedAt')}catch(e){}S.err='';checkTestnetStatus().then(()=>{syncTestnet();render()})},
+  checkTestnet(){
+    if(!TESTNET_API_ENABLED){
+      S.testnetStatus={apiDisabled:true,apiKeyConfigured:false,testnetUnlocked:false};
+      S.testnetRestricted=false;
+      S.err='TESTNET API is temporarily disabled — scanner-only mode.';
+      render();
+      return;
+    }
+    checkTestnetStatus().then(()=>{syncTestnet();render()})
+  },
+  retryTestnet(){
+    if(!TESTNET_API_ENABLED){
+      S.testnetRestricted=false;
+      S.err='TESTNET API is temporarily disabled — scanner-only mode.';
+      render();
+      return;
+    }
+    S.testnetRestricted=false;try{localStorage.removeItem('ddTestnetRestrictedAt')}catch(e){}S.err='';checkTestnetStatus().then(()=>{syncTestnet();render()})
+  },
   closeOptSet(i){
     const set=S.optSets[i];if(!set||set.status!=='OPEN')return;
     const lm=S.optData.marks[set.longContract],sm=S.optData.marks[set.shortContract];

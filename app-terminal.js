@@ -11,7 +11,10 @@ const PUB='/api/binance-market?path=',AC='/api/binance-account?path=',TR='/api/b
   TN_AC='/api/binance-testnet-account?path=',TN_TR='/api/binance-testnet-trade',TN_STATUS='/api/binance-testnet-status',TN_SYMS='/api/binance-testnet-symbols',
   OPT_TN_TR='/api/binance-options-testnet-trade',
   F=.0005,MC=3,SC=3,OC=4,MOM_COOLDOWN=20*60e3,SCALP_COOLDOWN=10*60e3,COOLDOWN=10*60e3,OPT_SETS=4,OPT_COOLDOWN=3*60e3,OPT_STOP=0.25,OPT_TP=0.50,OPT_RISK=0.01,DAILY_RISK_LIMIT=0.06;
-  const CONF_MOM=70,CONF_SCALP=72,VOL_FILTER=1.15,QUALITY_MIN=70;
+  const TESTNET_API_ENABLED=false;
+  // TESTNET is temporarily scanner-only. Keep the server routes in the repo, but
+  // do not call account/status/symbol/order endpoints until the Demo API path is verified.
+const CONF_MOM=70,CONF_SCALP=72,VOL_FILTER=1.15,QUALITY_MIN=70;
 const NAV=['dashboard','momentum','momentum-history','scalping','scalping-history','options','options-history','positions','trade-history','pnl','paper','testnet','live','analytics','settings'];
 const NAV_LABELS={'dashboard':'Dashboard','momentum':'Momentum','momentum-history':'Mom History','scalping':'Scalping','scalping-history':'Scalp History','options':'Options','options-history':'Opt History','positions':'Positions','trade-history':'Trade History','pnl':'PNL','paper':'Paper Trading','testnet':'Testnet','live':'Live Trading','analytics':'Analytics','settings':'Settings'};
 const BOTTOM_NAV=['dashboard','momentum','scalping','options','positions','pnl','analytics','settings'];
@@ -424,6 +427,7 @@ async function testnetPreflight(x,e){
   }
 }
 async function testnetOpen(x,e){
+  if(!TESTNET_API_ENABLED){S.err='TESTNET API temporarily disabled — scanner-only mode. No Demo order was sent.';render();return false;}
   if(!['MOMENTUM','SCALPING'].includes(e)||!reserveEntry(e))return false;
   try{
   // Final server-side/client-side safety gate: TESTNET may never place an
@@ -559,6 +563,7 @@ let rotationBusy=false;
 async function engine(){
   if(engineBusy)return;
   if(!S.auto||S.emergencyStop)return;
+  if(S.mode==='TESTNET'&&!TESTNET_API_ENABLED)return;
   engineBusy=true;
   try{
   dailyRiskReset();
@@ -895,7 +900,7 @@ async function managePaper(){
   manageOptions();
 }
 async function manageTestnet(){
-  if(S.mode!=='TESTNET')return;
+  if(S.mode!=='TESTNET'||!TESTNET_API_ENABLED)return;
   // Dedicated TESTNET reconciliation. Scanner refresh never calls Demo account APIs.
   const now=Date.now();
   if(now-N(S.lastTestnetSync)>=5000){
@@ -927,7 +932,7 @@ async function syncAccount(){
   }catch(e){S.account={apiReady:false,error:e.message};S.err='Account sync: '+e.message}
 }
 async function syncTestnet(){
-  if(S.mode!=='TESTNET')return;
+  if(S.mode!=='TESTNET'||!TESTNET_API_ENABLED)return;
   try{
     const [a,pr]=await Promise.all([
       api(TN_AC,'/fapi/v2/account'),
@@ -1028,11 +1033,15 @@ async function syncTestnet(){
   }
 }
 async function checkTestnetStatus(){
-  // Status is a lightweight same-origin check only. Do not implicitly call
-  // Binance Demo exchangeInfo/account APIs from boot or scanner refresh.
+  if(!TESTNET_API_ENABLED){
+    S.testnetStatus={apiDisabled:true,apiKeyConfigured:false,testnetUnlocked:false};
+    S.testnetRestricted=false;
+    return;
+  }
   try{const r=await fetch(TN_STATUS,{cache:'no-store'});if(r.ok)S.testnetStatus=await r.json()}catch(e){S.testnetStatus=null}
 }
 async function syncTestnetSymbols(){
+  if(!TESTNET_API_ENABLED){S.testnetSymbols.clear();S.testnetSymbolsReady=false;return false;}
   try{
     const r=await fetch(TN_SYMS+'?ts='+Date.now(),{cache:'no-store'});const j=await r.json();
     if(j.testnetUnavailable||j.restricted){S.testnetSymbolsReady=false;S.testnetRestricted=true;S.err='TESTNET: '+(j.error||'Binance Futures Demo symbols are unavailable from this deployment location.');return false}
@@ -1160,7 +1169,13 @@ function connectWS(){
 
 /* ===== Options (preserved logic, extended with 4 independent paper sets) ===== */
 async function scanOptions(){
-  if(S.optLoading)return;S.optLoading=true;
+  if(S.optLoading)return;
+  if(S.mode==='TESTNET'&&!TESTNET_API_ENABLED){
+    S.optTestnetStatus={connected:false,locked:true,error:'TESTNET API temporarily disabled — Options execution is paused.'};
+    S.optData.contracts=[];S.optData.marks={};S.optData.rows=[];
+    return;
+  }
+  S.optLoading=true;
   try{
     // PAPER uses Binance public Options market data. TESTNET uses the
     // dedicated Options Demo proxy so its contracts/quotes are never mixed
@@ -1765,21 +1780,15 @@ function renderPaper(){
 }
 
 function renderTestnet(){
-  const ta=S.testnetAccount,st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
+  const st=statsFor(S.hist),unreal=S.pos.reduce((a,p)=>a+N(p.pnl),0);
   const managedPositions=S.pos.filter(p=>['MOMENTUM','SCALPING','OPTIONS'].includes(p.e)).length;
   const externalPositions=S.pos.filter(p=>p.e==='EXTERNAL').length;
-  const ts=S.testnetStatus||{};
-  const restricted=S.testnetRestricted||(typeof localStorage!=='undefined'&&localStorage.getItem('ddTestnetRestrictedAt')&&(Date.now()-Number(localStorage.getItem('ddTestnetRestrictedAt'))<600000));
-  let statusNote='';
-  if(restricted){statusNote='<div class="note warn"><b>Binance Futures Demo trading is unavailable from this deployment location or account eligibility.</b> Auto trading has been stopped. Paper Trading remains fully functional. <button class="btn sm" onclick="DD.retryTestnet()">Retry Testnet</button></div>'}
-  else if(ts.apiKeyConfigured===false){statusNote='<div class="note info">Testnet API keys are not configured. To enable Testnet trading, add BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET to your environment. Paper Trading works without configuration.</div>'}
-  else if(ts.testnetUnlocked===false){statusNote='<div class="note info">Testnet is locked. Set TESTNET_UNLOCKED=true in your environment to enable Demo orders.</div>'}
-  else{statusNote='<div class="note info">Testnet API: Configured · '+(ts.testnetUnlocked?'Unlocked':'Locked')+' · Base: '+E(ts.baseUrl)+'</div>'}
-  return '<div class="mode-banner testnet"><b>TESTNET ACTIVE</b> — Binance Futures Demo · Simulated funds</div>'+
+  const statusNote='<div class="note warn"><b>TESTNET API TEMPORARILY DISABLED</b> — Binance Demo account/status/symbol/order API calls are paused for stability. Market scanner remains active. No TESTNET order is being placed or modified. PAPER Trading remains fully functional.</div>';
+  return '<div class="mode-banner testnet"><b>TESTNET SCANNER</b> — API OFF · Market data only</div>'+
     statusNote+
-    '<div class="kpi-grid">'+kpiCard('Wallet Balance','₹'+R(ta?.walletBalance||0),'acc')+kpiCard('Available Balance','₹'+R(ta?.availableBalance||0),'acc')+kpiCard('Margin','₹'+R(ta?.margin||0))+kpiCard('Unrealized PNL','₹'+PNL(ta?.unrealized||unreal),pnlClass(ta?.unrealized||unreal))+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Open Positions',S.pos.length+' ('+managedPositions+' managed)'+(externalPositions?' · '+externalPositions+' external':''))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
-    '<div class="btn-row" style="margin-top:8px"><button class="btn sm '+(S.auto?'green':'')+'" onclick="DD.toggleAuto()">Testnet Auto: '+(S.auto?'ON':'OFF')+'</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">Check Status</button></div>'+
-    '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">TESTNET Live Scanner</div><div class="panel-sub">Stable '+(S.rows.length||0)+' · Market feed only · Demo execution isolated</div></div>'+
+    '<div class="kpi-grid">'+kpiCard('Wallet Balance','—','acc')+kpiCard('Available Balance','—','acc')+kpiCard('Margin','—')+kpiCard('Unrealized PNL','—')+kpiCard('Realized PNL','₹'+PNL(S.real),pnlClass(S.real))+kpiCard('Fees','₹'+R(S.fees))+kpiCard('Local Positions',S.pos.length+' ('+managedPositions+' managed)'+(externalPositions?' · '+externalPositions+' external':''))+kpiCard('Win Rate',st.winRate.toFixed(1)+'%')+'</div>'+
+    '<div class="btn-row" style="margin-top:8px"><button class="btn sm" disabled>Testnet Auto: OFF</button><button class="btn sm blue" onclick="DD.scan()">Scan</button><button class="btn sm" onclick="DD.checkTestnet()">API Status: OFF</button></div>'+
+    '<div class="panel" style="margin-top:8px"><div class="panel-header"><div class="panel-title">TESTNET Live Scanner</div><div class="panel-sub">Stable '+(S.rows.length||0)+' · Market feed only · Demo API paused</div></div>'+
     '<div class="two-col"><div><div class="panel-header" style="border-top:0"><div class="panel-title">Momentum</div><div class="panel-sub">'+S.pos.filter(p=>p.e==='MOMENTUM').length+'/'+MC+'</div></div>'+scannerTable('M')+'</div>'+
     '<div><div class="panel-header" style="border-top:0"><div class="panel-title">Scalping</div><div class="panel-sub">'+S.pos.filter(p=>p.e==='SCALPING').length+'/'+SC+'</div></div>'+scannerTable('S')+'</div></div></div>';
 }
@@ -1898,16 +1907,17 @@ window.DD={
   render,scan,scanOptions,connectWS,
   openTestnet(){
     S.mode='TESTNET';
+    S.auto=false;
     S.liveAuto=false;
     S.liveTrading=false;
     localStorage.setItem('ddMode','TESTNET');
     load();
     S.mode='TESTNET';
+    S.auto=false;
     S.tab='testnet';
     S.err='';
+    checkTestnetStatus();
     render();
-    checkTestnetStatus().then(render).catch(()=>render());
-    syncTestnetSymbols().then(()=>syncTestnet()).then(render).catch(()=>render());
   },
   openModeDashboard(m){
     if(!['PAPER','TESTNET','LIVE'].includes(m))return;
@@ -1922,7 +1932,9 @@ window.DD={
     S.err='';
     render();
     if(m==='TESTNET'){
-      Promise.resolve().then(()=>syncTestnetSymbols()).then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render).catch(()=>render());
+      S.auto=false;
+      checkTestnetStatus();
+      render();
     }else if(m==='LIVE'){
       syncAccount().catch(()=>{});
     }
@@ -1935,8 +1947,9 @@ window.DD={
     render();
     if(S.auto && S.mode==='PAPER') engine();
     if(S.auto && S.mode==='TESTNET'){
-      S.err='TESTNET Auto enabled — API execution only; browser navigation disabled.';
-      checkTestnetStatus().then(()=>{if(S.testnetRestricted){S.auto=false;}render()});
+      S.auto=false;
+      S.err='TESTNET API is temporarily disabled — scanner-only mode. PAPER remains available.';
+      render();
     }
   },
   toggleLiveAuto(){if(S.mode!=='LIVE'||!S.liveTrading){S.liveAuto=false;S.err='LIVE AUTO blocked: LIVE Trading must be ON first.';render();return}if(!S.liveAuto){if(!confirm('Enable LIVE AUTO trading? This will place REAL orders on Binance automatically.'))return}S.liveAuto=!S.liveAuto;render()},toggleLiveTrading(){if(S.mode!=='LIVE'){S.liveTrading=false;render();return}if(!S.liveTrading&&!confirm('Enable LIVE TRADING? Real Binance orders may be placed only when all safety gates pass.'))return;S.liveTrading=!S.liveTrading;if(!S.liveTrading)S.liveAuto=false;render()},toggleEmergency(){S.emergencyStop=!S.emergencyStop;if(S.emergencyStop){S.liveAuto=false;S.auto=false}save();render()},
@@ -1951,7 +1964,9 @@ window.DD={
       else if(m==='LIVE')S.tab='live';
       render();
       if(m==='TESTNET'){
-        syncTestnetSymbols().then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render).catch(()=>render());
+        S.auto=false;
+        checkTestnetStatus();
+        render();
       }
       return;
     }
@@ -1966,7 +1981,9 @@ window.DD={
     render();
     if(m==='LIVE')syncAccount();
     if(m==='TESTNET'){
-      syncTestnetSymbols().then(()=>syncTestnet()).then(()=>checkTestnetStatus()).then(render).catch(()=>render());
+      S.auto=false;
+      checkTestnetStatus();
+      render();
     }
   },
   async close(sym){
@@ -1974,6 +1991,12 @@ window.DD={
     const x=N(S.t[sym]?.p)||N(p.current)||N(p.entry);if(!x)return false;
     p.closing=true;render();
     try{
+      if(p.mode==='TESTNET'&&!TESTNET_API_ENABLED){
+        p.closing=false;
+        S.err='TESTNET API is temporarily disabled — existing Demo positions are not modified.';
+        render();
+        return false;
+      }
       if(p.mode==='TESTNET'||p.mode==='LIVE'){
         const base=p.mode==='TESTNET'?TN_TR:TR;
         const resp=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'close',symbol:p.s,side:p.side,quantity:p.q})});

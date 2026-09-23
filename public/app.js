@@ -47,7 +47,7 @@ function render(state) {
   $("paperAuto").className = state.paper.auto ? "auto on" : "auto";
 
   $("equity").textContent = money(state.paper.balanceUsd);
-  $("realized").textContent = money(state.paper.realizedPnlUsd);
+  $("available").textContent = money(state.paper.availableBalanceUsd);
   $("fees").textContent = money(state.paper.feesUsd);
 
   $("momentum").textContent = state.engines.momentum.open + "/" + state.engines.momentum.max;
@@ -60,8 +60,7 @@ function render(state) {
   $("riskDaily").textContent = state.risk.dailyRiskUsedPct.toFixed(2) + "% / " + state.risk.maxDailyRiskPct + "%";
   $("emergency").textContent = state.risk.emergencyStop ? "ON" : "OFF";
 
-  $("paperStats").textContent =
-    state.paper.tradeCount + " trades • " + state.paper.winRate.toFixed(1) + "% WR";
+  $("paperStats").textContent = state.paper.tradeCount + " trades • " + state.paper.winRate.toFixed(1) + "% WR";
 
   const pbody = $("positions");
   if (!state.paper.positions.length) {

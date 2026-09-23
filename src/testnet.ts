@@ -131,21 +131,67 @@ export class TestnetClient {
   }
 
   async sync(): Promise<TestnetStateView> {
-    const execution = await this.getExecutionSnapshot();
-    return {
-      ...this.emptyState(),
-      connected: execution.connected,
-      accountBalanceUsd: execution.accountBalanceUsd,
-      availableBalanceUsd: execution.availableBalanceUsd,
-      unrealizedPnlUsd: execution.unrealizedPnlUsd,
-      openPositions: execution.openPositions,
-      momentumOpen: execution.momentumOpen,
-      scalpingOpen: execution.scalpingOpen,
-      unclassifiedOpenPositions: execution.unclassifiedOpenPositions,
-      dailyRiskUsedPct: execution.dailyRiskUsedPct,
-      positions: execution.positions,
+    const base = this.emptyState();
+    if (!this.isConfigured()) {
+      return { ...base, lastSyncAt: Date.now() };
+    }
+
+    const [balances, positions] = await Promise.all([
+      this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
+      this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
+    ]);
+
+    const usdt = balances.find((row) => row.asset === "USDT");
+    const open = positions.filter((row) => Math.abs(Number(row.positionAmt ?? 0)) > 0);
+    const basicPositions: TestnetPositionView[] = open.map((row) => ({
+      symbol: String(row.symbol ?? "").toUpperCase(),
+      engine: null,
+      side: Number(row.positionAmt ?? 0) >= 0 ? "LONG" : "SHORT",
+      quantity: Math.abs(Number(row.positionAmt ?? 0)),
+      entryPrice: Number(row.entryPrice ?? 0),
+      markPrice: Number(row.markPrice ?? 0),
+      unrealizedPnlUsd: Number(row.unrealizedProfit ?? 0),
+      leverage: Number.isFinite(Number(row.leverage)) ? Number(row.leverage) : null,
+      openedAt: Number(row.updateTime ?? 0),
+    }));
+
+    const basic = {
+      ...base,
+      connected: true,
+      accountBalanceUsd: Number(usdt?.balance ?? 0),
+      availableBalanceUsd: Number(usdt?.availableBalance ?? 0),
+      unrealizedPnlUsd: open.reduce((sum, row) => sum + Number(row.unrealizedProfit ?? 0), 0),
+      openPositions: open.length,
+      momentumOpen: 0,
+      scalpingOpen: 0,
+      unclassifiedOpenPositions: open.length,
+      dailyRiskUsedPct: 0,
+      positions: basicPositions,
       lastSyncAt: Date.now(),
     };
+
+    try {
+      const enriched = await this.getExecutionSnapshot();
+      return {
+        ...basic,
+        connected: enriched.connected,
+        accountBalanceUsd: enriched.accountBalanceUsd,
+        availableBalanceUsd: enriched.availableBalanceUsd,
+        unrealizedPnlUsd: enriched.unrealizedPnlUsd,
+        openPositions: enriched.openPositions,
+        momentumOpen: enriched.momentumOpen,
+        scalpingOpen: enriched.scalpingOpen,
+        unclassifiedOpenPositions: enriched.unclassifiedOpenPositions,
+        dailyRiskUsedPct: enriched.dailyRiskUsedPct,
+        positions: enriched.positions,
+        lastSyncAt: Date.now(),
+      };
+    } catch {
+      // Basic account sync remains authoritative for dashboard connectivity.
+      // Execution auto-gates still call getExecutionSnapshot() and fail closed
+      // when reconciliation cannot be completed.
+      return basic;
+    }
   }
 
   async getExecutionSnapshot(): Promise<TestnetExecutionSnapshot> {

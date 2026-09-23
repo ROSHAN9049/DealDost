@@ -422,7 +422,7 @@ function render(state) {
         "<td>" + fmt(s.entry) + "</td>" +
         "<td>" + fmt(s.stop) + "</td>" +
         "<td>" + fmt(s.takeProfit1) + "</td>" +
-        "<td>" + (s.risk.eligible ? "PASS" : "BLOCKED") + "</td>" +
+        "<td title="" + esc(s.risk.reason || "") + "">" + (s.risk.eligible ? "PASS" : "BLOCKED") + "</td>" +
         "</tr>"
       );
     }).join("");

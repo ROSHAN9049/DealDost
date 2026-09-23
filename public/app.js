@@ -372,7 +372,10 @@ function render(state) {
     button.onclick = () => syncTestnetProtection(button.dataset.symbol);
   });
 
-  $("paperStats").textContent = state.paper.tradeCount + " trades • " + state.paper.winRate.toFixed(1) + "% WR";
+  $("paperStats").textContent =
+    state.paper.positions.length + " open • " +
+    state.paper.tradeCount + " closed • " +
+    state.paper.winRate.toFixed(1) + "% WR";
 
   const pbody = $("positions");
   if (!state.paper.positions.length) {

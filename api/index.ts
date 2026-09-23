@@ -10,6 +10,15 @@ let startPromise: Promise<void> | undefined;
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.resolve(process.cwd(), "public")));
 
+function applyRequestMode(input: any) {
+  const requested = String(input?.mode ?? "").toUpperCase();
+  if (requested === "PAPER" || requested === "TESTNET") {
+    scanner.setRequestMode(requested, Boolean(input?.auto ?? input?.testnetAuto));
+  } else if (requested === "LIVE") {
+    throw new Error("LIVE_EXECUTION_LOCKED");
+  }
+}
+
 async function ensureStarted() {
   if (started) return;
   if (!startPromise) {
@@ -42,9 +51,14 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 
-app.get("/api/state", async (_req, res) => {
+app.get("/api/state", async (req, res) => {
   try {
     await ensureStarted();
+    applyRequestMode({
+      mode: req.get("x-dealdost-mode"),
+      auto: req.get("x-dealdost-auto") === "true",
+      testnetAuto: req.get("x-dealdost-testnet-auto") === "true",
+    });
     await scanner.serverlessTick();
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
     res.json(scanner.state());
@@ -57,6 +71,7 @@ app.post("/api/market/ingest", async (req, res) => {
   try {
     await ensureStarted();
     const body = req.body ?? {};
+    applyRequestMode(body);
     const universe = Array.isArray(body.universe) ? body.universe : [];
     const symbol = String(body.symbol ?? "").toUpperCase();
     const candles = body.candles;
@@ -85,6 +100,23 @@ app.post("/api/market/ingest", async (req, res) => {
     res.json(state);
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/mode", async (req, res) => {
+  try {
+    await ensureStarted();
+    const body = req.body ?? {};
+    const mode = String(body.mode ?? "").toUpperCase();
+    if (mode !== "PAPER" && mode !== "TESTNET") {
+      res.status(400).json({ error: mode === "LIVE" ? "LIVE_EXECUTION_LOCKED" : "invalid_mode" });
+      return;
+    }
+    scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto));
+    res.json(scanner.state());
+  } catch (error) {
+    res.status(error instanceof Error && error.message === "LIVE_EXECUTION_LOCKED" ? 403 : 503)
+      .json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 

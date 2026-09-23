@@ -41,6 +41,13 @@ Current execution boundary:
 
 Binance WebSocket market connections are treated as reconnectable streams, with heartbeat/reconnect handling and stale-data gating.
 
+## Railway deployment
+- The primary Node runtime is `src/index.ts` -> `dist/index.js`; `npm run build` compiles it and `npm start` runs the persistent server.
+- The persistent server binds to `0.0.0.0` and reads Railway's injected `PORT` environment variable automatically.
+- The same server serves `public/`, REST API routes, and the WebSocket endpoint, so Railway can host the scanner as one service without the Vercel serverless adapter.
+- Railway deployment should use the repository root with Build Command `npm run build` and Start Command `npm start` (Railway can also auto-detect the `start` script).
+- Required secrets stay in Railway service variables; never commit Binance API keys or secrets.
+
 
 Testnet phase 1:
 - Dedicated Binance Futures Demo/Testnet credentials are read only from environment variables.

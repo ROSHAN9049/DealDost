@@ -147,16 +147,29 @@ export class BinanceScanner extends EventEmitter {
     this.rotation.restore(Array.isArray(events) ? events : []);
   }
 
+  private syncPaperRiskState() {
+    this.risk.syncOpenPositions(
+      this.paper.positionsList().map((p) => ({ symbol: p.symbol, engine: p.engine })),
+    );
+  }
+
   state(): DashboardState {
+    this.syncPaperRiskState();
     const risk = this.risk.snapshot();
     const allSignals = [...this.signals.values()]
       .sort((a, b) => b.quality.total - a.quality.total || b.updatedAt - a.updatedAt)
       .slice(0, 30);
 
     const testnetMode = this.mode === "TESTNET";
+    const paperPositions = this.paper.positionsList();
+    const paperEngineOpen = {
+      momentum: paperPositions.filter((p) => p.engine === "MOMENTUM").length,
+      scalping: paperPositions.filter((p) => p.engine === "SCALPING").length,
+      total: paperPositions.length,
+    };
     const engineOpen = testnetMode
       ? { momentum: this.testnetState.momentumOpen, scalping: this.testnetState.scalpingOpen, total: this.testnetState.openPositions }
-      : { momentum: risk.momentum, scalping: risk.scalping, total: risk.total };
+      : paperEngineOpen;
     const riskDaily = testnetMode ? this.testnetState.dailyRiskUsedPct : risk.dailyRiskUsedPct;
     const riskAccount = testnetMode ? this.testnetState.accountBalanceUsd || this.risk.cfg.accountBalanceUsd : this.risk.cfg.accountBalanceUsd;
 
@@ -692,6 +705,11 @@ export class BinanceScanner extends EventEmitter {
 
   private tryPaperEntries() {
     if (!this.paper.getAuto()) return;
+
+    // Reconcile the risk layer from the broker's actual open positions before
+    // every entry cycle so a restart/restore or UI refresh cannot make the
+    // governor believe the account is empty while PAPER still has positions.
+    this.syncPaperRiskState();
 
     const now = Date.now();
     const candidates = [...this.signals.values()]

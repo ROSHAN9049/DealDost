@@ -640,8 +640,10 @@ export class BinanceScanner extends EventEmitter {
       const signal = this.signals.get(position.engine + ":" + position.symbol);
       if (!signal || signal.side !== position.side || signal.stage === "BLOCKED") continue;
 
-      const maxAgeMs = signal.engine === "SCALPING" ? 90_000 : 10 * 60_000;
-      if (now - signal.updatedAt > maxAgeMs) continue;
+      // Protection repair is safer than leaving a live Demo position naked.
+      // The exchange-side plan validation below still rejects stale prices
+      // that are no longer on the correct side of the current market.
+      if (now - signal.updatedAt > 10 * 60_000) continue;
 
       try {
         await this.testnet.ensureOpenPositionProtection({

@@ -16,22 +16,24 @@ async function toggleAuto() {
   const enabled = $("paperAuto").dataset.enabled !== "true";
   $("paperAuto").disabled = true;
   try {
-    await fetch("/api/paper/auto", {
+    const response = await fetch("/api/paper/auto", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ enabled })
     });
+    if (response.ok) render(await response.json());
   } finally {
     $("paperAuto").disabled = false;
   }
 }
 
 async function closePaper(symbol) {
-  await fetch("/api/paper/close", {
+  const response = await fetch("/api/paper/close", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ symbol })
   });
+  if (response.ok) render(await response.json());
 }
 
 function render(state) {
@@ -82,13 +84,13 @@ function render(state) {
       "<tr>" +
       "<td><strong>" + esc(p.symbol) + "</strong></td>" +
       "<td>" + p.engine + "</td>" +
-      "<td class=\"" + (p.side === "LONG" ? "long" : "short") + "\">" + p.side + "</td>" +
+      "<td class="" + (p.side === "LONG" ? "long" : "short") + "">" + p.side + "</td>" +
       "<td>" + fmt(p.entry) + "</td>" +
       "<td>" + fmt(p.markPrice) + "</td>" +
       "<td>" + fmt(p.stop) + "</td>" +
       "<td>" + fmt(p.takeProfit1) + "</td>" +
       "<td>" + money(p.netPnlUsd) + "</td>" +
-      "<td><button class=\"close-btn\" data-symbol=\"" + esc(p.symbol) + "\">Close</button></td>" +
+      "<td><button class="close-btn" data-symbol="" + esc(p.symbol) + "">Close</button></td>" +
       "</tr>"
     )).join("");
 
@@ -108,8 +110,8 @@ function render(state) {
         "<tr>" +
         "<td><strong>" + esc(s.symbol) + "</strong></td>" +
         "<td>" + esc(s.engine) + "</td>" +
-        "<td class=\"" + sideClass + "\">" + s.side + "</td>" +
-        "<td><span class=\"stage " + s.stage.toLowerCase() + "\">" + s.stage + "</span></td>" +
+        "<td class="" + sideClass + "">" + s.side + "</td>" +
+        "<td><span class="stage " + s.stage.toLowerCase() + "">" + s.stage + "</span></td>" +
         "<td><strong>" + s.quality.total + "</strong></td>" +
         "<td>" + esc(s.regime.replaceAll("_", " ")) + "</td>" +
         "<td>" + fmt(s.entry) + "</td>" +
@@ -129,22 +131,19 @@ function render(state) {
     : "No profitable rotation yet.";
 }
 
+let polling = false;
 async function load() {
+  if (polling) return;
+  polling = true;
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
-    render(await response.json());
+    if (response.ok) render(await response.json());
   } catch {}
-}
-
-function connect() {
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(protocol + "://" + location.host);
-  socket.onmessage = (event) => {
-    try { render(JSON.parse(event.data)); } catch {}
-  };
-  socket.onclose = () => setTimeout(connect, 1500);
+  finally {
+    polling = false;
+  }
 }
 
 $("paperAuto").onclick = toggleAuto;
 load();
-connect();
+setInterval(load, 3000);

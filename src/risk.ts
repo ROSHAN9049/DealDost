@@ -103,6 +103,16 @@ export class RiskGovernor {
     };
   }
 
+  syncOpenPositions(positions: Array<{ symbol: string; engine: Engine }>) {
+    const next = new Map<string, Engine>();
+    for (const position of positions) {
+      if ((position.engine === "MOMENTUM" || position.engine === "SCALPING") && position.symbol) {
+        next.set(position.symbol.toUpperCase(), position.engine);
+      }
+    }
+    this.openPositions = next;
+  }
+
   registerOpen(symbol: string, engine: Engine) {
     this.openPositions.set(symbol, engine);
   }

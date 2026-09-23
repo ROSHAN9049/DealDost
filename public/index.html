@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DealDost — Binance Scanner V2</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="brand">DEALDOST</div>
+      <div class="subtitle">BINANCE SCANNER V2</div>
+    </div>
+    <div class="mode">
+      <span class="pill active">PAPER</span>
+      <span class="pill disabled">TESTNET</span>
+      <span class="pill disabled">LIVE</span>
+      <span class="auto">AUTO OFF</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero-grid">
+      <article class="card">
+        <div class="label">MARKET REGIME</div>
+        <div id="regime" class="big">NO_TRADE</div>
+        <div class="muted">BTC <span id="btc">—</span></div>
+      </article>
+      <article class="card">
+        <div class="label">MARKET FEED</div>
+        <div id="ws" class="status">CONNECTING</div>
+        <div id="data" class="muted">NO DATA</div>
+      </article>
+      <article class="card">
+        <div class="label">UNIVERSE</div>
+        <div id="universe" class="big">0</div>
+        <div class="muted">Liquid USDT perpetuals</div>
+      </article>
+      <article class="card">
+        <div class="label">LAST UPDATE</div>
+        <div id="updated" class="big">—</div>
+        <div id="reconnects" class="muted">Reconnects: 0</div>
+      </article>
+    </section>
+
+    <section class="engine-grid">
+      <article class="card engine">
+        <div><div class="label">MOMENTUM</div><div id="momentum" class="big">0/3</div></div>
+        <span id="momentumStatus" class="badge">READY</span>
+      </article>
+      <article class="card engine">
+        <div><div class="label">SCALPING</div><div id="scalping" class="big">0/3</div></div>
+        <span id="scalpingStatus" class="badge">READY</span>
+      </article>
+      <article class="card engine">
+        <div><div class="label">TOTAL</div><div id="total" class="big">0/6</div></div>
+        <span class="badge">POSITION GATE</span>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <div class="label">LIVE SIGNALS</div>
+          <div class="muted">Server-owned signal state • sorted by quality</div>
+        </div>
+        <div id="signalCount" class="badge">0</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th><th>Engine</th><th>Side</th><th>Stage</th><th>Quality</th>
+              <th>Regime</th><th>Entry</th><th>SL</th><th>TP1</th><th>Risk</th>
+            </tr>
+          </thead>
+          <tbody id="signals">
+            <tr><td colspan="10" class="empty">Waiting for market data…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="bottom-grid">
+      <article class="card">
+        <div class="label">RISK GOVERNOR</div>
+        <div class="risk-row"><span>Per Trade</span><strong id="riskTrade">1%</strong></div>
+        <div class="risk-row"><span>Daily Risk</span><strong id="riskDaily">0% / 6%</strong></div>
+        <div class="risk-row"><span>Account</span><strong id="account">$1,000</strong></div>
+        <div class="risk-row"><span>Emergency Stop</span><strong id="emergency">OFF</strong></div>
+      </article>
+      <article class="card">
+        <div class="label">ARCHITECTURE</div>
+        <p class="muted">Market Feed → Universe → Regime → Engines → Signal → Quality → Risk Governor → Execution adapters → Ledger → Rotation.</p>
+        <p class="muted">Scanner phase only. No real Binance orders are submitted.</p>
+      </article>
+    </section>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

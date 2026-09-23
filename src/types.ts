@@ -1,0 +1,118 @@
+export type Engine = "MOMENTUM" | "SCALPING";
+export type Side = "LONG" | "SHORT";
+export type Stage = "WATCH" | "SETUP" | "CONFIRMED" | "BLOCKED";
+export type Regime =
+  | "TREND_UP"
+  | "TREND_DOWN"
+  | "RANGE"
+  | "HIGH_VOLATILITY"
+  | "LOW_VOLATILITY"
+  | "NO_TRADE";
+
+export interface Candle {
+  openTime: number;
+  closeTime: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  quoteVolume: number;
+  trades: number;
+}
+
+export interface SymbolState {
+  symbol: string;
+  quoteVolume24h: number;
+  lastPrice: number;
+  lastDataAt: number;
+  candles: {
+    "1m": Candle[];
+    "5m": Candle[];
+    "15m": Candle[];
+  };
+}
+
+export interface QualityBreakdown {
+  trend: number;
+  momentum: number;
+  volume: number;
+  volatility: number;
+  structure: number;
+  regime: number;
+  total: number;
+}
+
+export interface RiskPreview {
+  eligible: boolean;
+  reason: string;
+  entry: number;
+  stop: number;
+  takeProfit1: number;
+  takeProfit2: number;
+  riskDistancePct: number;
+  riskUsd: number;
+  notionalUsd: number;
+}
+
+export interface Signal {
+  signalId: string;
+  symbol: string;
+  engine: Engine;
+  side: Side;
+  stage: Stage;
+  quality: QualityBreakdown;
+  regime: Regime;
+  entry: number;
+  stop: number;
+  takeProfit1: number;
+  takeProfit2: number;
+  createdAt: number;
+  updatedAt: number;
+  rationale: string[];
+  risk: RiskPreview;
+}
+
+export interface RiskConfig {
+  accountBalanceUsd: number;
+  riskPerTradePct: number;
+  maxDailyRiskPct: number;
+  maxTotalPositions: number;
+  maxMomentumPositions: number;
+  maxScalpingPositions: number;
+  cooldownMinutes: number;
+}
+
+export interface EngineState {
+  open: number;
+  max: number;
+  status: "READY" | "FULL" | "BLOCKED";
+}
+
+export interface DashboardState {
+  mode: "PAPER" | "TESTNET" | "LIVE";
+  auto: boolean;
+  market: {
+    regime: Regime;
+    btcPrice: number;
+    universeSize: number;
+  };
+  feed: {
+    websocket: "ONLINE" | "CONNECTING" | "RECONNECTING" | "OFFLINE";
+    data: "FRESH" | "STALE" | "NO_DATA";
+    lastUpdateAt: number;
+    reconnects: number;
+  };
+  engines: {
+    momentum: EngineState;
+    scalping: EngineState;
+    totalOpen: number;
+    totalMax: number;
+  };
+  risk: RiskConfig & {
+    dailyRiskUsedPct: number;
+    emergencyStop: boolean;
+  };
+  signals: Signal[];
+  updatedAt: number;
+}

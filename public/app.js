@@ -9,8 +9,16 @@ const money = (n) => "$" + fmt(Number(n));
 
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({
-    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", """: "&quot;", "'": "&#039;"
   }[c]));
+
+function showApiError(message) {
+  const el = $("data");
+  if (el) {
+    el.textContent = message;
+    el.className = "muted error";
+  }
+}
 
 async function toggleAuto() {
   const enabled = $("paperAuto").dataset.enabled !== "true";
@@ -22,30 +30,29 @@ async function toggleAuto() {
       body: JSON.stringify({ enabled })
     });
     if (response.ok) render(await response.json());
+    else showApiError("API error: HTTP " + response.status);
+  } catch (error) {
+    showApiError("API error: " + (error instanceof Error ? error.message : String(error)));
   } finally {
     $("paperAuto").disabled = false;
   }
 }
 
 async function closePaper(symbol) {
-  const response = await fetch("/api/paper/close", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ symbol })
-  });
-  if (response.ok) render(await response.json());
-}
-
-function showApiError(message) {
-  const el = $("data");
-  if (el) {
-    el.textContent = message;
-    el.className = "muted error";
+  try {
+    const response = await fetch("/api/paper/close", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ symbol })
+    });
+    if (response.ok) render(await response.json());
+    else showApiError("Close failed: HTTP " + response.status);
+  } catch (error) {
+    showApiError("Close failed: " + (error instanceof Error ? error.message : String(error)));
   }
 }
 
 function render(state) {
-
   $("regime").textContent = state.market.regime.replaceAll("_", " ");
   $("btc").textContent = fmt(state.market.btcPrice);
   $("ws").textContent = state.feed.websocket;
@@ -90,19 +97,19 @@ function render(state) {
   if (!state.paper.positions.length) {
     pbody.innerHTML = '<tr><td colspan="9" class="empty">No paper positions.</td></tr>';
   } else {
-    pbody.innerHTML = state.paper.positions.map((p) => (
+    pbody.innerHTML = state.paper.positions.map((p) =>
       "<tr>" +
       "<td><strong>" + esc(p.symbol) + "</strong></td>" +
-      "<td>" + p.engine + "</td>" +
-      "<td class="" + (p.side === "LONG" ? "long" : "short") + "">" + p.side + "</td>" +
+      "<td>" + esc(p.engine) + "</td>" +
+      '<td class="' + (p.side === "LONG" ? "long" : "short") + '">' + esc(p.side) + "</td>" +
       "<td>" + fmt(p.entry) + "</td>" +
       "<td>" + fmt(p.markPrice) + "</td>" +
       "<td>" + fmt(p.stop) + "</td>" +
       "<td>" + fmt(p.takeProfit1) + "</td>" +
       "<td>" + money(p.netPnlUsd) + "</td>" +
-      "<td><button class="close-btn" data-symbol="" + esc(p.symbol) + "">Close</button></td>" +
+      '<td><button class="close-btn" data-symbol="' + esc(p.symbol) + '">Close</button></td>' +
       "</tr>"
-    )).join("");
+    ).join("");
 
     document.querySelectorAll(".close-btn").forEach((button) => {
       button.onclick = () => closePaper(button.dataset.symbol);
@@ -112,7 +119,7 @@ function render(state) {
   $("signalCount").textContent = state.signals.length;
   const tbody = $("signals");
   if (!state.signals.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty">No scored signals yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">Waiting for scored market data…</td></tr>';
   } else {
     tbody.innerHTML = state.signals.map((s) => {
       const sideClass = s.side === "LONG" ? "long" : "short";
@@ -120,8 +127,8 @@ function render(state) {
         "<tr>" +
         "<td><strong>" + esc(s.symbol) + "</strong></td>" +
         "<td>" + esc(s.engine) + "</td>" +
-        "<td class="" + sideClass + "">" + s.side + "</td>" +
-        "<td><span class="stage " + s.stage.toLowerCase() + "">" + s.stage + "</span></td>" +
+        '<td class="' + sideClass + '">' + esc(s.side) + "</td>" +
+        '<td><span class="stage ' + s.stage.toLowerCase() + '">' + esc(s.stage) + "</span></td>" +
         "<td><strong>" + s.quality.total + "</strong></td>" +
         "<td>" + esc(s.regime.replaceAll("_", " ")) + "</td>" +
         "<td>" + fmt(s.entry) + "</td>" +
@@ -147,8 +154,9 @@ async function load() {
   polling = true;
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
-    if (response.ok) render(await response.json());
-    else {
+    if (response.ok) {
+      render(await response.json());
+    } else {
       let detail = "HTTP " + response.status;
       try {
         const body = await response.json();
@@ -157,10 +165,8 @@ async function load() {
       showApiError("API connection failed: " + detail);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    showApiError("API connection failed: " + message);
-  }
-  finally {
+    showApiError("API connection failed: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
     polling = false;
   }
 }

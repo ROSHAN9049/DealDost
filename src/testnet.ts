@@ -567,14 +567,14 @@ export class TestnetClient {
     const hasStop = openOrders.some(
       (o) =>
         o.status === "NEW" &&
-        o.closePosition === true &&
+        (o.closePosition === true || String(o.closePosition).toLowerCase() === "true") &&
         o.type === "STOP_MARKET" &&
         String(o.clientOrderId ?? "").startsWith("DDT-"),
     );
     const hasTakeProfit = openOrders.some(
       (o) =>
         o.status === "NEW" &&
-        o.closePosition === true &&
+        (o.closePosition === true || String(o.closePosition).toLowerCase() === "true") &&
         o.type === "TAKE_PROFIT_MARKET" &&
         String(o.clientOrderId ?? "").startsWith("DDT-"),
     );
@@ -629,7 +629,7 @@ export class TestnetClient {
     const protections = openOrders.filter(
       (o) =>
         o.status === "NEW" &&
-        o.closePosition === true &&
+        (o.closePosition === true || String(o.closePosition).toLowerCase() === "true") &&
         (o.type === "STOP_MARKET" || o.type === "TAKE_PROFIT_MARKET") &&
         String(o.clientOrderId ?? "").startsWith("DDT-"),
     );
@@ -695,7 +695,7 @@ export class TestnetClient {
         symbol &&
         !openSymbols.has(symbol) &&
         order.status === "NEW" &&
-        order.closePosition === true &&
+        (order.closePosition === true || String(order.closePosition).toLowerCase() === "true") &&
         (order.type === "STOP_MARKET" || order.type === "TAKE_PROFIT_MARKET") &&
         clientId.startsWith("DDT-")
       );

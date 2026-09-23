@@ -702,13 +702,32 @@ export class BinanceScanner extends EventEmitter {
         const base = position.entryPrice;
         if (!Number.isFinite(base) || base <= 0) continue;
 
+        const mark = Number(position.markPrice);
+        if (!Number.isFinite(mark) || mark <= 0) continue;
+
         const stopPct = position.engine === "MOMENTUM" ? 0.0042 : 0.0030;
         const takePct = position.engine === "MOMENTUM" ? 0.0063 : 0.0033;
+        const minTriggerGap = 0.0001;
 
-        stopPrice = position.side === "LONG" ? base * (1 - stopPct) : base * (1 + stopPct);
-        takeProfitPrice = position.side === "LONG" ? base * (1 + takePct) : base * (1 - takePct);
+        // Start from the original entry-derived bracket, then move any
+        // already-crossed trigger just beyond the current mark so Binance
+        // accepts it and the position remains protected immediately.
+        const rawStop = position.side === "LONG" ? base * (1 - stopPct) : base * (1 + stopPct);
+        const rawTakeProfit = position.side === "LONG" ? base * (1 + takePct) : base * (1 - takePct);
 
-        errorMessage = "Signal memory unavailable for " + position.symbol + "; using emergency entry-based protection";
+        if (position.side === "LONG") {
+          stopPrice = Math.min(rawStop, mark * (1 - minTriggerGap));
+          takeProfitPrice = Math.max(rawTakeProfit, mark * (1 + minTriggerGap));
+        } else {
+          stopPrice = Math.max(rawStop, mark * (1 + minTriggerGap));
+          takeProfitPrice = Math.min(rawTakeProfit, mark * (1 - minTriggerGap));
+        }
+
+        console.warn(
+          "[testnet protection fallback]",
+          position.symbol,
+          "signal memory unavailable; using emergency bracket",
+        );
       }
 
       try {

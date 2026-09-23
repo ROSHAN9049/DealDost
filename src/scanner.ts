@@ -150,6 +150,61 @@ export class BinanceScanner extends EventEmitter {
     };
   }
 
+  async ingestBrowserMarket(input: {
+    universe: Array<{ symbol: string; quoteVolume: number; lastPrice: number }>;
+    symbol: string;
+    candles: { "1m": Candle[]; "5m": Candle[]; "15m": Candle[] };
+  }) {
+    const validUniverse = input.universe
+      .filter((t) => t.symbol.endsWith("USDT") && Number.isFinite(t.quoteVolume) && Number.isFinite(t.lastPrice))
+      .slice(0, config.universeSize);
+
+    const existing = this.symbols;
+    const next = new Map<string, SymbolState>();
+    for (const t of validUniverse) {
+      const previous = existing.get(t.symbol);
+      next.set(t.symbol, {
+        symbol: t.symbol,
+        quoteVolume24h: t.quoteVolume,
+        lastPrice: t.lastPrice,
+        lastDataAt: previous?.lastDataAt ?? 0,
+        candles: previous?.candles ?? { "1m": [], "5m": [], "15m": [] },
+      });
+    }
+
+    const state = next.get(input.symbol);
+    if (!state) throw new Error("Symbol not in browser universe: " + input.symbol);
+
+    if (
+      input.candles["1m"].length < 60 ||
+      input.candles["5m"].length < 60 ||
+      input.candles["15m"].length < 60
+    ) {
+      throw new Error("Insufficient candle history for " + input.symbol);
+    }
+
+    state.candles = {
+      "1m": input.candles["1m"].map((c) => ({ ...c })),
+      "5m": input.candles["5m"].map((c) => ({ ...c })),
+      "15m": input.candles["15m"].map((c) => ({ ...c })),
+    };
+    state.lastPrice = state.candles["1m"].at(-1)?.close ?? state.lastPrice;
+    state.lastDataAt = Date.now();
+
+    this.symbols = next;
+    if (input.symbol === "BTCUSDT") this.btcPrice = state.lastPrice;
+
+    this.evaluate(input.symbol, "MOMENTUM");
+    this.evaluate(input.symbol, "SCALPING");
+    this.lastMarketError = null;
+    this.feedStatus = "ONLINE";
+    this.lastUpdateAt = Date.now();
+    this.tryAutoEntries();
+    this.emit("update");
+
+    return this.state();
+  }
+
   setPaperAuto(enabled: boolean) {
     this.paper.setAuto(enabled);
     this.emit("update");

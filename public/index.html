@@ -10,7 +10,7 @@
   <header class="topbar">
     <div>
       <div class="brand">DEALDOST</div>
-      <div class="subtitle">BINANCE SCANNER V2</div>
+      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260923.5</span></div>
     </div>
     <div class="mode">
       <button id="paperMode" class="pill active" type="button">PAPER</button>
@@ -51,6 +51,35 @@
       <article class="card"><div class="label">PROFIT ROTATION V3</div><div class="risk-row"><span>Events Today</span><strong id="rotEvents">0</strong></div><div class="risk-row"><span>Released</span><strong id="rotReleased">$0</strong></div><div class="risk-row"><span>Allocated</span><strong id="rotAllocated">$0</strong></div><div id="rotLast" class="muted">No profitable rotation yet.</div></article>
     </section>
   </main>
-  <script src="/app.js?v=20260923.3" defer></script>
+  <script>
+    (() => {
+      const setBoot = (message, error = false) => {
+        const data = document.getElementById("data");
+        const ws = document.getElementById("ws");
+        if (data) {
+          data.textContent = message;
+          data.className = error ? "muted error" : "muted";
+        }
+        if (ws && error) {
+          ws.textContent = "BOOT ERROR";
+          ws.className = "status warn";
+        }
+      };
+      window.addEventListener("error", (event) => {
+        const message = event?.message || "JavaScript runtime error";
+        setBoot("JS ERROR • " + String(message).slice(0, 120), true);
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event?.reason instanceof Error ? event.reason.message : String(event?.reason ?? "Promise rejected");
+        setBoot("PROMISE ERROR • " + reason.slice(0, 120), true);
+      });
+      const script = document.createElement("script");
+      script.src = "/app.js?build=20260923.5";
+      script.defer = true;
+      script.onload = () => setBoot("BOOT OK • loading market data…");
+      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260923.5", true);
+      document.head.appendChild(script);
+    })();
+  </script>
 </body>
 </html>

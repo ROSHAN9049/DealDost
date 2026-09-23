@@ -14,6 +14,10 @@ const bool = (key: string, fallback: boolean) => {
 export const config = {
   port: n("PORT", 3000),
   restBase: process.env.BINANCE_REST_BASE ?? "https://fapi.binance.com",
+  restFallbackBases: (process.env.BINANCE_REST_FALLBACK_BASES ?? "https://fapi1.binance.com,https://fapi2.binance.com,https://fapi3.binance.com")
+    .split(",")
+    .map((value) => value.trim().replace(/\/+$/, ""))
+    .filter(Boolean),
   wsBase: process.env.BINANCE_WS_BASE ?? "wss://fstream.binance.com/stream",
   testnetRestBase: (process.env.BINANCE_TESTNET_REST_BASE ?? "https://demo-fapi.binance.com").replace(/\/+$/, ""),
   testnetApiKey: process.env.BINANCE_TESTNET_API_KEY ?? "",

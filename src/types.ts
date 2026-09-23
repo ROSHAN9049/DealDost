@@ -1,13 +1,7 @@
 export type Engine = "MOMENTUM" | "SCALPING";
 export type Side = "LONG" | "SHORT";
 export type Stage = "WATCH" | "SETUP" | "CONFIRMED" | "BLOCKED";
-export type Regime =
-  | "TREND_UP"
-  | "TREND_DOWN"
-  | "RANGE"
-  | "HIGH_VOLATILITY"
-  | "LOW_VOLATILITY"
-  | "NO_TRADE";
+export type Regime = "TREND_UP" | "TREND_DOWN" | "RANGE" | "HIGH_VOLATILITY" | "LOW_VOLATILITY" | "NO_TRADE";
 
 export interface Candle {
   openTime: number;
@@ -26,11 +20,7 @@ export interface SymbolState {
   quoteVolume24h: number;
   lastPrice: number;
   lastDataAt: number;
-  candles: {
-    "1m": Candle[];
-    "5m": Candle[];
-    "15m": Candle[];
-  };
+  candles: { "1m": Candle[]; "5m": Candle[]; "15m": Candle[] };
 }
 
 export interface QualityBreakdown {
@@ -103,6 +93,7 @@ export interface PaperPositionView {
   takeProfit2: number;
   openedAt: number;
   entryFeeUsd: number;
+  marginReservedUsd: number;
   grossPnlUsd: number;
   netPnlUsd: number;
 }
@@ -112,6 +103,8 @@ export interface PaperStateView {
   auto: boolean;
   startingBalanceUsd: number;
   balanceUsd: number;
+  availableBalanceUsd: number;
+  reservedMarginUsd: number;
   realizedPnlUsd: number;
   unrealizedPnlUsd: number;
   feesUsd: number;
@@ -135,11 +128,7 @@ export interface RotationStateView {
 export interface DashboardState {
   mode: "PAPER" | "TESTNET" | "LIVE";
   auto: boolean;
-  market: {
-    regime: Regime;
-    btcPrice: number;
-    universeSize: number;
-  };
+  market: { regime: Regime; btcPrice: number; universeSize: number };
   feed: {
     websocket: "ONLINE" | "CONNECTING" | "RECONNECTING" | "OFFLINE";
     data: "FRESH" | "STALE" | "NO_DATA";
@@ -152,10 +141,7 @@ export interface DashboardState {
     totalOpen: number;
     totalMax: number;
   };
-  risk: RiskConfig & {
-    dailyRiskUsedPct: number;
-    emergencyStop: boolean;
-  };
+  risk: RiskConfig & { dailyRiskUsedPct: number; emergencyStop: boolean };
   paper: PaperStateView;
   rotation: RotationStateView;
   signals: Signal[];

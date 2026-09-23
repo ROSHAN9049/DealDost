@@ -64,43 +64,41 @@ export class BinanceScanner extends EventEmitter {
     this.serverlessMode = true;
     try {
       await this.refreshUniverse();
+      this.feedStatus = "ONLINE";
+      this.lastUpdateAt = Date.now();
     } catch (error) {
       this.feedStatus = "OFFLINE";
       console.error("[serverless universe]", error);
-      this.emit("update");
-      return;
     }
-    // Keep serverless startup bounded: score only one symbol here.
-    try {
-      await this.bootstrapHistory(1);
-    } catch (error) {
-      console.error("[serverless bootstrap]", error);
-    }
-    this.feedStatus = "ONLINE";
-    this.lastUpdateAt = Date.now();
+    // Do not block the API startup on kline history. Vercel serverless
+    // invocations must return quickly; scoring happens inside /api/state.
     void this.syncTestnet();
     this.emit("update");
   }
 
   async serverlessTick() {
     if (!this.serverlessMode) return;
-    if (Date.now() - this.lastServerlessPollAt < 4000) return;
+    if (Date.now() - this.lastServerlessPollAt < 1000) return;
     this.lastServerlessPollAt = Date.now();
-    await this.refreshUniverse();
+
     try {
-      const size = this.symbols.size;
-      if (size) {
-        this.serverlessCursor %= size;
-        const states = [...this.symbols.values()];
-        const target = states[this.serverlessCursor];
-        this.serverlessCursor = (this.serverlessCursor + 1) % size;
+      await this.refreshUniverse();
+      const states = [...this.symbols.values()];
+      if (states.length) {
+        // Always score BTC first so a fresh Vercel invocation produces a
+        // deterministic server-owned market/signal result.
+        const btc = this.symbols.get("BTCUSDT");
+        const target = btc ?? states[this.serverlessCursor % states.length];
+        this.serverlessCursor = (this.serverlessCursor + 1) % states.length;
         await this.bootstrapHistoryForStates([target]);
       }
+      this.feedStatus = "ONLINE";
+      this.lastUpdateAt = Date.now();
     } catch (error) {
-      console.error("[serverless bootstrap]", error);
+      this.feedStatus = "OFFLINE";
+      console.error("[serverless tick]", error);
     }
-    this.feedStatus = "ONLINE";
-    this.lastUpdateAt = Date.now();
+
     this.emit("update");
   }
 

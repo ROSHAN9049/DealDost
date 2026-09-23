@@ -47,6 +47,8 @@ type OrderRow = {
   clientOrderId?: string;
   reduceOnly?: boolean;
   closePosition?: boolean;
+  orderId?: string | number;
+  stopPrice?: string;
   time?: number;
   updateTime?: number;
 };
@@ -93,6 +95,7 @@ export interface TestnetExecutionSnapshot {
   momentumOpen: number;
   scalpingOpen: number;
   unclassifiedOpenPositions: number;
+  unprotectedOpenPositions: number;
   dailyRiskUsedPct: number;
   lastClosedAt: Record<string, number>;
 }
@@ -167,6 +170,7 @@ export class TestnetClient {
       momentumOpen: 0,
       scalpingOpen: 0,
       unclassifiedOpenPositions: open.length,
+      unprotectedOpenPositions: open.length,
       dailyRiskUsedPct: 0,
       realizedPnlTodayUsd: 0,
       feesTodayUsd: 0,
@@ -186,6 +190,7 @@ export class TestnetClient {
         momentumOpen: enriched.momentumOpen,
         scalpingOpen: enriched.scalpingOpen,
         unclassifiedOpenPositions: enriched.unclassifiedOpenPositions,
+        unprotectedOpenPositions: enriched.unprotectedOpenPositions,
         dailyRiskUsedPct: enriched.dailyRiskUsedPct,
         positions: enriched.positions,
         lastSyncAt: Date.now(),
@@ -210,6 +215,7 @@ export class TestnetClient {
         momentumOpen: 0,
         scalpingOpen: 0,
         unclassifiedOpenPositions: 0,
+        unprotectedOpenPositions: 0,
         dailyRiskUsedPct: 0,
         realizedPnlTodayUsd: 0,
         feesTodayUsd: 0,
@@ -251,6 +257,7 @@ export class TestnetClient {
       else if (engine === "SCALPING") scalpingOpen += 1;
       else unclassifiedOpenPositions += 1;
 
+      if (item.protection !== "OK") unprotectedOpenPositions += 1;
       if (item.lastClosedAt > 0) lastClosedAt[item.symbol] = item.lastClosedAt;
 
       positionViews.push({
@@ -263,6 +270,7 @@ export class TestnetClient {
         unrealizedPnlUsd: Number(position.unrealizedProfit ?? 0),
         leverage: Number.isFinite(Number(position.leverage)) ? Number(position.leverage) : null,
         openedAt: Number(position.updateTime ?? 0),
+        protection: item.protection,
       });
     }
 
@@ -295,6 +303,7 @@ export class TestnetClient {
       momentumOpen,
       scalpingOpen,
       unclassifiedOpenPositions,
+      unprotectedOpenPositions,
       dailyRiskUsedPct,
       realizedPnlTodayUsd,
       feesTodayUsd,
@@ -515,6 +524,21 @@ export class TestnetClient {
       .sort((a, b) => b - a)[0] ?? 0;
   }
 
+  private getProtectionStatus(openOrders: OrderRow[]): "OK" | "PARTIAL" | "MISSING" {
+    const protections = openOrders.filter(
+      (o) =>
+        o.status === "NEW" &&
+        o.closePosition === true &&
+        (o.type === "STOP_MARKET" || o.type === "TAKE_PROFIT_MARKET") &&
+        String(o.clientOrderId ?? "").startsWith("DDT-"),
+    );
+    const hasStop = protections.some((o) => o.type === "STOP_MARKET");
+    const hasTakeProfit = protections.some((o) => o.type === "TAKE_PROFIT_MARKET");
+    if (hasStop && hasTakeProfit) return "OK";
+    if (hasStop || hasTakeProfit) return "PARTIAL";
+    return "MISSING";
+  }
+
   private incomePath(type: "REALIZED_PNL" | "COMMISSION") {
     // DealDost is operated in India, so the daily risk window is IST midnight
     // rather than the Vercel runtime's UTC/local timezone.
@@ -528,6 +552,12 @@ export class TestnetClient {
   private async getRecentOrders(symbol: string): Promise<OrderRow[]> {
     return this.signedGet<OrderRow[]>(
       "/fapi/v1/allOrders?symbol=" + encodeURIComponent(symbol) + "&limit=50",
+    );
+  }
+
+  private async getOpenOrders(symbol: string): Promise<OrderRow[]> {
+    return this.signedGet<OrderRow[]>(
+      "/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol),
     );
   }
 

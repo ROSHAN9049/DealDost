@@ -98,7 +98,15 @@ export class PaperBroker {
     if (!stopDistance || signal.entry <= 0) return { opened: false, reason: "INVALID_RISK_DISTANCE" };
 
     const available = this.availableBalance();
-    const notional = Math.min(signal.risk.notionalUsd, Math.max(0, available * 0.95));
+    // Keep six-position mode practical even when ATR/stop distance is tiny.
+    // With the default 15% cap, six fully-sized positions use at most 90% of
+    // the starting account notional, leaving a cash buffer for fees/slippage.
+    const maxNotional = this.startingBalance * (config.maxNotionalPctPerTrade / 100);
+    const notional = Math.min(
+      signal.risk.notionalUsd,
+      maxNotional,
+      Math.max(0, available * 0.95),
+    );
     if (notional <= 0) return { opened: false, reason: "INSUFFICIENT_PAPER_MARGIN" };
 
     const sign = signal.side === "LONG" ? 1 : -1;

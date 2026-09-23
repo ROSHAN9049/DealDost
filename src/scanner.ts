@@ -357,7 +357,42 @@ export class BinanceScanner extends EventEmitter {
 
   private async syncTestnet() {
     try {
-      this.testnetState = { ...await this.testnet.sync(), auto: this.testnetAuto };
+      let synced = await this.testnet.sync();
+      let repairError: string | null = null;
+
+      // Protection is a safety requirement independent of AUTO. When a
+      // DDT-managed Demo position is missing SL/TP, attempt a verified repair
+      // during reconciliation rather than waiting for AUTO to be enabled.
+      if (this.testnet.isExecutionEnabled() && synced.unprotectedOpenPositions > 0) {
+        const reconciled = await this.testnet.getExecutionSnapshot();
+        const repaired = await this.repairManagedTestnetProtection(reconciled);
+        repairError = repaired.error;
+        if (repaired.snapshot !== reconciled || repaired.error) {
+          synced = {
+            ...synced,
+            connected: repaired.snapshot.connected,
+            accountBalanceUsd: repaired.snapshot.accountBalanceUsd,
+            availableBalanceUsd: repaired.snapshot.availableBalanceUsd,
+            unrealizedPnlUsd: repaired.snapshot.unrealizedPnlUsd,
+            openPositions: repaired.snapshot.openPositions,
+            momentumOpen: repaired.snapshot.momentumOpen,
+            scalpingOpen: repaired.snapshot.scalpingOpen,
+            unclassifiedOpenPositions: repaired.snapshot.unclassifiedOpenPositions,
+            unprotectedOpenPositions: repaired.snapshot.unprotectedOpenPositions,
+            dailyRiskUsedPct: repaired.snapshot.dailyRiskUsedPct,
+            realizedPnlTodayUsd: repaired.snapshot.realizedPnlTodayUsd,
+            feesTodayUsd: repaired.snapshot.feesTodayUsd,
+            positions: repaired.snapshot.positions,
+            lastSyncAt: Date.now(),
+          };
+        }
+      }
+
+      this.testnetState = {
+        ...synced,
+        auto: this.testnetAuto,
+        error: repairError,
+      };
       this.lastTestnetSyncAt = Date.now();
       this.emit("update");
     } catch (error) {
@@ -741,8 +776,9 @@ export class BinanceScanner extends EventEmitter {
 
         const riskUsd = snapshot.accountBalanceUsd * (config.testnetRiskPerTradePct / 100);
         const riskBasedNotional = riskUsd * (signal.entry / riskDistance);
+        const maxAccountNotional = snapshot.accountBalanceUsd * (config.maxNotionalPctPerTrade / 100);
         const maxAvailableNotional = snapshot.availableBalanceUsd * 0.95;
-        const notionalUsd = Math.min(riskBasedNotional, maxAvailableNotional);
+        const notionalUsd = Math.min(riskBasedNotional, maxAccountNotional, maxAvailableNotional);
         const quantity = notionalUsd > 0 ? notionalUsd / signal.entry : 0;
 
         if (!(quantity > 0)) continue;
@@ -836,7 +872,9 @@ export class BinanceScanner extends EventEmitter {
 
     const accountBalanceUsd = this.testnetState.accountBalanceUsd;
     const riskUsd = accountBalanceUsd * (config.testnetRiskPerTradePct / 100);
-    const notionalUsd = riskDistance > 0 ? riskUsd * (signal.entry / riskDistance) : 0;
+    const riskBasedNotional = riskDistance > 0 ? riskUsd * (signal.entry / riskDistance) : 0;
+    const maxAccountNotional = accountBalanceUsd * (config.maxNotionalPctPerTrade / 100);
+    const notionalUsd = Math.min(riskBasedNotional, maxAccountNotional);
     const positions = this.testnetState.positions ?? [];
     const symbolOpen = positions.some((p) => p.symbol === signal.symbol);
     let reason = "RISK_GATE_PASS";

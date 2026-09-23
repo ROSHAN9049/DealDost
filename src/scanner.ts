@@ -895,6 +895,10 @@ export class BinanceScanner extends EventEmitter {
         feesTodayUsd: refreshed.feesTodayUsd,
         positions: refreshed.positions,
         lastSyncAt: Date.now(),
+        // A successful exchange reconciliation clears stale candidate/order
+        // errors from the dashboard. Genuine execution failures are still
+        // surfaced during the cycle in which they occur.
+        error: null,
       };
     } catch (error) {
       this.testnetState = {

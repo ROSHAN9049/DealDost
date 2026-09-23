@@ -46,14 +46,24 @@ async function directScannerFallback() {
   if (!selected) throw new Error("No eligible Binance futures symbols");
 
   const marketSymbol = "BTCUSDT";
-  const [m1, m5, m15, btc15] = await Promise.all([
+  const [m1, m5, m15] = await Promise.all([
     fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=1m&limit=120"),
     fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=5m&limit=120"),
-    fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=15m&limit=120"),
-    selected.symbol === marketSymbol
-      ? Promise.resolve(m15)
-      : fetchDirectBinance("/fapi/v1/klines?symbol=" + marketSymbol + "&interval=15m&limit=120")
+    fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=15m&limit=120")
   ]);
+
+  // BTC context is useful for the global regime but must never prevent the
+  // selected-symbol scanner from updating when this extra request fails.
+  let btc15 = m15;
+  if (selected.symbol !== marketSymbol) {
+    try {
+      btc15 = await fetchDirectBinance(
+        "/fapi/v1/klines?symbol=" + marketSymbol + "&interval=15m&limit=120"
+      );
+    } catch {
+      btc15 = [];
+    }
+  }
 
   localStorage.setItem("dealdost.scannerCursor", String((index + 1) % top.length));
 

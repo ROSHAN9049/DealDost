@@ -34,6 +34,7 @@ export class BinanceScanner extends EventEmitter {
   private testnetState = this.testnet.emptyState();
   private serverlessMode = false;
   private lastServerlessPollAt = 0;
+  private serverlessCursor = 0;
 
   onUpdate(listener: () => void): () => void {
     this.on("update", listener);
@@ -69,8 +70,12 @@ export class BinanceScanner extends EventEmitter {
       this.emit("update");
       return;
     }
-    // Do not make the entire API request fail if a single kline batch is slow.
-    await this.bootstrapHistory(3);
+    // Keep serverless startup bounded: score only one symbol here.
+    try {
+      await this.bootstrapHistory(1);
+    } catch (error) {
+      console.error("[serverless bootstrap]", error);
+    }
     this.feedStatus = "ONLINE";
     this.lastUpdateAt = Date.now();
     void this.syncTestnet();
@@ -82,7 +87,18 @@ export class BinanceScanner extends EventEmitter {
     if (Date.now() - this.lastServerlessPollAt < 4000) return;
     this.lastServerlessPollAt = Date.now();
     await this.refreshUniverse();
-    await this.bootstrapHistory(3);
+    try {
+      const size = this.symbols.size;
+      if (size) {
+        this.serverlessCursor %= size;
+        const states = [...this.symbols.values()];
+        const target = states[this.serverlessCursor];
+        this.serverlessCursor = (this.serverlessCursor + 1) % size;
+        await this.bootstrapHistoryForStates([target]);
+      }
+    } catch (error) {
+      console.error("[serverless bootstrap]", error);
+    }
     this.feedStatus = "ONLINE";
     this.lastUpdateAt = Date.now();
     this.emit("update");
@@ -166,7 +182,10 @@ export class BinanceScanner extends EventEmitter {
   }
 
   private async request<T>(path: string): Promise<T> {
-    const response = await fetch(config.restBase + path, { headers: { "User-Agent": "DealDost/2.0" } });
+    const response = await fetch(config.restBase + path, {
+      headers: { "User-Agent": "DealDost/2.0" },
+      signal: AbortSignal.timeout(6000),
+    });
     if (!response.ok) {
       const body = await response.text();
       throw new Error("Binance REST " + response.status + ": " + body.slice(0, 300));
@@ -209,6 +228,10 @@ export class BinanceScanner extends EventEmitter {
 
   private async bootstrapHistory(limit = this.symbols.size) {
     const states = [...this.symbols.values()].slice(0, limit);
+    await this.bootstrapHistoryForStates(states);
+  }
+
+  private async bootstrapHistoryForStates(states: SymbolState[]) {
     const concurrency = 5;
 
     for (let i = 0; i < states.length; i += concurrency) {

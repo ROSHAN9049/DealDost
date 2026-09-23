@@ -12,7 +12,7 @@ const esc = (s) =>
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
   }[c]));
 
-async function directBinanceFallback() {
+async function fetchDirectBinance(path) {
   const bases = [
     "https://fapi.binance.com",
     "https://fapi1.binance.com",
@@ -20,32 +20,88 @@ async function directBinanceFallback() {
     "https://fapi3.binance.com"
   ];
   let lastError = null;
-
   for (const base of bases) {
     try {
-      const response = await fetch(base + "/fapi/v1/ticker/24hr", { cache: "no-store" });
-      if (!response.ok) throw new Error("HTTP " + response.status);
-      const ticker = await response.json();
-      const top = ticker
-        .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
-        .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
-        .slice(0, 50);
-      const btc = top.find((t) => t.symbol === "BTCUSDT");
-
-      $("regime").textContent = "WAITING";
-      $("btc").textContent = btc ? fmt(Number(btc.lastPrice)) : "—";
-      $("ws").textContent = "REST ONLINE";
-      $("ws").className = "status ok";
-      $("data").textContent = "FRESH • direct Binance fallback";
-      $("data").className = "muted";
-      $("universe").textContent = top.length;
-      return;
+      const response = await fetch(base + path, { cache: "no-store" });
+      if (!response.ok) throw new Error(base + " HTTP " + response.status);
+      return await response.json();
     } catch (error) {
       lastError = error;
     }
   }
-
   throw lastError instanceof Error ? lastError : new Error("Binance market API unavailable");
+}
+
+async function directScannerFallback() {
+  const ticker = await fetchDirectBinance("/fapi/v1/ticker/24hr");
+  const top = ticker
+    .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
+    .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
+    .slice(0, 50);
+
+  const cursor = Number(localStorage.getItem("dealdost.scannerCursor") || "0");
+  const btcIndex = top.findIndex((t) => t.symbol === "BTCUSDT");
+  const index = cursor === 0 && btcIndex >= 0 ? btcIndex : cursor % Math.max(top.length, 1);
+  const selected = top[index];
+  if (!selected) throw new Error("No eligible Binance futures symbols");
+
+  const [m1, m5, m15] = await Promise.all([
+    fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=1m&limit=120"),
+    fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=5m&limit=120"),
+    fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=15m&limit=120")
+  ]);
+
+  localStorage.setItem("dealdost.scannerCursor", String((index + 1) % top.length));
+
+  const toCandle = (row) => ({
+    openTime: Number(row[0]),
+    closeTime: Number(row[6]),
+    open: Number(row[1]),
+    high: Number(row[2]),
+    low: Number(row[3]),
+    close: Number(row[4]),
+    volume: Number(row[5]),
+    quoteVolume: Number(row[7]),
+    trades: Number(row[8])
+  });
+
+  const response = await fetch("/api/market/ingest", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({
+      universe: top.map((t) => ({
+        symbol: t.symbol,
+        quoteVolume: Number(t.quoteVolume),
+        lastPrice: Number(t.lastPrice)
+      })),
+      symbol: selected.symbol,
+      candles: {
+        "1m": m1.map(toCandle),
+        "5m": m5.map(toCandle),
+        "15m": m15.map(toCandle)
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error("Signal ingest HTTP " + response.status);
+  render(await response.json());
+}
+
+async function directBinanceFallback() {
+  const ticker = await fetchDirectBinance("/fapi/v1/ticker/24hr");
+  const top = ticker
+    .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
+    .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
+    .slice(0, 50);
+  const btc = top.find((t) => t.symbol === "BTCUSDT");
+  $("regime").textContent = "WAITING";
+  $("btc").textContent = btc ? fmt(Number(btc.lastPrice)) : "—";
+  $("ws").textContent = "REST ONLINE";
+  $("ws").className = "status ok";
+  $("data").textContent = "FRESH • direct Binance fallback";
+  $("data").className = "muted";
+  $("universe").textContent = top.length;
 }
 
 function showApiError(message) {
@@ -195,8 +251,13 @@ async function load() {
       render(await response.json());
     } else {
       try {
-        await directBinanceFallback();
+        await directScannerFallback();
+        return;
       } catch (fallbackError) {
+        try {
+          await directBinanceFallback();
+          return;
+        } catch {}
         let detail = "HTTP " + response.status;
         try {
           const body = await response.json();
@@ -207,9 +268,13 @@ async function load() {
     }
   } catch (error) {
     try {
-      await directBinanceFallback();
+      await directScannerFallback();
     } catch (fallbackError) {
-      showApiError("Scanner API failed: " + (error instanceof Error ? error.message : String(error)));
+      try {
+        await directBinanceFallback();
+      } catch {
+        showApiError("Scanner API failed: " + (error instanceof Error ? error.message : String(error)));
+      }
     }
   } finally {
     polling = false;

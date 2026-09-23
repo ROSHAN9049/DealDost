@@ -541,8 +541,13 @@ export class BinanceScanner extends EventEmitter {
   private tryPaperEntries() {
     if (!this.paper.getAuto()) return;
 
+    const now = Date.now();
     const candidates = [...this.signals.values()]
-      .filter((s) => s.stage === "CONFIRMED")
+      .filter((s) => {
+        if (s.stage !== "CONFIRMED") return false;
+        const maxAgeMs = s.engine === "SCALPING" ? 90_000 : 10 * 60_000;
+        return now - s.updatedAt <= maxAgeMs;
+      })
       .sort((a, b) => b.quality.total - a.quality.total);
 
     for (const signal of candidates) {
@@ -595,8 +600,13 @@ export class BinanceScanner extends EventEmitter {
       let scalping = snapshot.scalpingOpen;
       const usedSymbols = new Set(snapshot.positions.map((p) => p.symbol));
 
+      const now = Date.now();
       const candidates = [...this.signals.values()]
-        .filter((s) => s.stage === "CONFIRMED")
+        .filter((s) => {
+          if (s.stage !== "CONFIRMED") return false;
+          const maxAgeMs = s.engine === "SCALPING" ? 90_000 : 10 * 60_000;
+          return now - s.updatedAt <= maxAgeMs;
+        })
         .sort((a, b) => b.quality.total - a.quality.total);
 
       for (const signal of candidates) {

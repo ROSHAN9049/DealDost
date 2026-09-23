@@ -32,6 +32,10 @@ export class BinanceScanner extends EventEmitter {
   private readonly rotation = new ProfitRotationV3();
   private readonly testnet = new TestnetClient();
   private testnetState = this.testnet.emptyState();
+  private mode: "PAPER" | "TESTNET" = "PAPER";
+  private testnetAuto = false;
+  private testnetExecutionInFlight = false;
+  private lastTestnetSyncAt = 0;
   private serverlessMode = false;
   private lastServerlessPollAt = 0;
   private serverlessCursor = 0;
@@ -93,6 +97,7 @@ export class BinanceScanner extends EventEmitter {
         this.serverlessCursor = (this.serverlessCursor + 1) % states.length;
         await this.bootstrapHistoryForStates([target]);
       }
+      await this.syncTestnetIfDue();
       this.feedStatus = "ONLINE";
       this.lastUpdateAt = Date.now();
     } catch (error) {
@@ -116,9 +121,16 @@ export class BinanceScanner extends EventEmitter {
       .sort((a, b) => b.quality.total - a.quality.total || b.updatedAt - a.updatedAt)
       .slice(0, 30);
 
+    const testnetMode = this.mode === "TESTNET";
+    const engineOpen = testnetMode
+      ? { momentum: this.testnetState.momentumOpen, scalping: this.testnetState.scalpingOpen, total: this.testnetState.openPositions }
+      : { momentum: risk.momentum, scalping: risk.scalping, total: risk.total };
+    const riskDaily = testnetMode ? this.testnetState.dailyRiskUsedPct : risk.dailyRiskUsedPct;
+    const riskAccount = testnetMode ? this.testnetState.accountBalanceUsd || this.risk.cfg.accountBalanceUsd : this.risk.cfg.accountBalanceUsd;
+
     return {
-      mode: "PAPER",
-      auto: this.paper.getAuto(),
+      mode: this.mode === "TESTNET" ? "TESTNET" : "PAPER",
+      auto: testnetMode ? this.testnetAuto : this.paper.getAuto(),
       market: { regime: this.marketRegime, btcPrice: this.btcPrice, universeSize: this.symbols.size },
       feed: {
         websocket: this.feedStatus,
@@ -129,19 +141,24 @@ export class BinanceScanner extends EventEmitter {
       },
       engines: {
         momentum: {
-          open: risk.momentum,
+          open: engineOpen.momentum,
           max: this.risk.cfg.maxMomentumPositions,
-          status: risk.momentum >= this.risk.cfg.maxMomentumPositions ? "FULL" : "READY",
+          status: engineOpen.momentum >= this.risk.cfg.maxMomentumPositions ? "FULL" : "READY",
         },
         scalping: {
-          open: risk.scalping,
+          open: engineOpen.scalping,
           max: this.risk.cfg.maxScalpingPositions,
-          status: risk.scalping >= this.risk.cfg.maxScalpingPositions ? "FULL" : "READY",
+          status: engineOpen.scalping >= this.risk.cfg.maxScalpingPositions ? "FULL" : "READY",
         },
-        totalOpen: risk.total,
+        totalOpen: engineOpen.total,
         totalMax: this.risk.cfg.maxTotalPositions,
       },
-      risk: { ...this.risk.cfg, dailyRiskUsedPct: risk.dailyRiskUsedPct, emergencyStop: risk.emergencyStop },
+      risk: {
+        ...this.risk.cfg,
+        accountBalanceUsd: riskAccount,
+        dailyRiskUsedPct: riskDaily,
+        emergencyStop: risk.emergencyStop,
+      },
       paper: this.paper.snapshot(),
       testnet: this.testnetState,
       rotation: this.rotation.snapshot(),
@@ -219,16 +236,38 @@ export class BinanceScanner extends EventEmitter {
     this.lastMarketError = null;
     this.feedStatus = "ONLINE";
     this.lastUpdateAt = Date.now();
-    this.tryAutoEntries();
+    this.tryActiveEntries();
     this.emit("update");
 
     return this.state();
   }
 
+  setRequestMode(mode: "PAPER" | "TESTNET" | "LIVE", auto?: boolean) {
+    if (mode === "LIVE") {
+      throw new Error("LIVE_EXECUTION_LOCKED");
+    }
+    this.mode = mode;
+    if (typeof auto === "boolean") {
+      if (mode === "PAPER") this.paper.setAuto(auto);
+      else this.testnetAuto = auto;
+    }
+    if (mode === "TESTNET" && this.testnetAuto) void this.tryTestnetEntries();
+    if (mode === "PAPER" && this.paper.getAuto()) this.tryPaperEntries();
+    this.emit("update");
+  }
+
   setPaperAuto(enabled: boolean) {
+    this.mode = "PAPER";
     this.paper.setAuto(enabled);
     this.emit("update");
-    if (enabled) this.tryAutoEntries();
+    if (enabled) this.tryPaperEntries();
+  }
+
+  setTestnetAuto(enabled: boolean) {
+    this.mode = "TESTNET";
+    this.testnetAuto = Boolean(enabled);
+    this.emit("update");
+    if (this.testnetAuto) void this.tryTestnetEntries();
   }
 
   closePaperPosition(symbol: string) {
@@ -252,17 +291,26 @@ export class BinanceScanner extends EventEmitter {
 
   private async syncTestnet() {
     try {
-      this.testnetState = await this.testnet.sync();
+      this.testnetState = { ...await this.testnet.sync(), auto: this.testnetAuto };
+      this.lastTestnetSyncAt = Date.now();
       this.emit("update");
     } catch (error) {
       this.testnetState = {
         ...this.testnet.emptyState(),
         configured: this.testnet.isConfigured(),
         executionEnabled: this.testnet.isExecutionEnabled(),
+        auto: this.testnetAuto,
         error: error instanceof Error ? error.message : String(error),
       };
+      this.lastTestnetSyncAt = Date.now();
       this.emit("update");
     }
+  }
+
+  private async syncTestnetIfDue() {
+    if (!this.testnet.isConfigured()) return;
+    if (Date.now() - this.lastTestnetSyncAt < 30_000) return;
+    await this.syncTestnet();
   }
 
   private async request<T>(path: string): Promise<T> {
@@ -365,7 +413,7 @@ export class BinanceScanner extends EventEmitter {
       this.emit("update");
     }
 
-    this.tryAutoEntries();
+    this.tryActiveEntries();
   }
 
   private toCandle = (row: any[]): Candle => ({
@@ -456,7 +504,7 @@ export class BinanceScanner extends EventEmitter {
 
         if (k.x) {
           this.evaluate(symbol, interval === "1m" ? "SCALPING" : "MOMENTUM");
-          this.tryAutoEntries();
+          this.tryActiveEntries();
         }
 
         this.emit("update");
@@ -485,7 +533,12 @@ export class BinanceScanner extends EventEmitter {
     this.reconnectTimer = setTimeout(() => this.connectWebSocket(), delay);
   }
 
-  private tryAutoEntries() {
+  private tryActiveEntries() {
+    if (this.mode === "PAPER") this.tryPaperEntries();
+    else if (this.mode === "TESTNET" && this.testnetAuto) void this.tryTestnetEntries();
+  }
+
+  private tryPaperEntries() {
     if (!this.paper.getAuto()) return;
 
     const candidates = [...this.signals.values()]
@@ -501,6 +554,124 @@ export class BinanceScanner extends EventEmitter {
 
       const result = this.paper.tryOpen(refreshed);
       if (result.opened) this.risk.registerOpen(signal.symbol, signal.engine);
+    }
+  }
+
+  private async tryTestnetEntries() {
+    if (
+      this.mode !== "TESTNET" ||
+      !this.testnetAuto ||
+      !this.testnet.isExecutionEnabled() ||
+      this.testnetExecutionInFlight
+    ) return;
+
+    this.testnetExecutionInFlight = true;
+    try {
+      const snapshot = await this.testnet.getExecutionSnapshot();
+      this.testnetState = {
+        ...this.testnetState,
+        auto: this.testnetAuto,
+        connected: snapshot.connected,
+        accountBalanceUsd: snapshot.accountBalanceUsd,
+        availableBalanceUsd: snapshot.availableBalanceUsd,
+        unrealizedPnlUsd: snapshot.unrealizedPnlUsd,
+        openPositions: snapshot.openPositions,
+        momentumOpen: snapshot.momentumOpen,
+        scalpingOpen: snapshot.scalpingOpen,
+        unclassifiedOpenPositions: snapshot.unclassifiedOpenPositions,
+        dailyRiskUsedPct: snapshot.dailyRiskUsedPct,
+        positions: snapshot.positions,
+        lastSyncAt: Date.now(),
+        error: null,
+      };
+
+      if (!snapshot.connected) return;
+      if (snapshot.unclassifiedOpenPositions > 0) return;
+      if (snapshot.openPositions >= config.testnetMaxTotalPositions) return;
+      if (snapshot.dailyRiskUsedPct >= config.testnetMaxDailyRiskPct) return;
+
+      let total = snapshot.openPositions;
+      let momentum = snapshot.momentumOpen;
+      let scalping = snapshot.scalpingOpen;
+      const usedSymbols = new Set(snapshot.positions.map((p) => p.symbol));
+
+      const candidates = [...this.signals.values()]
+        .filter((s) => s.stage === "CONFIRMED")
+        .sort((a, b) => b.quality.total - a.quality.total);
+
+      for (const signal of candidates) {
+        if (total >= config.testnetMaxTotalPositions) break;
+        if (usedSymbols.has(signal.symbol)) continue;
+        if (signal.engine === "MOMENTUM" && momentum >= config.testnetMaxMomentumPositions) continue;
+        if (signal.engine === "SCALPING" && scalping >= config.testnetMaxScalpingPositions) continue;
+
+        const lastClosedAt = snapshot.lastClosedAt[signal.symbol] ?? 0;
+        if (lastClosedAt > 0 && Date.now() - lastClosedAt < config.cooldownMinutes * 60_000) continue;
+
+        const riskDistance = Math.abs(signal.entry - signal.stop);
+        if (!Number.isFinite(riskDistance) || riskDistance <= 0 || signal.entry <= 0) continue;
+
+        const riskUsd = snapshot.accountBalanceUsd * (config.testnetRiskPerTradePct / 100);
+        const riskBasedNotional = riskUsd * (signal.entry / riskDistance);
+        const maxAvailableNotional = snapshot.availableBalanceUsd * 0.95;
+        const notionalUsd = Math.min(riskBasedNotional, maxAvailableNotional);
+        const quantity = notionalUsd > 0 ? notionalUsd / signal.entry : 0;
+
+        if (!(quantity > 0)) continue;
+
+        try {
+          const result = await this.testnet.placeMarketOrder({
+            symbol: signal.symbol,
+            side: signal.side,
+            quantity,
+            stopPrice: signal.stop,
+            takeProfitPrice: signal.takeProfit1,
+            clientOrderId: "DDT-" + (signal.engine === "MOMENTUM" ? "MOM-" : "SCALP-") + signal.symbol + "-" + signal.signalId.slice(-10),
+          });
+
+          total += 1;
+          usedSymbols.add(signal.symbol);
+          if (signal.engine === "MOMENTUM") momentum += 1;
+          else scalping += 1;
+
+          this.testnetState.error = null;
+          console.info("[testnet entry]", result);
+        } catch (error) {
+          this.testnetState = {
+            ...this.testnetState,
+            auto: this.testnetAuto,
+            error: error instanceof Error ? error.message : String(error),
+            lastSyncAt: Date.now(),
+          };
+        }
+      }
+
+      const refreshed = await this.testnet.getExecutionSnapshot();
+      this.testnetState = {
+        ...this.testnetState,
+        auto: this.testnetAuto,
+        connected: refreshed.connected,
+        accountBalanceUsd: refreshed.accountBalanceUsd,
+        availableBalanceUsd: refreshed.availableBalanceUsd,
+        unrealizedPnlUsd: refreshed.unrealizedPnlUsd,
+        openPositions: refreshed.openPositions,
+        momentumOpen: refreshed.momentumOpen,
+        scalpingOpen: refreshed.scalpingOpen,
+        unclassifiedOpenPositions: refreshed.unclassifiedOpenPositions,
+        dailyRiskUsedPct: refreshed.dailyRiskUsedPct,
+        positions: refreshed.positions,
+        lastSyncAt: Date.now(),
+      };
+    } catch (error) {
+      this.testnetState = {
+        ...this.testnetState,
+        auto: this.testnetAuto,
+        error: error instanceof Error ? error.message : String(error),
+        lastSyncAt: Date.now(),
+      };
+    } finally {
+      this.testnetExecutionInFlight = false;
+      this.emit("update");
     }
   }
 

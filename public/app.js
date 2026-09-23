@@ -179,7 +179,7 @@ function render(state) {
 
   const tn = state.testnet;
   $("testnetStatus").textContent = tn.error
-    ? "ERROR"
+    ? (String(tn.error).includes(" 451:") ? "REGION RESTRICTED" : "ERROR")
     : tn.connected
       ? (tn.executionEnabled ? "CONNECTED • ARMED" : "CONNECTED • READ ONLY")
       : tn.configured

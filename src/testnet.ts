@@ -53,6 +53,19 @@ type OrderRow = {
   updateTime?: number;
 };
 
+type AlgoOrderRow = {
+  symbol?: string;
+  side?: "BUY" | "SELL";
+  orderType?: string;
+  algoStatus?: string;
+  clientAlgoId?: string;
+  algoId?: string | number;
+  closePosition?: boolean;
+  triggerPrice?: string;
+  createTime?: number;
+  updateTime?: number;
+};
+
 type IncomeRow = {
   income?: string;
   asset?: string;
@@ -574,14 +587,38 @@ export class TestnetClient {
   }
 
   private async getOpenOrders(symbol: string): Promise<OrderRow[]> {
-    return this.signedGet<OrderRow[]>(
-      "/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol),
-    );
+    const [normalOrders, algoOrders] = await Promise.all([
+      this.signedGet<OrderRow[]>(
+        "/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol),
+      ),
+      this.signedGet<AlgoOrderRow[]>(
+        "/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol),
+      ),
+    ]);
+
+    const normalizedAlgoOrders: OrderRow[] = algoOrders.map((order) => ({
+      symbol: order.symbol,
+      side: order.side,
+      type: order.orderType,
+      status: order.algoStatus,
+      clientOrderId: order.clientAlgoId,
+      closePosition: order.closePosition,
+      orderId: order.algoId,
+      stopPrice: order.triggerPrice,
+      time: order.createTime,
+      updateTime: order.updateTime,
+    }));
+
+    return [...normalOrders, ...normalizedAlgoOrders];
   }
 
   private async cleanupStaleProtectionOrders(openSymbols: Set<string>) {
-    const openOrders = await this.signedGet<OrderRow[]>("/fapi/v1/openOrders");
-    const stale = openOrders.filter((order) => {
+    const [normalOrders, algoOrders] = await Promise.all([
+      this.signedGet<OrderRow[]>("/fapi/v1/openOrders"),
+      this.signedGet<AlgoOrderRow[]>("/fapi/v1/openAlgoOrders"),
+    ]);
+
+    const staleNormal = normalOrders.filter((order) => {
       const symbol = String(order.symbol ?? "").toUpperCase();
       const clientId = String(order.clientOrderId ?? "");
       return (
@@ -594,7 +631,7 @@ export class TestnetClient {
       );
     });
 
-    for (const order of stale) {
+    for (const order of staleNormal) {
       if (order.orderId === undefined && !order.clientOrderId) continue;
       try {
         await this.signedDelete<any>("/fapi/v1/order", {
@@ -605,6 +642,33 @@ export class TestnetClient {
         console.info("[testnet cleanup]", order.symbol, order.clientOrderId);
       } catch (error) {
         console.error("[testnet cleanup]", order.symbol, error);
+      }
+    }
+
+    const staleAlgo = algoOrders.filter((order) => {
+      const symbol = String(order.symbol ?? "").toUpperCase();
+      const clientId = String(order.clientAlgoId ?? "");
+      return (
+        symbol &&
+        !openSymbols.has(symbol) &&
+        order.algoStatus === "NEW" &&
+        order.closePosition === true &&
+        (order.orderType === "STOP_MARKET" || order.orderType === "TAKE_PROFIT_MARKET") &&
+        clientId.startsWith("DDT-")
+      );
+    });
+
+    for (const order of staleAlgo) {
+      if (order.algoId === undefined && !order.clientAlgoId) continue;
+      try {
+        await this.signedDelete<any>("/fapi/v1/algoOrder", {
+          symbol: String(order.symbol ?? "").toUpperCase(),
+          algoId: order.algoId === undefined ? "" : String(order.algoId),
+          clientAlgoId: order.algoId === undefined ? String(order.clientAlgoId) : "",
+        });
+        console.info("[testnet algo cleanup]", order.symbol, order.clientAlgoId);
+      } catch (error) {
+        console.error("[testnet algo cleanup]", order.symbol, error);
       }
     }
   }
@@ -630,15 +694,18 @@ export class TestnetClient {
       throw new Error("Invalid protection price for " + symbol);
     }
 
-    return this.signedPost<any>("/fapi/v1/order", {
+    // Binance USDⓈ-M conditional orders use the Algo service.
+    return this.signedPost<any>("/fapi/v1/algoOrder", {
+      algoType: "CONDITIONAL",
       symbol,
       side,
       type,
-      stopPrice: this.formatNumber(normalizedPrice),
+      triggerPrice: this.formatNumber(normalizedPrice),
       closePosition: "true",
       workingType: "MARK_PRICE",
       priceProtect: "true",
-      newClientOrderId: this.safeClientOrderId(clientOrderId),
+      clientAlgoId: this.safeAlgoClientId(clientOrderId),
+      newOrderRespType: "RESULT",
     });
   }
 
@@ -675,6 +742,11 @@ export class TestnetClient {
   private safeClientOrderId(value: string) {
     const cleaned = String(value).replace(/[^A-Za-z0-9_-]/g, "");
     return cleaned.slice(0, 36) || "DDT-" + Date.now().toString(36);
+  }
+
+  private safeAlgoClientId(value: string) {
+    const cleaned = String(value).replace(/[^A-Za-z0-9_-]/g, "");
+    return cleaned.slice(0, 32) || "DDT-ALGO-" + Date.now().toString(36);
   }
 
   private async publicGet<T>(path: string): Promise<T> {

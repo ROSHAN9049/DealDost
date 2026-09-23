@@ -33,3 +33,7 @@ Production:
 
 Safety boundary:
 This phase is market-data and signal infrastructure only. It does not submit Binance orders. Real execution should be implemented later behind separate adapters and explicit gates.
+
+
+## Verification
+Paper broker and rotation layer are wired into the server-owned scanner state. CI build validation is enabled.

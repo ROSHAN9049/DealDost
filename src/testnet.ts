@@ -637,6 +637,117 @@ export class TestnetClient {
     return { changed: true, protection: "OK" as const };
   }
 
+  async closeManagedPosition(symbolInput: string) {
+    if (!this.isExecutionEnabled()) throw new Error("TESTNET_EXECUTION_DISABLED");
+    const symbol = symbolInput.toUpperCase();
+
+    const snapshot = await this.getExecutionSnapshot();
+    const position = snapshot.positions.find((p) => p.symbol === symbol);
+    if (!position) throw new Error("TESTNET_POSITION_NOT_FOUND");
+    if (!position.engine) throw new Error("TESTNET_EXTERNAL_POSITION_CLOSE_BLOCKED");
+
+    // Manual close is explicit and managed-only. Reconciliation never closes
+    // a position automatically just because an engine is over its configured cap.
+    const [normalOrders, algoOrders] = await Promise.all([
+      this.signedGet<OrderRow[]>("/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol)),
+      this.signedGet<AlgoOrderRow[]>("/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol)),
+    ]);
+
+    for (const order of normalOrders) {
+      const clientId = String(order.clientOrderId ?? "");
+      const closePosition = order.closePosition === true || String(order.closePosition).toLowerCase() === "true";
+      if (
+        order.status === "NEW" &&
+        closePosition &&
+        (order.type === "STOP_MARKET" || order.type === "TAKE_PROFIT_MARKET") &&
+        clientId.startsWith("DDT-") &&
+        (order.orderId !== undefined || order.clientOrderId)
+      ) {
+        await this.signedDelete<any>("/fapi/v1/order", {
+          symbol,
+          orderId: order.orderId === undefined ? "" : String(order.orderId),
+          origClientOrderId: order.orderId === undefined ? clientId : "",
+        });
+      }
+    }
+
+    for (const order of algoOrders) {
+      const clientId = String(order.clientAlgoId ?? "");
+      if (
+        order.algoStatus === "NEW" &&
+        order.closePosition === true &&
+        (order.orderType === "STOP_MARKET" || order.orderType === "TAKE_PROFIT_MARKET") &&
+        clientId.startsWith("DDT-") &&
+        (order.algoId !== undefined || order.clientAlgoId)
+      ) {
+        await this.signedDelete<any>("/fapi/v1/algoOrder", {
+          symbol,
+          algoId: order.algoId === undefined ? "" : String(order.algoId),
+          clientAlgoId: order.algoId === undefined ? clientId : "",
+        });
+      }
+    }
+
+    const plan = await this.buildMarketOrderPlan({
+      symbol,
+      side: position.side,
+      quantity: position.quantity,
+    });
+
+    const order = await this.signedPost<any>("/fapi/v1/order", {
+      symbol: plan.symbol,
+      side: plan.closeOrderSide,
+      type: "MARKET",
+      quantity: this.formatNumber(plan.quantity),
+      reduceOnly: "true",
+      positionSide: "BOTH",
+      newOrderRespType: "RESULT",
+    });
+
+    let executedQty = Number(order.executedQty ?? order.cumQty ?? 0);
+    let avgPrice = Number(
+      order.avgPrice ??
+        (Number(order.cummulativeQuoteQty ?? 0) > 0 && executedQty > 0
+          ? Number(order.cummulativeQuoteQty) / executedQty
+          : 0),
+    );
+
+    if ((!executedQty || !avgPrice) && order.orderId !== undefined) {
+      for (let attempt = 0; attempt < 3 && (!executedQty || !avgPrice); attempt += 1) {
+        const reconciled = await this.signedGet<any>(
+          "/fapi/v1/order?symbol=" + encodeURIComponent(plan.symbol) +
+          "&orderId=" + encodeURIComponent(String(order.orderId)),
+        );
+        executedQty = Number(reconciled.executedQty ?? reconciled.cumQty ?? 0);
+        avgPrice = Number(
+          reconciled.avgPrice ??
+            (Number(reconciled.cummulativeQuoteQty ?? 0) > 0 && executedQty > 0
+              ? Number(reconciled.cummulativeQuoteQty) / executedQty
+              : 0),
+        );
+        if (executedQty && avgPrice) break;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+
+    if (!executedQty || !avgPrice) {
+      throw new Error(
+        "TESTNET manual close not filled: status=" + String(order.status ?? "UNKNOWN") +
+        " orderId=" + String(order.orderId ?? "—"),
+      );
+    }
+
+    return {
+      symbol,
+      side: position.side,
+      engine: position.engine,
+      executedQty,
+      avgPrice,
+      orderId: String(order.orderId ?? ""),
+      snapshot: await this.getExecutionSnapshot(),
+    };
+  }
+
   private detectEngine(orders: OrderRow[]): Engine | null {
     const entry = [...orders]
       .filter((o) => o.status === "FILLED" && !o.reduceOnly && !o.closePosition && o.type === "MARKET")

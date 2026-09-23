@@ -584,7 +584,10 @@ export class BinanceScanner extends EventEmitter {
         momentumOpen: snapshot.momentumOpen,
         scalpingOpen: snapshot.scalpingOpen,
         unclassifiedOpenPositions: snapshot.unclassifiedOpenPositions,
+        unprotectedOpenPositions: snapshot.unprotectedOpenPositions,
         dailyRiskUsedPct: snapshot.dailyRiskUsedPct,
+        realizedPnlTodayUsd: snapshot.realizedPnlTodayUsd,
+        feesTodayUsd: snapshot.feesTodayUsd,
         positions: snapshot.positions,
         lastSyncAt: Date.now(),
         error: null,
@@ -592,6 +595,7 @@ export class BinanceScanner extends EventEmitter {
 
       if (!snapshot.connected) return;
       if (snapshot.unclassifiedOpenPositions > 0) return;
+      if (snapshot.unprotectedOpenPositions > 0) return;
       if (snapshot.openPositions >= config.testnetMaxTotalPositions) return;
       if (snapshot.dailyRiskUsedPct >= config.testnetMaxDailyRiskPct) return;
 
@@ -671,7 +675,10 @@ export class BinanceScanner extends EventEmitter {
         momentumOpen: refreshed.momentumOpen,
         scalpingOpen: refreshed.scalpingOpen,
         unclassifiedOpenPositions: refreshed.unclassifiedOpenPositions,
+        unprotectedOpenPositions: refreshed.unprotectedOpenPositions,
         dailyRiskUsedPct: refreshed.dailyRiskUsedPct,
+        realizedPnlTodayUsd: refreshed.realizedPnlTodayUsd,
+        feesTodayUsd: refreshed.feesTodayUsd,
         positions: refreshed.positions,
         lastSyncAt: Date.now(),
       };

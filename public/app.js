@@ -36,12 +36,22 @@ async function closePaper(symbol) {
   if (response.ok) render(await response.json());
 }
 
+function showApiError(message) {
+  const el = $("data");
+  if (el) {
+    el.textContent = message;
+    el.className = "muted error";
+  }
+}
+
 function render(state) {
+
   $("regime").textContent = state.market.regime.replaceAll("_", " ");
   $("btc").textContent = fmt(state.market.btcPrice);
   $("ws").textContent = state.feed.websocket;
   $("ws").className = "status " + (state.feed.websocket === "ONLINE" ? "ok" : "warn");
   $("data").textContent = state.feed.data + " • reconnects " + state.feed.reconnects;
+  $("data").className = "muted";
   $("universe").textContent = state.market.universeSize;
 
   $("paperAuto").textContent = state.paper.auto ? "PAPER AUTO ON" : "PAPER AUTO OFF";
@@ -138,7 +148,18 @@ async function load() {
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (response.ok) render(await response.json());
-  } catch {}
+    else {
+      let detail = "HTTP " + response.status;
+      try {
+        const body = await response.json();
+        if (body?.error) detail += " • " + body.error;
+      } catch {}
+      showApiError("API connection failed: " + detail);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showApiError("API connection failed: " + message);
+  }
   finally {
     polling = false;
   }

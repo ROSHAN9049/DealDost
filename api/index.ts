@@ -46,7 +46,7 @@ app.get("/api/state", async (_req, res) => {
   try {
     await ensureStarted();
     await scanner.serverlessTick();
-    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
     res.json(scanner.state());
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });

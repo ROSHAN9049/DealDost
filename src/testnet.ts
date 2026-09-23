@@ -784,6 +784,15 @@ export class TestnetClient {
     });
   }
 
+  async isTradablePerpetual(symbol: string) {
+    try {
+      const row = await this.getSymbolRules(symbol.toUpperCase());
+      return row.status === "TRADING" && row.quoteAsset === "USDT" && row.contractType === "PERPETUAL";
+    } catch {
+      return false;
+    }
+  }
+
   private async getSymbolRules(symbol: string): Promise<ExchangeSymbol> {
     const now = Date.now();
     if (!this.exchangeInfo || now - this.exchangeInfoAt > 5 * 60_000) {

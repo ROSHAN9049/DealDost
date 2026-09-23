@@ -815,6 +815,13 @@ export class BinanceScanner extends EventEmitter {
       for (const signal of candidates) {
         if (total >= config.testnetMaxTotalPositions) break;
         if (usedSymbols.has(signal.symbol)) continue;
+
+        // The public market universe and Binance Demo/Testnet can temporarily
+        // disagree on TradFi/adjustment contracts. Never send an order for a
+        // symbol that the Demo exchangeInfo does not currently expose as a
+        // TRADING USDT perpetual; silently skip it instead of poisoning the
+        // execution status for the whole scanner cycle.
+        if (!(await this.testnet.isTradablePerpetual(signal.symbol))) continue;
         if (signal.engine === "MOMENTUM" && momentum >= config.testnetMaxMomentumPositions) continue;
         if (signal.engine === "SCALPING" && scalping >= config.testnetMaxScalpingPositions) continue;
 

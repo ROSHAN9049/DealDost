@@ -126,10 +126,12 @@ async function directBinanceFallback() {
 }
 
 function showApiError(message) {
-  const el = $("data");
-  if (el) {
-    el.textContent = message;
-    el.className = "muted error";
+  const isTestnet = currentMode === "TESTNET";
+  const target = isTestnet ? $("testnetError") : $("data");
+  if (target) {
+    target.textContent = message;
+    target.className = "muted error";
+    if (isTestnet) target.hidden = false;
   }
 }
 
@@ -252,10 +254,23 @@ function render(state) {
   $("testnetPnl").textContent = money(tn.realizedPnlTodayUsd);
   $("testnetFees").textContent = money(tn.feesTodayUsd);
   const tnError = $("testnetError");
+  const tnHint = $("testnetExecutionHint");
   if (tnError) {
     tnError.textContent = tn.error ? String(tn.error).slice(0, 120) : "";
     tnError.title = tn.error || "";
     tnError.hidden = !tn.error;
+  }
+  if (tnHint) {
+    if (currentMode === "TESTNET" && !tn.executionEnabled) {
+      tnHint.textContent = "TESTNET connected in READ ONLY mode • execution flag is OFF";
+      tnHint.hidden = false;
+    } else if (currentMode === "TESTNET") {
+      tnHint.textContent = "TESTNET execution ARMED • AUTO still requires explicit ON";
+      tnHint.hidden = false;
+    } else {
+      tnHint.textContent = "";
+      tnHint.hidden = true;
+    }
   }
 
   $("momentum").textContent = state.engines.momentum.open + "/" + state.engines.momentum.max;

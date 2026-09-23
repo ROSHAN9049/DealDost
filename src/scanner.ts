@@ -154,6 +154,7 @@ export class BinanceScanner extends EventEmitter {
     universe: Array<{ symbol: string; quoteVolume: number; lastPrice: number }>;
     symbol: string;
     candles: { "1m": Candle[]; "5m": Candle[]; "15m": Candle[] };
+    btc15m?: Candle[];
   }) {
     const validUniverse = input.universe
       .filter((t) => t.symbol.endsWith("USDT") && Number.isFinite(t.quoteVolume) && Number.isFinite(t.lastPrice))
@@ -196,6 +197,12 @@ export class BinanceScanner extends EventEmitter {
     // when the rotating signal target is another symbol.
     this.btcPrice = this.symbols.get("BTCUSDT")?.lastPrice ?? this.btcPrice;
     if (input.symbol === "BTCUSDT") this.btcPrice = state.lastPrice;
+
+    // Keep the global market regime tied to BTC even while signal scoring
+    // rotates through other symbols in serverless browser mode.
+    if (input.btc15m && input.btc15m.length >= 60) {
+      this.updateMarketRegimeFromContext(input.btc15m);
+    }
 
     // In Vercel/serverless mode there is no Binance websocket connection.
     // Re-mark every open paper position from the fresh browser universe
@@ -645,6 +652,16 @@ export class BinanceScanner extends EventEmitter {
       const oldest = [...this.signals.values()].sort((a, b) => a.updatedAt - b.updatedAt)[0];
       if (oldest) this.signals.delete(oldest.engine + ":" + oldest.symbol);
     }
+  }
+
+  private updateMarketRegimeFromContext(candles: Candle[]) {
+    const closes = candles.map((c) => c.close);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const fast = ema(closes, 20);
+    const slow = ema(closes, 50);
+    const currentAtr = atr(highs, lows, closes, 14);
+    this.marketRegime = this.detectRegime(closes, fast, slow, currentAtr);
   }
 
   private detectRegime(closes: number[], fast: number, slow: number, currentAtr: number): Regime {

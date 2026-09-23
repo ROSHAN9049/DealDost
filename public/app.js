@@ -248,7 +248,19 @@ async function load() {
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (response.ok) {
-      render(await response.json());
+      const state = await response.json();
+      if (
+        state?.market?.universeSize > 0 &&
+        state?.feed?.websocket === "ONLINE"
+      ) {
+        render(state);
+      } else {
+        try {
+          await directScannerFallback();
+        } catch (fallbackError) {
+          render(state);
+        }
+      }
     } else {
       try {
         await directScannerFallback();
@@ -282,7 +294,7 @@ async function load() {
 }
 
 $("paperAuto").onclick = toggleAuto;
-// Prime market cards immediately so the dashboard is never stuck on the static loading shell.
-void directBinanceFallback().catch(() => {});
+// Prime market cards and server-owned scoring immediately.
+void directScannerFallback().catch(() => directBinanceFallback().catch(() => {}));
 load();
 setInterval(load, 3000);

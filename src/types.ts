@@ -146,6 +146,7 @@ export interface DashboardState {
     data: "FRESH" | "STALE" | "NO_DATA";
     lastUpdateAt: number;
     reconnects: number;
+    error: string | null;
   };
   engines: {
     momentum: EngineState;

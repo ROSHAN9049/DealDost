@@ -271,6 +271,23 @@ async function closePaper(symbol) {
   }
 }
 
+async function closeTestnet(symbol) {
+  if (!window.confirm("Close managed TESTNET position " + symbol + " at market?")) return;
+  try {
+    const response = await fetch("/api/testnet/close", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ symbol })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    render(body);
+  } catch (error) {
+    showApiError("TESTNET close failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+}
+
 function render(state) {
   savePaperRuntime(state);
   $("regime").textContent = state.market.regime.replaceAll("_", " ");
@@ -334,6 +351,17 @@ function render(state) {
     if (currentMode === "TESTNET" && !tn.executionEnabled) {
       tnHint.textContent = "TESTNET connected in READ ONLY mode • execution flag is OFF";
       tnHint.hidden = false;
+    } else if (
+      currentMode === "TESTNET" &&
+      state.auto &&
+      (
+        Number(tn.momentumOpen) > Number(state.risk.maxMomentumPositions) ||
+        Number(tn.scalpingOpen) > Number(state.risk.maxScalpingPositions) ||
+        Number(tn.openPositions) > Number(state.risk.maxTotalPositions)
+      )
+    ) {
+      tnHint.textContent = "TESTNET AUTO ON • POSITION GATE BLOCKED • close excess managed position(s)";
+      tnHint.hidden = false;
     } else if (currentMode === "TESTNET" && state.auto) {
       tnHint.textContent = "TESTNET execution ARMED • AUTO is ON";
       tnHint.hidden = false;
@@ -358,14 +386,20 @@ function render(state) {
   const tnGate = $("testnetPositionGate");
   if (tnGate) {
     tnGate.textContent = tn.positions?.length
-      ? tn.positions.length + " open" + (tn.unclassifiedOpenPositions ? " • " + tn.unclassifiedOpenPositions + " unclassified" : "")
+      ? tn.positions.length + " open" +
+        (tn.unclassifiedOpenPositions ? " • " + tn.unclassifiedOpenPositions + " unclassified" : "") +
+        (Number(tn.momentumOpen) > Number(state.risk.maxMomentumPositions)
+          ? " • MOMENTUM OVER LIMIT"
+          : Number(tn.scalpingOpen) > Number(state.risk.maxScalpingPositions)
+            ? " • SCALPING OVER LIMIT"
+            : "")
       : "0 open";
   }
 
   const tnPositions = $("testnetPositions");
   if (tnPositions) {
     if (!tn.positions?.length) {
-      tnPositions.innerHTML = '<tr><td colspan="9" class="empty">No TESTNET positions.</td></tr>';
+      tnPositions.innerHTML = '<tr><td colspan="10" class="empty">No TESTNET positions.</td></tr>';
     } else {
       tnPositions.innerHTML = tn.positions.map((p) =>
         "<tr>" +
@@ -383,6 +417,11 @@ function render(state) {
             ? ' <button class="protect-btn" data-symbol="' + esc(p.symbol) + '">SYNC</button>'
             : "") +
         "</td>" +
+        "<td>" +
+          (p.engine
+            ? '<button class="testnet-close-btn" data-symbol="' + esc(p.symbol) + '">Close</button>'
+            : "—") +
+        "</td>" +
         "</tr>"
       ).join("");
     }
@@ -390,6 +429,9 @@ function render(state) {
 
   document.querySelectorAll(".protect-btn").forEach((button) => {
     button.onclick = () => syncTestnetProtection(button.dataset.symbol);
+  });
+  document.querySelectorAll(".testnet-close-btn").forEach((button) => {
+    button.onclick = () => closeTestnet(button.dataset.symbol);
   });
 
   $("paperStats").textContent =

@@ -35,6 +35,7 @@ export class BinanceScanner extends EventEmitter {
   private serverlessMode = false;
   private lastServerlessPollAt = 0;
   private serverlessCursor = 0;
+  private lastMarketError: string | null = null;
 
   onUpdate(listener: () => void): () => void {
     this.on("update", listener);
@@ -124,6 +125,7 @@ export class BinanceScanner extends EventEmitter {
         data: !this.lastUpdateAt ? "NO_DATA" : Date.now() - this.lastUpdateAt < 15_000 ? "FRESH" : "STALE",
         lastUpdateAt: this.lastUpdateAt,
         reconnects: this.reconnects,
+        error: this.lastMarketError,
       },
       engines: {
         momentum: {
@@ -180,15 +182,33 @@ export class BinanceScanner extends EventEmitter {
   }
 
   private async request<T>(path: string): Promise<T> {
-    const response = await fetch(config.restBase + path, {
-      headers: { "User-Agent": "DealDost/2.0" },
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error("Binance REST " + response.status + ": " + body.slice(0, 300));
+    const bases = [...new Set([config.restBase, ...config.restFallbackBases])];
+    const failures: string[] = [];
+
+    for (const base of bases) {
+      try {
+        const response = await fetch(base + path, {
+          headers: {
+            "User-Agent": "DealDost/2.2",
+            "Accept": "application/json",
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        const body = await response.text();
+        if (!response.ok) {
+          failures.push(base + " -> HTTP " + response.status + " " + body.slice(0, 160));
+          continue;
+        }
+        this.lastMarketError = null;
+        return JSON.parse(body) as T;
+      } catch (error) {
+        failures.push(base + " -> " + (error instanceof Error ? error.message : String(error)));
+      }
     }
-    return (await response.json()) as T;
+
+    const message = "Binance REST unavailable: " + failures.join(" | ");
+    this.lastMarketError = message;
+    throw new Error(message);
   }
 
   private async refreshUniverse() {
@@ -196,7 +216,9 @@ export class BinanceScanner extends EventEmitter {
     try {
       ticker = await this.request<BinanceTicker[]>("/fapi/v1/ticker/24hr");
     } catch (error) {
-      throw new Error("Binance market ticker unavailable: " + (error instanceof Error ? error.message : String(error)));
+      this.feedStatus = "OFFLINE";
+      this.lastMarketError = error instanceof Error ? error.message : String(error);
+      throw new Error("Binance market ticker unavailable: " + this.lastMarketError);
     }
 
     // The 24h futures ticker is the reliable public market-data path.

@@ -5,6 +5,12 @@ const n = (key: string, fallback: number) => {
   return Number.isFinite(value) ? value : fallback;
 };
 
+const bool = (key: string, fallback: boolean) => {
+  const value = process.env[key];
+  if (value === undefined) return fallback;
+  return value.toLowerCase() === "true";
+};
+
 export const config = {
   port: n("PORT", 3000),
   restBase: process.env.BINANCE_REST_BASE ?? "https://fapi.binance.com",
@@ -12,6 +18,9 @@ export const config = {
   universeSize: n("UNIVERSE_SIZE", 50),
   minQuoteVolume: n("MIN_24H_QUOTE_VOLUME_USDT", 10_000_000),
   paperBalance: n("PAPER_BALANCE_USDT", 1000),
+  paperFeeBps: n("PAPER_FEE_BPS", 5),
+  paperSlippageBps: n("PAPER_SLIPPAGE_BPS", 2),
+  paperAuto: bool("PAPER_AUTO", false),
   riskPerTradePct: n("RISK_PER_TRADE_PCT", 1),
   maxDailyRiskPct: n("MAX_DAILY_RISK_PCT", 6),
   maxTotalPositions: n("MAX_TOTAL_POSITIONS", 6),

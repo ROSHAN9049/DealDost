@@ -633,6 +633,7 @@ export class BinanceScanner extends EventEmitter {
 
   private async repairManagedTestnetProtection(snapshot: Awaited<ReturnType<TestnetClient["getExecutionSnapshot"]>>) {
     let changed = false;
+    let errorMessage: string | null = null;
     const now = Date.now();
 
     for (const position of snapshot.positions.filter((p) => p.engine && p.protection !== "OK")) {
@@ -652,17 +653,15 @@ export class BinanceScanner extends EventEmitter {
         });
         changed = true;
       } catch (error) {
-        this.testnetState = {
-          ...this.testnetState,
-          auto: this.testnetAuto,
-          error: "Protection repair failed for " + position.symbol + ": " +
-            (error instanceof Error ? error.message : String(error)),
-          lastSyncAt: Date.now(),
-        };
+        errorMessage = "Protection repair failed for " + position.symbol + ": " +
+          (error instanceof Error ? error.message : String(error));
       }
     }
 
-    return changed ? this.testnet.getExecutionSnapshot() : snapshot;
+    return {
+      snapshot: changed ? await this.testnet.getExecutionSnapshot() : snapshot,
+      error: errorMessage,
+    };
   }
 
   private async tryTestnetEntries() {
@@ -679,8 +678,11 @@ export class BinanceScanner extends EventEmitter {
 
       // Self-heal only DDT-managed positions with a fresh matching signal.
       // Never bypass the protection gate if repair cannot be verified.
+      let repairError: string | null = null;
       if (snapshot.unprotectedOpenPositions > 0) {
-        snapshot = await this.repairManagedTestnetProtection(snapshot);
+        const repaired = await this.repairManagedTestnetProtection(snapshot);
+        snapshot = repaired.snapshot;
+        repairError = repaired.error;
       }
 
       this.testnetState = {
@@ -700,7 +702,7 @@ export class BinanceScanner extends EventEmitter {
         feesTodayUsd: snapshot.feesTodayUsd,
         positions: snapshot.positions,
         lastSyncAt: Date.now(),
-        error: null,
+        error: repairError,
       };
 
       if (!snapshot.connected) return;

@@ -29,6 +29,11 @@ export class BinanceScanner extends EventEmitter {
   private readonly paper = new PaperBroker();
   private readonly rotation = new ProfitRotationV3();
 
+  onUpdate(listener: () => void): () => void {
+    this.on("update", listener);
+    return () => this.off("update", listener);
+  }
+
   async start() {
     await this.refreshUniverse();
     await this.bootstrapHistory();

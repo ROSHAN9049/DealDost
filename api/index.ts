@@ -13,7 +13,7 @@ app.use(express.static(path.resolve(process.cwd(), "public")));
 async function ensureStarted() {
   if (started) return;
   if (!startPromise) {
-    startPromise = scanner.start().then(() => {
+    startPromise = scanner.startServerless().then(() => {
       started = true;
     }).catch((error) => {
       startPromise = undefined;
@@ -45,6 +45,7 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/state", async (_req, res) => {
   try {
     await ensureStarted();
+    await scanner.serverlessTick();
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json(scanner.state());
   } catch (error) {

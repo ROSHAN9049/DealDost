@@ -470,16 +470,42 @@ export class TestnetClient {
       newClientOrderId: clientOrderId,
     });
 
-    const executedQty = Number(order.executedQty ?? order.origQty ?? 0);
-    const avgPrice = Number(
+    let executedQty = Number(order.executedQty ?? order.cumQty ?? 0);
+    let avgPrice = Number(
       order.avgPrice ??
         (Number(order.cummulativeQuoteQty ?? 0) > 0 && executedQty > 0
           ? Number(order.cummulativeQuoteQty) / executedQty
           : 0),
     );
 
+    // Some Demo responses can omit final fill fields even when the order was
+    // accepted. Reconcile the order by ID before declaring the execution
+    // failed; Binance documents RESULT MARKET orders as final FILLED responses
+    // when the order completes. citeturn942765search3
+    if ((!executedQty || !avgPrice) && order.orderId !== undefined) {
+      for (let attempt = 0; attempt < 3 && (!executedQty || !avgPrice); attempt += 1) {
+        const reconciled = await this.signedGet<any>(
+          "/fapi/v1/order?symbol=" + encodeURIComponent(plan.symbol) +
+          "&orderId=" + encodeURIComponent(String(order.orderId)),
+        );
+        executedQty = Number(reconciled.executedQty ?? reconciled.cumQty ?? 0);
+        avgPrice = Number(
+          reconciled.avgPrice ??
+            (Number(reconciled.cummulativeQuoteQty ?? 0) > 0 && executedQty > 0
+              ? Number(reconciled.cummulativeQuoteQty) / executedQty
+              : 0),
+        );
+        if (executedQty && avgPrice) break;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+
     if (!executedQty || !avgPrice) {
-      throw new Error("TESTNET market entry returned no executable fill");
+      const status = String(order.status ?? "UNKNOWN");
+      throw new Error(
+        "TESTNET market entry not filled: status=" + status +
+        " orderId=" + String(order.orderId ?? "—"),
+      );
     }
 
     let stopOrderId: string | undefined;

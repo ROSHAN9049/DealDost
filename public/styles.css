@@ -50,3 +50,6 @@ tr:hover td { background:#0d1c2d; }
   .hero-grid { grid-template-columns:1fr; }
   .topbar { align-items:flex-start; gap:12px; flex-direction:column; }
 }
+
+.stage.partial { color:#e7cb75; border-color:#675d2c; background:#28240f; }
+.stage.missing { color:#f18b8b; border-color:#65333a; background:#281419; }

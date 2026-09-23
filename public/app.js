@@ -1,5 +1,9 @@
 const $ = (id) => document.getElementById(id);
 
+let currentMode = localStorage.getItem("dealdost.mode") === "TESTNET" ? "TESTNET" : "PAPER";
+let testnetAuto = localStorage.getItem("dealdost.testnetAuto") === "true";
+let paperAuto = localStorage.getItem("dealdost.paperAuto") === "true";
+
 const fmt = (n) =>
   Number.isFinite(Number(n))
     ? Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -84,6 +88,8 @@ async function directScannerFallback() {
     headers: { "content-type": "application/json" },
     cache: "no-store",
     body: JSON.stringify({
+      mode: currentMode,
+      auto: currentMode === "PAPER" ? paperAuto : testnetAuto,
       universe: top.map((t) => ({
         symbol: t.symbol,
         quoteVolume: Number(t.quoteVolume),
@@ -127,14 +133,54 @@ function showApiError(message) {
   }
 }
 
-async function toggleAuto() {
-  const enabled = $("paperAuto").dataset.enabled !== "true";
+async function setMode(mode) {
+  if (mode === "LIVE") {
+    showApiError("LIVE trading is locked in V2.");
+    return;
+  }
+  const auto = mode === "PAPER" ? paperAuto : testnetAuto;
   $("paperAuto").disabled = true;
   try {
-    const response = await fetch("/api/paper/auto", {
+    const response = await fetch("/api/mode", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ enabled })
+      body: JSON.stringify({ mode, auto })
+    });
+    if (!response.ok) {
+      let detail = "HTTP " + response.status;
+      try { const body = await response.json(); if (body?.error) detail += " • " + body.error; } catch {}
+      throw new Error(detail);
+    }
+    currentMode = mode;
+    localStorage.setItem("dealdost.mode", currentMode);
+    render(await response.json());
+  } catch (error) {
+    showApiError("Mode change failed: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    $("paperAuto").disabled = false;
+  }
+}
+
+async function toggleAuto() {
+  const enabled = currentMode === "PAPER" ? !paperAuto : !testnetAuto;
+  if (currentMode === "PAPER") {
+    paperAuto = enabled;
+    localStorage.setItem("dealdost.paperAuto", String(enabled));
+  } else {
+    testnetAuto = enabled;
+    localStorage.setItem("dealdost.testnetAuto", String(enabled));
+  }
+
+  $("paperAuto").disabled = true;
+  try {
+    const response = await fetch("/api/mode", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: currentMode,
+        auto: enabled,
+        testnetAuto: currentMode === "TESTNET" ? enabled : false
+      })
     });
     if (response.ok) render(await response.json());
     else showApiError("API error: HTTP " + response.status);
@@ -169,9 +215,19 @@ function render(state) {
   $("data").className = "muted";
   $("universe").textContent = state.market.universeSize;
 
-  $("paperAuto").textContent = state.paper.auto ? "PAPER AUTO ON" : "PAPER AUTO OFF";
-  $("paperAuto").dataset.enabled = String(state.paper.auto);
-  $("paperAuto").className = state.paper.auto ? "auto on" : "auto";
+  currentMode = state.mode === "TESTNET" ? "TESTNET" : "PAPER";
+  if (currentMode === "PAPER") paperAuto = Boolean(state.auto);
+  else testnetAuto = Boolean(state.auto);
+  localStorage.setItem("dealdost.mode", currentMode);
+  localStorage.setItem("dealdost.paperAuto", String(paperAuto));
+  localStorage.setItem("dealdost.testnetAuto", String(testnetAuto));
+
+  ["paperMode", "testnetMode", "liveMode"].forEach((id) => $(id)?.classList.remove("active"));
+  $(currentMode === "PAPER" ? "paperMode" : "testnetMode")?.classList.add("active");
+
+  $("paperAuto").textContent = currentMode + " AUTO " + (state.auto ? "ON" : "OFF");
+  $("paperAuto").dataset.enabled = String(state.auto);
+  $("paperAuto").className = state.auto ? "auto on" : "auto";
 
   $("equity").textContent = money(state.paper.balanceUsd);
   $("available").textContent = money(state.paper.availableBalanceUsd);
@@ -204,6 +260,25 @@ function render(state) {
   $("riskTrade").textContent = state.risk.riskPerTradePct + "%";
   $("riskDaily").textContent = state.risk.dailyRiskUsedPct.toFixed(2) + "% / " + state.risk.maxDailyRiskPct + "%";
   $("emergency").textContent = state.risk.emergencyStop ? "ON" : "OFF";
+  const tnPositions = $("testnetPositions");
+  if (tnPositions) {
+    if (!tn.positions?.length) {
+      tnPositions.innerHTML = '<tr><td colspan="8" class="empty">No TESTNET positions.</td></tr>';
+    } else {
+      tnPositions.innerHTML = tn.positions.map((p) =>
+        "<tr>" +
+        "<td><strong>" + esc(p.symbol) + "</strong></td>" +
+        "<td>" + esc(p.engine || "UNCLASSIFIED") + "</td>" +
+        '<td class="' + (p.side === "LONG" ? "long" : "short") + '">' + esc(p.side) + "</td>" +
+        "<td>" + fmt(p.quantity) + "</td>" +
+        "<td>" + fmt(p.entryPrice) + "</td>" +
+        "<td>" + fmt(p.markPrice) + "</td>" +
+        "<td>" + money(p.unrealizedPnlUsd) + "</td>" +
+        "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
+        "</tr>"
+      ).join("");
+    }
+  }
 
   $("paperStats").textContent = state.paper.tradeCount + " trades • " + state.paper.winRate.toFixed(1) + "% WR";
 
@@ -268,7 +343,14 @@ async function load() {
   if (polling) return;
   polling = true;
   try {
-    const response = await fetch("/api/state", { cache: "no-store" });
+    const response = await fetch("/api/state", {
+      cache: "no-store",
+      headers: {
+        "x-dealdost-mode": currentMode,
+        "x-dealdost-auto": String(currentMode === "PAPER" ? paperAuto : testnetAuto),
+        "x-dealdost-testnet-auto": String(testnetAuto)
+      }
+    });
     if (response.ok) {
       const state = await response.json();
       if (
@@ -324,6 +406,9 @@ async function load() {
 }
 
 $("paperAuto").onclick = toggleAuto;
+$("paperMode")?.addEventListener("click", () => setMode("PAPER"));
+$("testnetMode")?.addEventListener("click", () => setMode("TESTNET"));
+$("liveMode")?.addEventListener("click", () => setMode("LIVE"));
 // Prime market cards and server-owned scoring immediately.
 void directScannerFallback().catch(() => directBinanceFallback().catch(() => {}));
 load();

@@ -242,6 +242,7 @@ function render(state) {
 }
 
 let polling = false;
+let lastBrowserIngestAt = 0;
 async function load() {
   if (polling) return;
   polling = true;
@@ -254,9 +255,17 @@ async function load() {
         state?.feed?.websocket === "ONLINE"
       ) {
         render(state);
+        // Keep server-owned paper positions marked in serverless/Vercel mode.
+        // The API state itself is not a market-data stream, so refresh the
+        // browser market snapshot regularly even when /api/state is healthy.
+        if (Date.now() - lastBrowserIngestAt >= 5000) {
+          lastBrowserIngestAt = Date.now();
+          void directScannerFallback().catch(() => {});
+        }
       } else {
         try {
           await directScannerFallback();
+          lastBrowserIngestAt = Date.now();
         } catch (fallbackError) {
           render(state);
         }

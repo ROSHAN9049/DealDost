@@ -276,6 +276,11 @@ function render(state) {
   $("paperAuto").dataset.enabled = String(paperAuto);
   $("paperAuto").className = paperAuto ? "auto on" : "auto";
 
+  $("equity").textContent = money(state.paper.balanceUsd);
+  $("available").textContent = money(state.paper.availableBalanceUsd);
+  $("fees").textContent = money(state.paper.feesUsd);
+
+  const tn = state.testnet;
   const testnetAutoButton = $("testnetAuto");
   if (testnetAutoButton) {
     testnetAutoButton.textContent = "TESTNET AUTO " + (testnetAuto ? "ON" : "OFF");
@@ -283,12 +288,6 @@ function render(state) {
     testnetAutoButton.className = testnetAuto ? "auto on" : "auto";
     testnetAutoButton.dataset.executionEnabled = String(Boolean(tn.executionEnabled));
   }
-
-  $("equity").textContent = money(state.paper.balanceUsd);
-  $("available").textContent = money(state.paper.availableBalanceUsd);
-  $("fees").textContent = money(state.paper.feesUsd);
-
-  const tn = state.testnet;
   $("testnetStatus").textContent = tn.error
     ? (String(tn.error).includes(" 451:") ? "REGION RESTRICTED" : "ERROR")
     : tn.connected

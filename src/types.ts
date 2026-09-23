@@ -150,6 +150,8 @@ export interface TestnetStateView {
   scalpingOpen: number;
   unclassifiedOpenPositions: number;
   dailyRiskUsedPct: number;
+  realizedPnlTodayUsd: number;
+  feesTodayUsd: number;
   positions: TestnetPositionView[];
   lastSyncAt: number;
   error: string | null;

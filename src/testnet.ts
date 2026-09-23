@@ -97,6 +97,8 @@ export interface TestnetExecutionSnapshot {
   unclassifiedOpenPositions: number;
   unprotectedOpenPositions: number;
   dailyRiskUsedPct: number;
+  realizedPnlTodayUsd: number;
+  feesTodayUsd: number;
   lastClosedAt: Record<string, number>;
 }
 
@@ -236,14 +238,19 @@ export class TestnetClient {
     let momentumOpen = 0;
     let scalpingOpen = 0;
     let unclassifiedOpenPositions = 0;
+    let unprotectedOpenPositions = 0;
 
     const tagged = await Promise.all(
       open.map(async (row) => {
         const symbol = String(row.symbol ?? "").toUpperCase();
-        const orders = await this.getRecentOrders(symbol);
+        const [orders, openOrders] = await Promise.all([
+          this.getRecentOrders(symbol),
+          this.getOpenOrders(symbol),
+        ]);
         const engine = this.detectEngine(orders);
         const lastClosedAt = this.detectLastClosedAt(orders);
-        return { row, symbol, orders, engine, lastClosedAt };
+        const protection = this.getProtectionStatus(openOrders);
+        return { row, symbol, orders, openOrders, engine, lastClosedAt, protection };
       }),
     );
 

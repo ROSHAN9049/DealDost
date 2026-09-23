@@ -113,7 +113,6 @@ export class PaperBroker {
     };
 
     this.fees += entryFee;
-    this.balance -= entryFee;
     this.positions.set(signal.symbol, position);
     this.openedSignals.add(signal.signalId);
 

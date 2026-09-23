@@ -646,48 +646,8 @@ export class TestnetClient {
     if (!position) throw new Error("TESTNET_POSITION_NOT_FOUND");
     if (!position.engine) throw new Error("TESTNET_EXTERNAL_POSITION_CLOSE_BLOCKED");
 
-    // Manual close is explicit and managed-only. Reconciliation never closes
-    // a position automatically just because an engine is over its configured cap.
-    const [normalOrders, algoOrders] = await Promise.all([
-      this.signedGet<OrderRow[]>("/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol)),
-      this.signedGet<AlgoOrderRow[]>("/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol)),
-    ]);
-
-    for (const order of normalOrders) {
-      const clientId = String(order.clientOrderId ?? "");
-      const closePosition = order.closePosition === true || String(order.closePosition).toLowerCase() === "true";
-      if (
-        order.status === "NEW" &&
-        closePosition &&
-        (order.type === "STOP_MARKET" || order.type === "TAKE_PROFIT_MARKET") &&
-        clientId.startsWith("DDT-") &&
-        (order.orderId !== undefined || order.clientOrderId)
-      ) {
-        await this.signedDelete<any>("/fapi/v1/order", {
-          symbol,
-          orderId: order.orderId === undefined ? "" : String(order.orderId),
-          origClientOrderId: order.orderId === undefined ? clientId : "",
-        });
-      }
-    }
-
-    for (const order of algoOrders) {
-      const clientId = String(order.clientAlgoId ?? "");
-      if (
-        order.algoStatus === "NEW" &&
-        order.closePosition === true &&
-        (order.orderType === "STOP_MARKET" || order.orderType === "TAKE_PROFIT_MARKET") &&
-        clientId.startsWith("DDT-") &&
-        (order.algoId !== undefined || order.clientAlgoId)
-      ) {
-        await this.signedDelete<any>("/fapi/v1/algoOrder", {
-          symbol,
-          algoId: order.algoId === undefined ? "" : String(order.algoId),
-          clientAlgoId: order.algoId === undefined ? clientId : "",
-        });
-      }
-    }
-
+    // Keep protective orders live until the market close is confirmed.
+    // If the close request is rejected, the existing SL/TP remains active.
     const plan = await this.buildMarketOrderPlan({
       symbol,
       side: position.side,
@@ -734,6 +694,57 @@ export class TestnetClient {
       throw new Error(
         "TESTNET manual close not filled: status=" + String(order.status ?? "UNKNOWN") +
         " orderId=" + String(order.orderId ?? "—"),
+      );
+    }
+
+    // The position is now confirmed closed. Remove only DealDost-owned
+    // protections; cleanup errors do not reopen exposure and will be retried
+    // by normal TESTNET reconciliation.
+    try {
+      const [normalOrders, algoOrders] = await Promise.all([
+        this.signedGet<OrderRow[]>("/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol)),
+        this.signedGet<AlgoOrderRow[]>("/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol)),
+      ]);
+
+      for (const protection of normalOrders) {
+        const clientId = String(protection.clientOrderId ?? "");
+        const closePosition = protection.closePosition === true || String(protection.closePosition).toLowerCase() === "true";
+        if (
+          protection.status === "NEW" &&
+          closePosition &&
+          (protection.type === "STOP_MARKET" || protection.type === "TAKE_PROFIT_MARKET") &&
+          clientId.startsWith("DDT-") &&
+          (protection.orderId !== undefined || protection.clientOrderId)
+        ) {
+          await this.signedDelete<any>("/fapi/v1/order", {
+            symbol,
+            orderId: protection.orderId === undefined ? "" : String(protection.orderId),
+            origClientOrderId: protection.orderId === undefined ? clientId : "",
+          });
+        }
+      }
+
+      for (const protection of algoOrders) {
+        const clientId = String(protection.clientAlgoId ?? "");
+        if (
+          protection.algoStatus === "NEW" &&
+          protection.closePosition === true &&
+          (protection.orderType === "STOP_MARKET" || protection.orderType === "TAKE_PROFIT_MARKET") &&
+          clientId.startsWith("DDT-") &&
+          (protection.algoId !== undefined || protection.clientAlgoId)
+        ) {
+          await this.signedDelete<any>("/fapi/v1/algoOrder", {
+            symbol,
+            algoId: protection.algoId === undefined ? "" : String(protection.algoId),
+            clientAlgoId: protection.algoId === undefined ? clientId : "",
+          });
+        }
+      }
+    } catch (error) {
+      console.warn(
+        "[testnet manual close cleanup]",
+        symbol,
+        error instanceof Error ? error.message : String(error),
       );
     }
 

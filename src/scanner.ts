@@ -270,6 +270,59 @@ export class BinanceScanner extends EventEmitter {
     if (this.testnetAuto) void this.tryTestnetEntries();
   }
 
+  async syncTestnetPositionProtection(symbol: string) {
+    if (this.mode !== "TESTNET") throw new Error("TESTNET_MODE_REQUIRED");
+    if (!this.testnet.isExecutionEnabled()) throw new Error("TESTNET_EXECUTION_DISABLED");
+
+    const snapshot = await this.testnet.getExecutionSnapshot();
+    const position = snapshot.positions.find((p) => p.symbol === symbol.toUpperCase());
+    if (!position) throw new Error("TESTNET_POSITION_NOT_FOUND");
+    if (position.protection === "OK") {
+      this.testnetState = { ...this.testnetState, ...snapshot, auto: this.testnetAuto, error: null };
+      return this.state();
+    }
+
+    if (!position.engine) throw new Error("TESTNET_POSITION_ENGINE_UNKNOWN");
+
+    const signal = this.signals.get(position.engine + ":" + position.symbol);
+    if (!signal || signal.side !== position.side) {
+      throw new Error("No matching current signal for TESTNET protection sync");
+    }
+    if (signal.stage === "BLOCKED") {
+      throw new Error("Current matching signal is BLOCKED");
+    }
+
+    await this.testnet.ensureOpenPositionProtection({
+      symbol: position.symbol,
+      side: position.side,
+      quantity: position.quantity,
+      stopPrice: signal.stop,
+      takeProfitPrice: signal.takeProfit1,
+    });
+
+    const refreshed = await this.testnet.getExecutionSnapshot();
+    this.testnetState = {
+      ...this.testnetState,
+      connected: refreshed.connected,
+      accountBalanceUsd: refreshed.accountBalanceUsd,
+      availableBalanceUsd: refreshed.availableBalanceUsd,
+      unrealizedPnlUsd: refreshed.unrealizedPnlUsd,
+      openPositions: refreshed.openPositions,
+      momentumOpen: refreshed.momentumOpen,
+      scalpingOpen: refreshed.scalpingOpen,
+      unclassifiedOpenPositions: refreshed.unclassifiedOpenPositions,
+      unprotectedOpenPositions: refreshed.unprotectedOpenPositions,
+      dailyRiskUsedPct: refreshed.dailyRiskUsedPct,
+      realizedPnlTodayUsd: refreshed.realizedPnlTodayUsd,
+      feesTodayUsd: refreshed.feesTodayUsd,
+      positions: refreshed.positions,
+      lastSyncAt: Date.now(),
+      error: null,
+      auto: this.testnetAuto,
+    };
+    return this.state();
+  }
+
   closePaperPosition(symbol: string) {
     const trade = this.paper.closeManual(symbol);
     if (trade) {

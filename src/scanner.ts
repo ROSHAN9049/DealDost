@@ -646,6 +646,9 @@ export class BinanceScanner extends EventEmitter {
 
           this.testnetState.error = null;
           console.info("[testnet entry]", result);
+          // One new Demo entry per execution cycle keeps balance/risk sizing
+          // authoritative and avoids a burst of orders from one stale snapshot.
+          break;
         } catch (error) {
           this.testnetState = {
             ...this.testnetState,

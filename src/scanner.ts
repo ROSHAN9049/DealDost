@@ -95,7 +95,7 @@ export class BinanceScanner extends EventEmitter {
   closePaperPosition(symbol: string) {
     const trade = this.paper.closeManual(symbol);
     if (trade) {
-      this.risk.registerClose(symbol);
+      this.risk.registerClose(symbol, trade.netPnlUsd);
       this.rotation.onClosedTrade(trade);
     }
     this.emit("update");
@@ -262,7 +262,7 @@ export class BinanceScanner extends EventEmitter {
 
         const closedTrade = this.paper.mark(symbol, state.lastPrice);
         if (closedTrade) {
-          this.risk.registerClose(symbol);
+          this.risk.registerClose(symbol, closedTrade.netPnlUsd);
           this.rotation.onClosedTrade(closedTrade);
         }
 
@@ -301,12 +301,17 @@ export class BinanceScanner extends EventEmitter {
     if (!this.paper.getAuto()) return;
 
     const candidates = [...this.signals.values()]
-      .filter((s) => s.stage === "CONFIRMED" && s.risk.eligible)
+      .filter((s) => s.stage === "CONFIRMED")
       .sort((a, b) => b.quality.total - a.quality.total);
 
     for (const signal of candidates) {
-      if (this.paper.positionsList().length >= this.risk.cfg.maxTotalPositions) break;
-      const result = this.paper.tryOpen(signal);
+      const gate = this.risk.canOpen(signal.symbol, signal.engine);
+      if (!gate.eligible) continue;
+
+      const refreshed = { ...signal, risk: this.risk.preview(signal) };
+      if (!refreshed.risk.eligible) continue;
+
+      const result = this.paper.tryOpen(refreshed);
       if (result.opened) this.risk.registerOpen(signal.symbol, signal.engine);
     }
   }
@@ -411,6 +416,8 @@ export class BinanceScanner extends EventEmitter {
 
     const signalKey = engine + ":" + symbol;
     const current = this.signals.get(signalKey);
+    const signalId =
+      "SIG-" + symbol + "-" + engine + "-" + String(base.at(-1)?.openTime ?? Date.now());
 
     const quality = {
       trend: Math.min(20, Math.round((Math.abs(emaFast - emaSlow) / Math.max(a, 1e-8)) * 3 + 6)),
@@ -423,9 +430,7 @@ export class BinanceScanner extends EventEmitter {
     };
 
     const signal: Signal = {
-      signalId:
-        current?.signalId ??
-        "SIG-" + new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14) + "-" + symbol + "-" + engine,
+      signalId,
       symbol,
       engine,
       side,
@@ -436,7 +441,7 @@ export class BinanceScanner extends EventEmitter {
       stop,
       takeProfit1: tp1,
       takeProfit2: tp2,
-      createdAt: current?.createdAt ?? Date.now(),
+      createdAt: current?.signalId === signalId ? current.createdAt : Date.now(),
       updatedAt: Date.now(),
       rationale: Array.from(new Set(rationale)).slice(0, 6),
       risk: {
@@ -454,6 +459,7 @@ export class BinanceScanner extends EventEmitter {
 
     signal.risk = this.risk.preview(signal);
     this.signals.set(signalKey, signal);
+
     if (this.signals.size > 250) {
       const oldest = [...this.signals.values()].sort((a, b) => a.updatedAt - b.updatedAt)[0];
       if (oldest) this.signals.delete(oldest.engine + ":" + oldest.symbol);

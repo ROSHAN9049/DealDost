@@ -172,6 +172,19 @@ export class PaperBroker {
     if (this.positions.has(signal.symbol)) return { opened: false, reason: "SYMBOL_ALREADY_OPEN" };
     if (this.openedSignals.has(signal.signalId)) return { opened: false, reason: "SIGNAL_ALREADY_TRADED" };
 
+    // Defense in depth: enforce the V2 3 Momentum + 3 Scalping / 6 total
+    // position limits inside the broker itself, not only in the risk layer.
+    if (this.positions.size >= config.maxTotalPositions) {
+      return { opened: false, reason: "TOTAL_POSITION_LIMIT" };
+    }
+    const sameEngineOpen = [...this.positions.values()].filter((p) => p.engine === signal.engine).length;
+    const engineLimit = signal.engine === "MOMENTUM"
+      ? config.maxMomentumPositions
+      : config.maxScalpingPositions;
+    if (sameEngineOpen >= engineLimit) {
+      return { opened: false, reason: signal.engine + "_LIMIT" };
+    }
+
     const stopDistance = Math.abs(signal.entry - signal.stop);
     if (!stopDistance || signal.entry <= 0) return { opened: false, reason: "INVALID_RISK_DISTANCE" };
 

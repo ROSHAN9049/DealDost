@@ -29,7 +29,8 @@ body { margin: 0; background: radial-gradient(circle at top right, #13263e 0, #0
 .status.warn { color:#f1cc76; font-weight:900; }
 .engine { display:flex; justify-content:space-between; align-items:center; }
 .section-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-.table-wrap { overflow:auto; border-radius:12px; border:1px solid #182a40; }
+.table-wrap { overflow:auto; border-radius:12px; border:1px solid #182a40; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; -webkit-overflow-scrolling:touch; }
+.signals-wrap { max-height:55vh; }
 table { width:100%; border-collapse:collapse; min-width:1100px; }
 th,td { padding:11px 9px; border-bottom:1px solid #14253a; text-align:left; font-size:12px; white-space:nowrap; }
 th { color:#7f94aa; font-size:10px; letter-spacing:.08em; background:#0a1727; position:sticky; top:0; }

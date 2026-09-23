@@ -631,6 +631,40 @@ export class BinanceScanner extends EventEmitter {
     }
   }
 
+  private async repairManagedTestnetProtection(snapshot: Awaited<ReturnType<TestnetClient["getExecutionSnapshot"]>>) {
+    let changed = false;
+    const now = Date.now();
+
+    for (const position of snapshot.positions.filter((p) => p.engine && p.protection !== "OK")) {
+      const signal = this.signals.get(position.engine + ":" + position.symbol);
+      if (!signal || signal.side !== position.side || signal.stage === "BLOCKED") continue;
+
+      const maxAgeMs = signal.engine === "SCALPING" ? 90_000 : 10 * 60_000;
+      if (now - signal.updatedAt > maxAgeMs) continue;
+
+      try {
+        await this.testnet.ensureOpenPositionProtection({
+          symbol: position.symbol,
+          side: position.side,
+          quantity: position.quantity,
+          stopPrice: signal.stop,
+          takeProfitPrice: signal.takeProfit1,
+        });
+        changed = true;
+      } catch (error) {
+        this.testnetState = {
+          ...this.testnetState,
+          auto: this.testnetAuto,
+          error: "Protection repair failed for " + position.symbol + ": " +
+            (error instanceof Error ? error.message : String(error)),
+          lastSyncAt: Date.now(),
+        };
+      }
+    }
+
+    return changed ? this.testnet.getExecutionSnapshot() : snapshot;
+  }
+
   private async tryTestnetEntries() {
     if (
       this.mode !== "TESTNET" ||
@@ -641,7 +675,14 @@ export class BinanceScanner extends EventEmitter {
 
     this.testnetExecutionInFlight = true;
     try {
-      const snapshot = await this.testnet.getExecutionSnapshot();
+      let snapshot = await this.testnet.getExecutionSnapshot();
+
+      // Self-heal only DDT-managed positions with a fresh matching signal.
+      // Never bypass the protection gate if repair cannot be verified.
+      if (snapshot.unprotectedOpenPositions > 0) {
+        snapshot = await this.repairManagedTestnetProtection(snapshot);
+      }
+
       this.testnetState = {
         ...this.testnetState,
         auto: this.testnetAuto,

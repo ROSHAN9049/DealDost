@@ -266,8 +266,11 @@ function render(state) {
     if (currentMode === "TESTNET" && !tn.executionEnabled) {
       tnHint.textContent = "TESTNET connected in READ ONLY mode • execution flag is OFF";
       tnHint.hidden = false;
+    } else if (currentMode === "TESTNET" && state.auto) {
+      tnHint.textContent = "TESTNET execution ARMED • AUTO is ON";
+      tnHint.hidden = false;
     } else if (currentMode === "TESTNET") {
-      tnHint.textContent = "TESTNET execution ARMED • AUTO still requires explicit ON";
+      tnHint.textContent = "TESTNET execution ARMED • AUTO is OFF";
       tnHint.hidden = false;
     } else {
       tnHint.textContent = "";
@@ -339,10 +342,14 @@ function render(state) {
 
   $("signalCount").textContent = state.signals.length;
   const tbody = $("signals");
+  const signalWrap = $("signalsWrap");
+  const signalScrollTop = signalWrap?.scrollTop ?? 0;
+  const signalScrollLeft = signalWrap?.scrollLeft ?? 0;
+  let signalHtml;
   if (!state.signals.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty">Waiting for scored market data…</td></tr>';
+    signalHtml = '<tr><td colspan="10" class="empty">Waiting for scored market data…</td></tr>';
   } else {
-    tbody.innerHTML = state.signals.map((s) => {
+    signalHtml = state.signals.map((s) => {
       const sideClass = s.side === "LONG" ? "long" : "short";
       return (
         "<tr>" +
@@ -359,6 +366,21 @@ function render(state) {
         "</tr>"
       );
     }).join("");
+  }
+
+  // The scanner polls every few seconds. Reuse the existing DOM when rows are
+  // unchanged and always restore the user's exact scroll position after an
+  // update so the coin list never jumps back to the top.
+  if (tbody && tbody.innerHTML !== signalHtml) {
+    tbody.innerHTML = signalHtml;
+    if (signalWrap) {
+      signalWrap.scrollTop = signalScrollTop;
+      signalWrap.scrollLeft = signalScrollLeft;
+      requestAnimationFrame(() => {
+        signalWrap.scrollTop = signalScrollTop;
+        signalWrap.scrollLeft = signalScrollLeft;
+      });
+    }
   }
 
   $("rotEvents").textContent = state.rotation.eventsToday;

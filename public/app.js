@@ -12,6 +12,33 @@ const esc = (s) =>
     "&": "&amp;", "<": "&lt;", ">": "&gt;", """: "&quot;", "'": "&#039;"
   }[c]));
 
+async function directBinanceFallback() {
+  const [infoResponse, tickerResponse] = await Promise.all([
+    fetch("https://fapi.binance.com/fapi/v1/exchangeInfo", { cache: "no-store" }),
+    fetch("https://fapi.binance.com/fapi/v1/ticker/24hr", { cache: "no-store" })
+  ]);
+  if (!infoResponse.ok || !tickerResponse.ok) throw new Error("Binance market API unavailable");
+  const info = await infoResponse.json();
+  const ticker = await tickerResponse.json();
+  const eligible = new Set(
+    info.symbols
+      .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.contractType === "PERPETUAL")
+      .map((s) => s.symbol)
+  );
+  const top = ticker
+    .filter((t) => eligible.has(t.symbol) && Number(t.quoteVolume) >= 10000000)
+    .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
+    .slice(0, 50);
+  const btc = top.find((t) => t.symbol === "BTCUSDT");
+  $("regime").textContent = "WAITING";
+  $("btc").textContent = btc ? fmt(Number(btc.lastPrice)) : "—";
+  $("ws").textContent = "REST ONLINE";
+  $("ws").className = "status ok";
+  $("data").textContent = "FRESH • direct Binance market fallback";
+  $("data").className = "muted";
+  $("universe").textContent = top.length;
+}
+
 function showApiError(message) {
   const el = $("data");
   if (el) {
@@ -157,15 +184,23 @@ async function load() {
     if (response.ok) {
       render(await response.json());
     } else {
-      let detail = "HTTP " + response.status;
       try {
-        const body = await response.json();
-        if (body?.error) detail += " • " + body.error;
-      } catch {}
-      showApiError("API connection failed: " + detail);
+        await directBinanceFallback();
+      } catch (fallbackError) {
+        let detail = "HTTP " + response.status;
+        try {
+          const body = await response.json();
+          if (body?.error) detail += " • " + body.error;
+        } catch {}
+        showApiError("Scanner API failed: " + detail);
+      }
     }
   } catch (error) {
-    showApiError("API connection failed: " + (error instanceof Error ? error.message : String(error)));
+    try {
+      await directBinanceFallback();
+    } catch (fallbackError) {
+      showApiError("Scanner API failed: " + (error instanceof Error ? error.message : String(error)));
+    }
   } finally {
     polling = false;
   }

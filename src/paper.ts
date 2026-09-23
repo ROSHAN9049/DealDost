@@ -15,6 +15,7 @@ export interface PaperPosition {
   takeProfit2: number;
   openedAt: number;
   entryFeeUsd: number;
+  marginReservedUsd: number;
   grossPnlUsd: number;
   netPnlUsd: number;
 }
@@ -54,6 +55,14 @@ export class PaperBroker {
   positionsList() { return [...this.positions.values()]; }
   historyList() { return [...this.history]; }
 
+  private reservedMargin() {
+    return [...this.positions.values()].reduce((sum, p) => sum + p.marginReservedUsd, 0);
+  }
+
+  private availableBalance() {
+    return Math.max(0, this.balance - this.reservedMargin());
+  }
+
   snapshot(): PaperStateView {
     const unrealized = [...this.positions.values()].reduce((sum, p) => sum + p.netPnlUsd, 0);
     const wins = this.history.filter((t) => t.netPnlUsd > 0).length;
@@ -64,6 +73,8 @@ export class PaperBroker {
       auto: this.auto,
       startingBalanceUsd: this.startingBalance,
       balanceUsd: this.balance + unrealized,
+      availableBalanceUsd: this.availableBalance(),
+      reservedMarginUsd: this.reservedMargin(),
       realizedPnlUsd: this.realizedPnl,
       unrealizedPnlUsd: unrealized,
       feesUsd: this.fees,
@@ -86,8 +97,9 @@ export class PaperBroker {
     const stopDistance = Math.abs(signal.entry - signal.stop);
     if (!stopDistance || signal.entry <= 0) return { opened: false, reason: "INVALID_RISK_DISTANCE" };
 
-    const notional = Math.min(signal.risk.notionalUsd, Math.max(0, this.balance * 0.95));
-    if (notional <= 0) return { opened: false, reason: "INSUFFICIENT_PAPER_BALANCE" };
+    const available = this.availableBalance();
+    const notional = Math.min(signal.risk.notionalUsd, Math.max(0, available * 0.95));
+    if (notional <= 0) return { opened: false, reason: "INSUFFICIENT_PAPER_MARGIN" };
 
     const sign = signal.side === "LONG" ? 1 : -1;
     const fillPrice = signal.entry + signal.entry * (this.slippageBps / 10_000) * sign;
@@ -108,6 +120,7 @@ export class PaperBroker {
       takeProfit2: signal.takeProfit2,
       openedAt: Date.now(),
       entryFeeUsd: entryFee,
+      marginReservedUsd: notional,
       grossPnlUsd: 0,
       netPnlUsd: -entryFee,
     };

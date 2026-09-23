@@ -89,6 +89,49 @@ export interface EngineState {
   status: "READY" | "FULL" | "BLOCKED";
 }
 
+export interface PaperPositionView {
+  tradeId: string;
+  signalId: string;
+  symbol: string;
+  engine: Engine;
+  side: Side;
+  quantity: number;
+  entry: number;
+  markPrice: number;
+  stop: number;
+  takeProfit1: number;
+  takeProfit2: number;
+  openedAt: number;
+  entryFeeUsd: number;
+  grossPnlUsd: number;
+  netPnlUsd: number;
+}
+
+export interface PaperStateView {
+  enabled: boolean;
+  auto: boolean;
+  startingBalanceUsd: number;
+  balanceUsd: number;
+  realizedPnlUsd: number;
+  unrealizedPnlUsd: number;
+  feesUsd: number;
+  positions: PaperPositionView[];
+  history: unknown[];
+  tradeCount: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+}
+
+export interface RotationStateView {
+  enabled: boolean;
+  eventsToday: number;
+  totalReleasedUsd: number;
+  totalAllocatedUsd: number;
+  last: unknown | null;
+  events: unknown[];
+}
+
 export interface DashboardState {
   mode: "PAPER" | "TESTNET" | "LIVE";
   auto: boolean;
@@ -113,6 +156,8 @@ export interface DashboardState {
     dailyRiskUsedPct: number;
     emergencyStop: boolean;
   };
+  paper: PaperStateView;
+  rotation: RotationStateView;
   signals: Signal[];
   updatedAt: number;
 }

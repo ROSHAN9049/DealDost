@@ -277,7 +277,7 @@ function render(state) {
   const tnPositions = $("testnetPositions");
   if (tnPositions) {
     if (!tn.positions?.length) {
-      tnPositions.innerHTML = '<tr><td colspan="8" class="empty">No TESTNET positions.</td></tr>';
+      tnPositions.innerHTML = '<tr><td colspan="9" class="empty">No TESTNET positions.</td></tr>';
     } else {
       tnPositions.innerHTML = tn.positions.map((p) =>
         "<tr>" +
@@ -289,6 +289,7 @@ function render(state) {
         "<td>" + fmt(p.markPrice) + "</td>" +
         "<td>" + money(p.unrealizedPnlUsd) + "</td>" +
         "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
+        "<td>" + esc(p.protection || "MISSING") + "</td>" +
         "</tr>"
       ).join("");
     }

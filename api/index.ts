@@ -78,6 +78,7 @@ app.post("/api/market/ingest", async (req, res) => {
         "5m": candles["5m"],
         "15m": candles["15m"],
       },
+      btc15m: Array.isArray(body.btc15m) ? body.btc15m : undefined,
     });
 
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");

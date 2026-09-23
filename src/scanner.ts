@@ -242,17 +242,30 @@ export class BinanceScanner extends EventEmitter {
     return this.state();
   }
 
-  setRequestMode(mode: "PAPER" | "TESTNET" | "LIVE", auto?: boolean) {
+  setRequestMode(
+    mode: "PAPER" | "TESTNET" | "LIVE",
+    auto?: boolean,
+    automation?: { paperAuto?: boolean; testnetAuto?: boolean },
+  ) {
     if (mode === "LIVE") {
       throw new Error("LIVE_EXECUTION_LOCKED");
     }
     this.mode = mode;
-    if (typeof auto === "boolean") {
-      if (mode === "PAPER") this.paper.setAuto(auto);
-      else this.testnetAuto = auto;
+
+    if (typeof automation?.paperAuto === "boolean") {
+      this.paper.setAuto(automation.paperAuto);
+    } else if (mode === "PAPER" && typeof auto === "boolean") {
+      this.paper.setAuto(auto);
     }
-    if (mode === "TESTNET" && this.testnetAuto) void this.tryTestnetEntries();
-    if (mode === "PAPER" && this.paper.getAuto()) this.tryPaperEntries();
+
+    if (typeof automation?.testnetAuto === "boolean") {
+      this.testnetAuto = automation.testnetAuto;
+    } else if (mode === "TESTNET" && typeof auto === "boolean") {
+      this.testnetAuto = auto;
+    }
+
+    if (this.testnetAuto) void this.tryTestnetEntries();
+    if (this.paper.getAuto()) this.tryPaperEntries();
     this.emit("update");
   }
 

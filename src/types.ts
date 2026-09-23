@@ -125,14 +125,32 @@ export interface RotationStateView {
   events: unknown[];
 }
 
+export interface TestnetPositionView {
+  symbol: string;
+  engine: Engine | null;
+  side: Side;
+  quantity: number;
+  entryPrice: number;
+  markPrice: number;
+  unrealizedPnlUsd: number;
+  leverage: number | null;
+  openedAt: number;
+}
+
 export interface TestnetStateView {
   configured: boolean;
   executionEnabled: boolean;
+  auto: boolean;
   connected: boolean;
   accountBalanceUsd: number;
   availableBalanceUsd: number;
   unrealizedPnlUsd: number;
   openPositions: number;
+  momentumOpen: number;
+  scalpingOpen: number;
+  unclassifiedOpenPositions: number;
+  dailyRiskUsedPct: number;
+  positions: TestnetPositionView[];
   lastSyncAt: number;
   error: string | null;
 }

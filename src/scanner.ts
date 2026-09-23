@@ -587,8 +587,11 @@ export class BinanceScanner extends EventEmitter {
   }
 
   private tryActiveEntries() {
-    if (this.mode === "PAPER") this.tryPaperEntries();
-    else if (this.mode === "TESTNET" && this.testnetAuto) void this.tryTestnetEntries();
+    // PAPER AUTO and TESTNET AUTO are independent switches. The selected
+    // dashboard mode controls which account is shown, but never disables the
+    // other explicitly-enabled simulator/execution engine.
+    if (this.paper.getAuto()) this.tryPaperEntries();
+    if (this.mode === "TESTNET" && this.testnetAuto) void this.tryTestnetEntries();
   }
 
   private tryPaperEntries() {

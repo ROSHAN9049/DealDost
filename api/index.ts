@@ -120,6 +120,22 @@ app.post("/api/mode", async (req, res) => {
   }
 });
 
+app.post("/api/testnet/protection-sync", async (req, res) => {
+  try {
+    await ensureStarted();
+    const symbol = String(req.body?.symbol ?? "").toUpperCase();
+    if (!symbol) {
+      res.status(400).json({ error: "symbol_required" });
+      return;
+    }
+    const state = await scanner.syncTestnetPositionProtection(symbol);
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.json(state);
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.post("/api/paper/auto", async (req, res) => {
   try {
     await ensureStarted();

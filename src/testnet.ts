@@ -76,6 +76,7 @@ export class TestnetClient {
     params.set("signature", signature);
 
     const response = await fetch(this.baseUrl + path + "?" + params.toString(), {
+      signal: AbortSignal.timeout(7000),
       headers: {
         "X-MBX-APIKEY": config.testnetApiKey,
         "User-Agent": "DealDost/2.1",

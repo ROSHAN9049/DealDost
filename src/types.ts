@@ -135,6 +135,7 @@ export interface TestnetPositionView {
   unrealizedPnlUsd: number;
   leverage: number | null;
   openedAt: number;
+  protection: "OK" | "PARTIAL" | "MISSING";
 }
 
 export interface TestnetStateView {

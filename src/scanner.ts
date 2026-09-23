@@ -197,6 +197,16 @@ export class BinanceScanner extends EventEmitter {
     this.btcPrice = this.symbols.get("BTCUSDT")?.lastPrice ?? this.btcPrice;
     if (input.symbol === "BTCUSDT") this.btcPrice = state.lastPrice;
 
+    // In Vercel/serverless mode there is no Binance websocket connection.
+    // Re-mark every open paper position from the fresh browser universe
+    // ticker so unrealized P&L and SL/TP exits keep working.
+    for (const position of this.paper.positionsList()) {
+      const livePrice = this.symbols.get(position.symbol)?.lastPrice;
+      if (Number.isFinite(livePrice) && livePrice > 0) {
+        this.handlePaperMark(position.symbol, livePrice);
+      }
+    }
+
     this.evaluate(input.symbol, "MOMENTUM");
     this.evaluate(input.symbol, "SCALPING");
     this.lastMarketError = null;
@@ -222,6 +232,15 @@ export class BinanceScanner extends EventEmitter {
       if (rotationEvent) trade.rotationId = rotationEvent.rotationId;
     }
     this.emit("update");
+  }
+
+  private handlePaperMark(symbol: string, price: number) {
+    const trade = this.paper.mark(symbol, price);
+    if (!trade) return;
+
+    this.risk.registerClose(symbol, trade.netPnlUsd);
+    const rotationEvent = this.rotation.onClosedTrade(trade);
+    if (rotationEvent) trade.rotationId = rotationEvent.rotationId;
   }
 
   private async syncTestnet() {
@@ -426,12 +445,7 @@ export class BinanceScanner extends EventEmitter {
           if (arr.length > 200) arr.shift();
         }
 
-        const closedTrade = this.paper.mark(symbol, state.lastPrice);
-        if (closedTrade) {
-          this.risk.registerClose(symbol, closedTrade.netPnlUsd);
-          const rotationEvent = this.rotation.onClosedTrade(closedTrade);
-          if (rotationEvent) closedTrade.rotationId = rotationEvent.rotationId;
-        }
+        this.handlePaperMark(symbol, state.lastPrice);
 
         if (k.x) {
           this.evaluate(symbol, interval === "1m" ? "SCALPING" : "MOMENTUM");

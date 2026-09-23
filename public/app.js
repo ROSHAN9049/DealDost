@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 let currentMode = localStorage.getItem("dealdost.mode") === "TESTNET" ? "TESTNET" : "PAPER";
-let testnetAuto = localStorage.getItem("dealdost.testnetAuto") === "true";
+let testnetAuto = false;
 let paperAuto = localStorage.getItem("dealdost.paperAuto") === "true";
 
 const fmt = (n) =>
@@ -224,7 +224,7 @@ function render(state) {
   else testnetAuto = Boolean(state.auto);
   localStorage.setItem("dealdost.mode", currentMode);
   localStorage.setItem("dealdost.paperAuto", String(paperAuto));
-  localStorage.setItem("dealdost.testnetAuto", String(testnetAuto));
+  // TESTNET AUTO is intentionally session-only; it never re-arms on refresh.
 
   ["paperMode", "testnetMode", "liveMode"].forEach((id) => $(id)?.classList.remove("active"));
   $(currentMode === "PAPER" ? "paperMode" : "testnetMode")?.classList.add("active");

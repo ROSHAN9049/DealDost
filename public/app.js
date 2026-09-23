@@ -13,30 +13,39 @@ const esc = (s) =>
   }[c]));
 
 async function directBinanceFallback() {
-  const [infoResponse, tickerResponse] = await Promise.all([
-    fetch("https://fapi.binance.com/fapi/v1/exchangeInfo", { cache: "no-store" }),
-    fetch("https://fapi.binance.com/fapi/v1/ticker/24hr", { cache: "no-store" })
-  ]);
-  if (!infoResponse.ok || !tickerResponse.ok) throw new Error("Binance market API unavailable");
-  const info = await infoResponse.json();
-  const ticker = await tickerResponse.json();
-  const eligible = new Set(
-    info.symbols
-      .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.contractType === "PERPETUAL")
-      .map((s) => s.symbol)
-  );
-  const top = ticker
-    .filter((t) => eligible.has(t.symbol) && Number(t.quoteVolume) >= 10000000)
-    .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
-    .slice(0, 50);
-  const btc = top.find((t) => t.symbol === "BTCUSDT");
-  $("regime").textContent = "WAITING";
-  $("btc").textContent = btc ? fmt(Number(btc.lastPrice)) : "—";
-  $("ws").textContent = "REST ONLINE";
-  $("ws").className = "status ok";
-  $("data").textContent = "FRESH • direct Binance market fallback";
-  $("data").className = "muted";
-  $("universe").textContent = top.length;
+  const bases = [
+    "https://fapi.binance.com",
+    "https://fapi1.binance.com",
+    "https://fapi2.binance.com",
+    "https://fapi3.binance.com"
+  ];
+  let lastError = null;
+
+  for (const base of bases) {
+    try {
+      const response = await fetch(base + "/fapi/v1/ticker/24hr", { cache: "no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const ticker = await response.json();
+      const top = ticker
+        .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
+        .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
+        .slice(0, 50);
+      const btc = top.find((t) => t.symbol === "BTCUSDT");
+
+      $("regime").textContent = "WAITING";
+      $("btc").textContent = btc ? fmt(Number(btc.lastPrice)) : "—";
+      $("ws").textContent = "REST ONLINE";
+      $("ws").className = "status ok";
+      $("data").textContent = "FRESH • direct Binance fallback";
+      $("data").className = "muted";
+      $("universe").textContent = top.length;
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Binance market API unavailable");
 }
 
 function showApiError(message) {
@@ -85,6 +94,7 @@ function render(state) {
   $("ws").textContent = state.feed.websocket;
   $("ws").className = "status " + (state.feed.websocket === "ONLINE" ? "ok" : "warn");
   $("data").textContent = state.feed.data + " • reconnects " + state.feed.reconnects;
+  if (state.feed.error) $("data").title = state.feed.error; else $("data").removeAttribute("title");
   $("data").className = "muted";
   $("universe").textContent = state.market.universeSize;
 

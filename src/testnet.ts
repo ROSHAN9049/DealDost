@@ -211,6 +211,8 @@ export class TestnetClient {
         scalpingOpen: 0,
         unclassifiedOpenPositions: 0,
         dailyRiskUsedPct: 0,
+        realizedPnlTodayUsd: 0,
+        feesTodayUsd: 0,
         lastClosedAt: {},
       };
     }

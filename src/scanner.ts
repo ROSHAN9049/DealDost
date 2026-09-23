@@ -101,7 +101,8 @@ export class BinanceScanner extends EventEmitter {
     const trade = this.paper.closeManual(symbol);
     if (trade) {
       this.risk.registerClose(symbol, trade.netPnlUsd);
-      this.rotation.onClosedTrade(trade);
+      const rotationEvent = this.rotation.onClosedTrade(trade);
+      if (rotationEvent) trade.rotationId = rotationEvent.rotationId;
     }
     this.emit("update");
   }
@@ -268,7 +269,8 @@ export class BinanceScanner extends EventEmitter {
         const closedTrade = this.paper.mark(symbol, state.lastPrice);
         if (closedTrade) {
           this.risk.registerClose(symbol, closedTrade.netPnlUsd);
-          this.rotation.onClosedTrade(closedTrade);
+          const rotationEvent = this.rotation.onClosedTrade(closedTrade);
+          if (rotationEvent) closedTrade.rotationId = rotationEvent.rotationId;
         }
 
         if (k.x) {

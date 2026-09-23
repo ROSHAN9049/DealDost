@@ -88,7 +88,11 @@ export class RiskGovernor {
     const riskUsd = this.cfg.accountBalanceUsd * (this.cfg.riskPerTradePct / 100);
     const riskDistance = Math.abs(signal.entry - signal.stop);
     const riskDistancePct = signal.entry ? (riskDistance / signal.entry) * 100 : 0;
-    const notionalUsd = riskDistance > 0 ? riskUsd * (signal.entry / riskDistance) : 0;
+    const riskBasedNotionalUsd = riskDistance > 0 ? riskUsd * (signal.entry / riskDistance) : 0;
+    // PAPER is explicitly no-leverage, so reserve at most one equal capital slice per slot.
+    // This allows all six configured slots to coexist without borrowing/margin leverage.
+    const capitalPerSlotUsd = this.cfg.accountBalanceUsd / Math.max(1, this.cfg.maxTotalPositions);
+    const notionalUsd = Math.max(0, Math.min(riskBasedNotionalUsd, capitalPerSlotUsd));
 
     return {
       eligible: gate.eligible,

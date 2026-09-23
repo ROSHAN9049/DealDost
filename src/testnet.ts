@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { config } from "./config.js";
-import type { Side, TestnetStateView } from "./types.js";
+import type { Engine, Side, TestnetPositionView, TestnetStateView } from "./types.js";
 
 type BalanceRow = {
   asset?: string;
@@ -11,7 +11,11 @@ type BalanceRow = {
 type PositionRow = {
   symbol?: string;
   positionAmt?: string;
+  entryPrice?: string;
+  markPrice?: string;
   unrealizedProfit?: string;
+  leverage?: string;
+  updateTime?: number;
 };
 
 type ExchangeFilter = {
@@ -33,6 +37,25 @@ type ExchangeSymbol = {
 
 type ExchangeInfo = {
   symbols?: ExchangeSymbol[];
+};
+
+type OrderRow = {
+  symbol?: string;
+  side?: "BUY" | "SELL";
+  type?: string;
+  status?: string;
+  clientOrderId?: string;
+  reduceOnly?: boolean;
+  closePosition?: boolean;
+  time?: number;
+  updateTime?: number;
+};
+
+type IncomeRow = {
+  income?: string;
+  asset?: string;
+  incomeType?: string;
+  time?: number;
 };
 
 export interface TestnetOrderPlan {
@@ -60,6 +83,20 @@ export interface TestnetOrderResult {
   takeProfitOrderId?: string;
 }
 
+export interface TestnetExecutionSnapshot {
+  connected: boolean;
+  accountBalanceUsd: number;
+  availableBalanceUsd: number;
+  unrealizedPnlUsd: number;
+  positions: TestnetPositionView[];
+  openPositions: number;
+  momentumOpen: number;
+  scalpingOpen: number;
+  unclassifiedOpenPositions: number;
+  dailyRiskUsedPct: number;
+  lastClosedAt: Record<string, number>;
+}
+
 export class TestnetClient {
   private readonly baseUrl = config.testnetRestBase;
   private exchangeInfo?: ExchangeInfo;
@@ -77,40 +114,144 @@ export class TestnetClient {
     return {
       configured: this.isConfigured(),
       executionEnabled: this.isExecutionEnabled(),
+      auto: false,
       connected: false,
       accountBalanceUsd: 0,
       availableBalanceUsd: 0,
       unrealizedPnlUsd: 0,
       openPositions: 0,
+      momentumOpen: 0,
+      scalpingOpen: 0,
+      unclassifiedOpenPositions: 0,
+      dailyRiskUsedPct: 0,
+      positions: [],
       lastSyncAt: 0,
       error: null,
     };
   }
 
   async sync(): Promise<TestnetStateView> {
-    const base = this.emptyState();
+    const execution = await this.getExecutionSnapshot();
+    return {
+      ...this.emptyState(),
+      connected: execution.connected,
+      accountBalanceUsd: execution.accountBalanceUsd,
+      availableBalanceUsd: execution.availableBalanceUsd,
+      unrealizedPnlUsd: execution.unrealizedPnlUsd,
+      openPositions: execution.openPositions,
+      momentumOpen: execution.momentumOpen,
+      scalpingOpen: execution.scalpingOpen,
+      unclassifiedOpenPositions: execution.unclassifiedOpenPositions,
+      dailyRiskUsedPct: execution.dailyRiskUsedPct,
+      positions: execution.positions,
+      lastSyncAt: Date.now(),
+    };
+  }
+
+  async getExecutionSnapshot(): Promise<TestnetExecutionSnapshot> {
     if (!this.isConfigured()) {
-      return { ...base, lastSyncAt: Date.now() };
+      return {
+        connected: false,
+        accountBalanceUsd: 0,
+        availableBalanceUsd: 0,
+        unrealizedPnlUsd: 0,
+        positions: [],
+        openPositions: 0,
+        momentumOpen: 0,
+        scalpingOpen: 0,
+        unclassifiedOpenPositions: 0,
+        dailyRiskUsedPct: 0,
+        lastClosedAt: {},
+      };
     }
 
-    const [balances, positions] = await Promise.all([
+    const [balances, positions, income, commission] = await Promise.all([
       this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
       this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
+      this.signedGet<IncomeRow[]>(this.incomePath("REALIZED_PNL")),
+      this.signedGet<IncomeRow[]>(this.incomePath("COMMISSION")),
     ]);
 
     const usdt = balances.find((row) => row.asset === "USDT");
     const open = positions.filter((row) => Math.abs(Number(row.positionAmt ?? 0)) > 0);
-    const unrealizedPnlUsd = open.reduce((sum, row) => sum + Number(row.unrealizedProfit ?? 0), 0);
+    const positionViews: TestnetPositionView[] = [];
+    let momentumOpen = 0;
+    let scalpingOpen = 0;
+    let unclassifiedOpenPositions = 0;
+
+    const tagged = await Promise.all(
+      open.map(async (row) => {
+        const symbol = String(row.symbol ?? "").toUpperCase();
+        const orders = await this.getRecentOrders(symbol);
+        const engine = this.detectEngine(orders);
+        const lastClosedAt = this.detectLastClosedAt(orders);
+        return { row, symbol, orders, engine, lastClosedAt };
+      }),
+    );
+
+    const lastClosedAt: Record<string, number> = {};
+    for (const item of tagged) {
+      const position = item.row;
+      const quantity = Math.abs(Number(position.positionAmt ?? 0));
+      const side: Side = Number(position.positionAmt ?? 0) >= 0 ? "LONG" : "SHORT";
+      const engine = item.engine;
+      if (engine === "MOMENTUM") momentumOpen += 1;
+      else if (engine === "SCALPING") scalpingOpen += 1;
+      else unclassifiedOpenPositions += 1;
+
+      if (item.lastClosedAt > 0) lastClosedAt[item.symbol] = item.lastClosedAt;
+
+      positionViews.push({
+        symbol: item.symbol,
+        engine,
+        side,
+        quantity,
+        entryPrice: Number(position.entryPrice ?? 0),
+        markPrice: Number(position.markPrice ?? 0),
+        unrealizedPnlUsd: Number(position.unrealizedProfit ?? 0),
+        leverage: Number.isFinite(Number(position.leverage)) ? Number(position.leverage) : null,
+        openedAt: Number(position.updateTime ?? 0),
+      });
+    }
+
+    const accountBalanceUsd = Number(usdt?.balance ?? 0);
+    const availableBalanceUsd = Number(usdt?.availableBalance ?? 0);
+    const negativeRealized = income.reduce((sum, row) => {
+      const value = Number(row.income ?? 0);
+      return value < 0 ? sum + Math.abs(value) : sum;
+    }, 0);
+    const negativeCommission = commission.reduce((sum, row) => {
+      const value = Number(row.income ?? 0);
+      return value < 0 ? sum + Math.abs(value) : sum;
+    }, 0);
+    const dailyLossUsd = negativeRealized + negativeCommission;
+    const dailyRiskUsedPct = accountBalanceUsd > 0 ? (dailyLossUsd / accountBalanceUsd) * 100 : 0;
+    const unrealizedPnlUsd = open.reduce(
+      (sum, row) => sum + Number(row.unrealizedProfit ?? 0),
+      0,
+    );
 
     return {
-      ...base,
       connected: true,
-      accountBalanceUsd: Number(usdt?.balance ?? 0),
-      availableBalanceUsd: Number(usdt?.availableBalance ?? 0),
+      accountBalanceUsd,
+      availableBalanceUsd,
       unrealizedPnlUsd,
+      positions: positionViews,
       openPositions: open.length,
-      lastSyncAt: Date.now(),
+      momentumOpen,
+      scalpingOpen,
+      unclassifiedOpenPositions,
+      dailyRiskUsedPct,
+      lastClosedAt,
     };
+  }
+
+  async setOneXLeverage(symbol: string) {
+    if (!this.isExecutionEnabled()) throw new Error("TESTNET_EXECUTION_DISABLED");
+    await this.signedPost<any>("/fapi/v1/leverage", {
+      symbol: symbol.toUpperCase(),
+      leverage: "1",
+    });
   }
 
   async buildMarketOrderPlan(input: {
@@ -140,6 +281,23 @@ export class TestnetClient {
       throw new Error("Missing TESTNET quantity filters for " + symbol);
     }
 
+    const mark = await this.publicGet<{ markPrice?: string }>(
+      "/fapi/v1/premiumIndex?symbol=" + encodeURIComponent(symbol),
+    );
+    const markPrice = Number(mark.markPrice ?? 0);
+    if (!Number.isFinite(markPrice) || markPrice <= 0) {
+      throw new Error("Unable to read TESTNET mark price for " + symbol);
+    }
+
+    if (input.stopPrice !== undefined && input.takeProfitPrice !== undefined) {
+      if (input.side === "LONG" && !(input.stopPrice < markPrice && input.takeProfitPrice > markPrice)) {
+        throw new Error("TESTNET LONG protection prices are not on the correct side of market");
+      }
+      if (input.side === "SHORT" && !(input.stopPrice > markPrice && input.takeProfitPrice < markPrice)) {
+        throw new Error("TESTNET SHORT protection prices are not on the correct side of market");
+      }
+    }
+
     const quantity = this.floorToStep(input.quantity, stepSize);
     if (quantity < minQty || quantity <= 0) {
       throw new Error("TESTNET quantity below minimum for " + symbol + ": " + quantity);
@@ -151,26 +309,16 @@ export class TestnetClient {
     const minNotional = Number(
       (rules.filters ?? []).find((f) => f.filterType === "MIN_NOTIONAL")?.notional ?? 0,
     );
-
-    if (minNotional > 0) {
-      const mark = await this.publicGet<{ markPrice?: string }>(
-        "/fapi/v1/premiumIndex?symbol=" + encodeURIComponent(symbol),
+    const notional = quantity * markPrice;
+    if (minNotional > 0 && notional < minNotional) {
+      throw new Error(
+        "TESTNET order notional below minimum for " +
+          symbol +
+          ": " +
+          notional.toFixed(4) +
+          " < " +
+          minNotional,
       );
-      const markPrice = Number(mark.markPrice ?? 0);
-      if (!Number.isFinite(markPrice) || markPrice <= 0) {
-        throw new Error("Unable to read TESTNET mark price for " + symbol);
-      }
-      const notional = quantity * markPrice;
-      if (notional < minNotional) {
-        throw new Error(
-          "TESTNET order notional below minimum for " +
-            symbol +
-            ": " +
-            notional.toFixed(4) +
-            " < " +
-            minNotional,
-        );
-      }
     }
 
     return {
@@ -204,6 +352,8 @@ export class TestnetClient {
     }
 
     const plan = await this.buildMarketOrderPlan(input);
+    await this.setOneXLeverage(plan.symbol);
+
     const clientOrderId = this.safeClientOrderId(
       input.clientOrderId ?? "DDT-" + Date.now().toString(36),
     );
@@ -255,9 +405,6 @@ export class TestnetClient {
         takeProfitOrderId = String(takeProfit.orderId);
       }
     } catch (error) {
-      // Fail closed: if the entry succeeded but protection could not be
-      // installed, immediately attempt a market close instead of leaving an
-      // unprotected TESTNET position running.
       try {
         await this.signedPost<any>("/fapi/v1/order", {
           symbol: plan.symbol,
@@ -294,6 +441,36 @@ export class TestnetClient {
     };
   }
 
+  private detectEngine(orders: OrderRow[]): Engine | null {
+    const entry = [...orders]
+      .filter((o) => o.status === "FILLED" && !o.reduceOnly && !o.closePosition && o.type === "MARKET")
+      .sort((a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0))[0];
+    const id = String(entry?.clientOrderId ?? "");
+    if (id.startsWith("DDT-MOM-")) return "MOMENTUM";
+    if (id.startsWith("DDT-SCALP-")) return "SCALPING";
+    return null;
+  }
+
+  private detectLastClosedAt(orders: OrderRow[]) {
+    return orders
+      .filter((o) => o.status === "FILLED" && (o.reduceOnly || o.closePosition))
+      .map((o) => Number(o.time ?? o.updateTime ?? 0))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => b - a)[0] ?? 0;
+  }
+
+  private incomePath(type: "REALIZED_PNL" | "COMMISSION") {
+    const startTime = new Date();
+    startTime.setHours(0, 0, 0, 0);
+    return "/fapi/v1/income?incomeType=" + type + "&startTime=" + startTime.getTime() + "&limit=1000";
+  }
+
+  private async getRecentOrders(symbol: string): Promise<OrderRow[]> {
+    return this.signedGet<OrderRow[]>(
+      "/fapi/v1/allOrders?symbol=" + encodeURIComponent(symbol) + "&limit=50",
+    );
+  }
+
   private async placeCloseProtection(
     symbol: string,
     side: "BUY" | "SELL",
@@ -304,8 +481,11 @@ export class TestnetClient {
     const rules = await this.getSymbolRules(symbol);
     const priceFilter = (rules.filters ?? []).find((f) => f.filterType === "PRICE_FILTER");
     const tickSize = Number(priceFilter?.tickSize ?? 0);
+    const isLong = side === "SELL";
     const normalizedPrice = tickSize > 0
-      ? this.floorToStep(stopPrice, tickSize)
+      ? type === "STOP_MARKET"
+        ? (isLong ? this.floorToStep(stopPrice, tickSize) : this.ceilToStep(stopPrice, tickSize))
+        : (isLong ? this.ceilToStep(stopPrice, tickSize) : this.floorToStep(stopPrice, tickSize))
       : stopPrice;
 
     if (!Number.isFinite(normalizedPrice) || normalizedPrice <= 0) {
@@ -344,6 +524,12 @@ export class TestnetClient {
     return Number((units * step).toFixed(precision));
   }
 
+  private ceilToStep(value: number, step: number) {
+    const precision = Math.max(0, Math.ceil(-Math.log10(step)) + 2);
+    const units = Math.ceil(value / step - 1e-12);
+    return Number((units * step).toFixed(precision));
+  }
+
   private formatNumber(value: number) {
     return Number(value.toFixed(12)).toString();
   }
@@ -358,7 +544,7 @@ export class TestnetClient {
       signal: AbortSignal.timeout(7000),
       headers: {
         "Accept": "application/json",
-        "User-Agent": "DealDost/2.3",
+        "User-Agent": "DealDost/2.4",
       },
     });
     const body = await response.text();
@@ -369,20 +555,20 @@ export class TestnetClient {
   }
 
   private async signedGet<T>(path: string): Promise<T> {
-    const params = new URLSearchParams({
-      recvWindow: "5000",
-      timestamp: String(Date.now()),
-    });
+    const [pathname, rawQuery = ""] = path.split("?");
+    const params = new URLSearchParams(rawQuery);
+    params.set("recvWindow", "5000");
+    params.set("timestamp", String(Date.now()));
     const signature = createHmac("sha256", config.testnetApiSecret)
       .update(params.toString())
       .digest("hex");
     params.set("signature", signature);
 
-    const response = await fetch(this.baseUrl + path + "?" + params.toString(), {
+    const response = await fetch(this.baseUrl + pathname + "?" + params.toString(), {
       signal: AbortSignal.timeout(7000),
       headers: {
         "X-MBX-APIKEY": config.testnetApiKey,
-        "User-Agent": "DealDost/2.3",
+        "User-Agent": "DealDost/2.4",
       },
     });
 
@@ -409,7 +595,7 @@ export class TestnetClient {
       signal: AbortSignal.timeout(10_000),
       headers: {
         "X-MBX-APIKEY": config.testnetApiKey,
-        "User-Agent": "DealDost/2.3",
+        "User-Agent": "DealDost/2.4",
       },
     });
 

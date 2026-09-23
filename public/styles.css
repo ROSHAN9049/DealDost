@@ -54,3 +54,6 @@ tr:hover td { background:#0d1c2d; }
 
 .stage.partial { color:#e7cb75; border-color:#675d2c; background:#28240f; }
 .stage.missing { color:#f18b8b; border-color:#65333a; background:#281419; }
+
+.protect-btn { margin-left:6px; padding:4px 7px; border:1px solid #6b4f24; border-radius:7px; background:#211b0e; color:#f0d083; font:800 9px/1 Inter,system-ui,sans-serif; letter-spacing:.08em; cursor:pointer; }
+.protect-btn:hover { border-color:#9a7334; }

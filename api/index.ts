@@ -13,7 +13,11 @@ app.use(express.static(path.resolve(process.cwd(), "public")));
 function applyRequestMode(input: any) {
   const requested = String(input?.mode ?? "").toUpperCase();
   if (requested === "PAPER" || requested === "TESTNET") {
-    scanner.setRequestMode(requested, Boolean(input?.auto ?? input?.testnetAuto));
+    const automation = {
+      paperAuto: input?.paperAuto === undefined ? undefined : Boolean(input.paperAuto),
+      testnetAuto: input?.testnetAuto === undefined ? undefined : Boolean(input.testnetAuto),
+    };
+    scanner.setRequestMode(requested, Boolean(input?.auto), automation);
   } else if (requested === "LIVE") {
     throw new Error("LIVE_EXECUTION_LOCKED");
   }
@@ -57,6 +61,7 @@ app.get("/api/state", async (req, res) => {
     applyRequestMode({
       mode: req.get("x-dealdost-mode"),
       auto: req.get("x-dealdost-auto") === "true",
+      paperAuto: req.get("x-dealdost-paper-auto") === "true",
       testnetAuto: req.get("x-dealdost-testnet-auto") === "true",
     });
     await scanner.serverlessTick();
@@ -112,7 +117,10 @@ app.post("/api/mode", async (req, res) => {
       res.status(400).json({ error: mode === "LIVE" ? "LIVE_EXECUTION_LOCKED" : "invalid_mode" });
       return;
     }
-    scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto));
+    scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto), {
+      paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
+      testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),
+    });
     res.json(scanner.state());
   } catch (error) {
     res.status(error instanceof Error && error.message === "LIVE_EXECUTION_LOCKED" ? 403 : 503)

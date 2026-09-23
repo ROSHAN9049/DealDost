@@ -34,9 +34,10 @@ Paper configuration:
 - PAPER_AUTO
 
 Current execution boundary:
-- PAPER is local simulation only.
-- TESTNET and LIVE adapters are not enabled in this phase.
-- Never put real Binance API keys in the repository.
+- PAPER is local simulation only and uses its own AUTO switch.
+- TESTNET uses the dedicated Binance Futures Demo/Testnet account only when credentials and BINANCE_TESTNET_EXECUTION_ENABLED=true are present; TESTNET AUTO is independently controlled from PAPER AUTO.
+- LIVE execution is intentionally locked in V2 and has no order path.
+- Never put Binance API keys or secrets in the repository.
 
 Binance WebSocket market connections are treated as reconnectable streams, with heartbeat/reconnect handling and stale-data gating.
 
@@ -49,6 +50,7 @@ Testnet phase 1:
 
 TESTNET execution phase 2:
 - Dashboard can switch between PAPER and TESTNET without connecting LIVE.
+- PAPER AUTO and TESTNET AUTO are independent switches; selecting one mode never disables the other automation state.
 - TESTNET AUTO only attempts orders when BINANCE_TESTNET_EXECUTION_ENABLED=true and credentials are configured server-side.
 - Before an auto-entry, the scanner reconciles Binance Demo balance, open positions, engine tags, recent exits/cooldowns and same-day realized-loss/commission usage.
 - Auto-entry is blocked when any open position is unclassified, total positions reach 6, Momentum reaches 3, Scalping reaches 3, or daily risk reaches 6%.

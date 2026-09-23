@@ -14,6 +14,7 @@ type PositionRow = {
   entryPrice?: string;
   markPrice?: string;
   unrealizedProfit?: string;
+  unRealizedProfit?: string;
   leverage?: string;
   updateTime?: number;
 };
@@ -180,7 +181,7 @@ export class TestnetClient {
       quantity: Math.abs(Number(row.positionAmt ?? 0)),
       entryPrice: Number(row.entryPrice ?? 0),
       markPrice: Number(row.markPrice ?? 0),
-      unrealizedPnlUsd: Number(row.unrealizedProfit ?? 0),
+      unrealizedPnlUsd: Number(row.unRealizedProfit ?? row.unrealizedProfit ?? 0),
       leverage: Number.isFinite(Number(row.leverage)) ? Number(row.leverage) : null,
       openedAt: Number(row.updateTime ?? 0),
       protection: "MISSING",
@@ -191,7 +192,7 @@ export class TestnetClient {
       connected: true,
       accountBalanceUsd: Number(usdt?.balance ?? 0),
       availableBalanceUsd: Number(usdt?.availableBalance ?? 0),
-      unrealizedPnlUsd: open.reduce((sum, row) => sum + Number(row.unrealizedProfit ?? 0), 0),
+      unrealizedPnlUsd: open.reduce((sum, row) => sum + Number(row.unRealizedProfit ?? row.unrealizedProfit ?? 0), 0),
       openPositions: open.length,
       momentumOpen: 0,
       scalpingOpen: 0,
@@ -218,6 +219,8 @@ export class TestnetClient {
         unclassifiedOpenPositions: enriched.unclassifiedOpenPositions,
         unprotectedOpenPositions: enriched.unprotectedOpenPositions,
         dailyRiskUsedPct: enriched.dailyRiskUsedPct,
+        realizedPnlTodayUsd: enriched.realizedPnlTodayUsd,
+        feesTodayUsd: enriched.feesTodayUsd,
         positions: enriched.positions,
         lastSyncAt: Date.now(),
       };
@@ -298,7 +301,7 @@ export class TestnetClient {
         quantity,
         entryPrice: Number(position.entryPrice ?? 0),
         markPrice: Number(position.markPrice ?? 0),
-        unrealizedPnlUsd: Number(position.unrealizedProfit ?? 0),
+        unrealizedPnlUsd: Number(position.unRealizedProfit ?? position.unrealizedProfit ?? 0),
         leverage: Number.isFinite(Number(position.leverage)) ? Number(position.leverage) : null,
         openedAt: Number(position.updateTime ?? 0),
         protection: item.protection,
@@ -320,7 +323,7 @@ export class TestnetClient {
     const dailyLossUsd = negativeRealized + negativeCommission;
     const dailyRiskUsedPct = accountBalanceUsd > 0 ? (dailyLossUsd / accountBalanceUsd) * 100 : 0;
     const unrealizedPnlUsd = open.reduce(
-      (sum, row) => sum + Number(row.unrealizedProfit ?? 0),
+      (sum, row) => sum + Number(row.unRealizedProfit ?? row.unrealizedProfit ?? 0),
       0,
     );
 

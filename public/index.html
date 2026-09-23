@@ -13,10 +13,10 @@
       <div class="subtitle">BINANCE SCANNER V2</div>
     </div>
     <div class="mode">
-      <span class="pill active">PAPER</span>
-      <span class="pill disabled">TESTNET</span>
-      <span class="pill disabled">LIVE</span>
-      <button id="paperAuto" class="auto">PAPER AUTO OFF</button>
+      <button id="paperMode" class="pill active" type="button">PAPER</button>
+      <button id="testnetMode" class="pill" type="button">TESTNET</button>
+      <button id="liveMode" class="pill disabled" type="button" title="LIVE execution is locked in V2">LIVE</button>
+      <button id="paperAuto" class="auto" type="button">PAPER AUTO OFF</button>
     </div>
   </header>
   <main class="container">
@@ -35,6 +35,10 @@
     <section class="card">
       <div class="section-head"><div><div class="label">PAPER POSITIONS</div><div class="muted">No-leverage simulation • fee and slippage included</div></div><div id="paperStats" class="badge">0 trades • 0% WR</div></div>
       <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Engine</th><th>Side</th><th>Entry</th><th>Mark</th><th>SL</th><th>TP1</th><th>Net P&L</th><th>Action</th></tr></thead><tbody id="positions"><tr><td colspan="9" class="empty">No paper positions.</td></tr></tbody></table></div>
+    </section>
+    <section class="card">
+      <div class="section-head"><div><div class="label">TESTNET POSITIONS</div><div class="muted">Exchange-reconciled Demo positions • engine tags are required for auto execution</div></div><div id="testnetPositionGate" class="badge">0 open</div></div>
+      <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Engine</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Unrealized P&L</th><th>Leverage</th></tr></thead><tbody id="testnetPositions"><tr><td colspan="8" class="empty">No TESTNET positions.</td></tr></tbody></table></div>
     </section>
     <section class="card">
       <div class="section-head"><div><div class="label">LIVE SIGNALS</div><div class="muted">Server-owned signal state • sorted by quality</div></div><div id="signalCount" class="badge">0</div></div>

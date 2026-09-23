@@ -249,6 +249,8 @@ function render(state) {
   $("paperAuto").dataset.executionEnabled = String(Boolean(tn.executionEnabled));
   $("testnetBalance").textContent = money(tn.accountBalanceUsd);
   $("testnetOpen").textContent = String(tn.openPositions);
+  $("testnetPnl").textContent = money(tn.realizedPnlTodayUsd);
+  $("testnetFees").textContent = money(tn.feesTodayUsd);
   const tnError = $("testnetError");
   if (tnError) {
     tnError.textContent = tn.error ? String(tn.error).slice(0, 120) : "";

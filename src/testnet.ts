@@ -142,6 +142,7 @@ export class TestnetClient {
       momentumOpen: 0,
       scalpingOpen: 0,
       unclassifiedOpenPositions: 0,
+      unprotectedOpenPositions: 0,
       dailyRiskUsedPct: 0,
       realizedPnlTodayUsd: 0,
       feesTodayUsd: 0,

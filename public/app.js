@@ -289,7 +289,7 @@ function render(state) {
         "<td>" + fmt(p.markPrice) + "</td>" +
         "<td>" + money(p.unrealizedPnlUsd) + "</td>" +
         "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
-        "<td>" + esc(p.protection || "MISSING") + "</td>" +
+        "<td><span class=\"stage " + String(p.protection || "MISSING").toLowerCase() + "\">" + esc(p.protection || "MISSING") + "</span></td>" +
         "</tr>"
       ).join("");
     }

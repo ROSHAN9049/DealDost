@@ -260,6 +260,13 @@ function render(state) {
   $("riskTrade").textContent = state.risk.riskPerTradePct + "%";
   $("riskDaily").textContent = state.risk.dailyRiskUsedPct.toFixed(2) + "% / " + state.risk.maxDailyRiskPct + "%";
   $("emergency").textContent = state.risk.emergencyStop ? "ON" : "OFF";
+  const tnGate = $("testnetPositionGate");
+  if (tnGate) {
+    tnGate.textContent = tn.positions?.length
+      ? tn.positions.length + " open" + (tn.unclassifiedOpenPositions ? " • " + tn.unclassifiedOpenPositions + " unclassified" : "")
+      : "0 open";
+  }
+
   const tnPositions = $("testnetPositions");
   if (tnPositions) {
     if (!tn.positions?.length) {

@@ -61,8 +61,10 @@ app.get("/api/state", async (req, res) => {
     applyRequestMode({
       mode: req.get("x-dealdost-mode"),
       auto: req.get("x-dealdost-auto") === "true",
-      paperAuto: req.get("x-dealdost-paper-auto") === "true",
-      testnetAuto: req.get("x-dealdost-testnet-auto") === "true",
+      paperAuto: req.get("x-dealdost-paper-auto") === "true" ||
+        req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "PAPER",
+      testnetAuto: req.get("x-dealdost-testnet-auto") === "true" ||
+        req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "TESTNET",
     });
     await scanner.serverlessTick();
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");

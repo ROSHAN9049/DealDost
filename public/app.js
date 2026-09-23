@@ -331,7 +331,7 @@ function render(state) {
       ? (tn.executionEnabled ? "CONNECTED • ARMED" : "CONNECTED • READ ONLY")
       : tn.configured
         ? "CONFIGURED • OFFLINE"
-        : "NOT CONFIGURED";
+        : "CREDENTIALS REQUIRED";
   $("testnetStatus").className = "status " + (
     tn.error ? "warn" : (tn.connected && tn.executionEnabled ? "ok" : "warn")
   );
@@ -348,8 +348,13 @@ function render(state) {
     tnError.hidden = !tn.error;
   }
   if (tnHint) {
-    if (currentMode === "TESTNET" && !tn.executionEnabled) {
-      tnHint.textContent = "TESTNET connected in READ ONLY mode • execution flag is OFF";
+    if (currentMode === "TESTNET" && !tn.configured) {
+      tnHint.textContent = "TESTNET credentials required • add API key + secret in Railway Variables • execution stays OFF";
+      tnHint.hidden = false;
+    } else if (currentMode === "TESTNET" && !tn.executionEnabled) {
+      tnHint.textContent = tn.connected
+        ? "TESTNET connected in READ ONLY mode • execution flag is OFF"
+        : "TESTNET configured • waiting for account connection";
       tnHint.hidden = false;
     } else if (
       currentMode === "TESTNET" &&

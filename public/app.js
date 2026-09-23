@@ -462,6 +462,7 @@ async function load() {
       headers: {
         "x-dealdost-mode": currentMode,
         "x-dealdost-auto": String(currentMode === "PAPER" ? paperAuto : testnetAuto),
+        "x-dealdost-paper-auto": String(paperAuto),
         "x-dealdost-testnet-auto": String(testnetAuto)
       }
     });

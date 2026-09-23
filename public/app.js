@@ -162,6 +162,10 @@ async function setMode(mode) {
 }
 
 async function toggleAuto() {
+  if (currentMode === "TESTNET" && $("paperAuto").dataset.executionEnabled !== "true") {
+    showApiError("TESTNET execution is READ ONLY. Enable BINANCE_TESTNET_EXECUTION_ENABLED first.");
+    return;
+  }
   const enabled = currentMode === "PAPER" ? !paperAuto : !testnetAuto;
   if (currentMode === "PAPER") {
     paperAuto = enabled;
@@ -242,6 +246,7 @@ function render(state) {
         ? "CONFIGURED • OFFLINE"
         : "NOT CONFIGURED";
   $("testnetStatus").className = "status " + (tn.connected ? "ok" : "warn");
+  $("paperAuto").dataset.executionEnabled = String(Boolean(tn.executionEnabled));
   $("testnetBalance").textContent = money(tn.accountBalanceUsd);
   $("testnetOpen").textContent = String(tn.openPositions);
   const tnError = $("testnetError");

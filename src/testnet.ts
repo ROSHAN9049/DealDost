@@ -148,6 +148,16 @@ export class TestnetClient {
       this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
     ]);
 
+    if (this.isExecutionEnabled()) {
+      await this.cleanupStaleProtectionOrders(
+        new Set(
+          positions
+            .filter((row) => Math.abs(Number(row.positionAmt ?? 0)) > 0)
+            .map((row) => String(row.symbol ?? "").toUpperCase()),
+        ),
+      );
+    }
+
     const usdt = balances.find((row) => row.asset === "USDT");
     const open = positions.filter((row) => Math.abs(Number(row.positionAmt ?? 0)) > 0);
     const basicPositions: TestnetPositionView[] = open.map((row) => ({
@@ -160,6 +170,7 @@ export class TestnetClient {
       unrealizedPnlUsd: Number(row.unrealizedProfit ?? 0),
       leverage: Number.isFinite(Number(row.leverage)) ? Number(row.leverage) : null,
       openedAt: Number(row.updateTime ?? 0),
+      protection: "MISSING",
     }));
 
     const basic = {
@@ -568,6 +579,36 @@ export class TestnetClient {
     );
   }
 
+  private async cleanupStaleProtectionOrders(openSymbols: Set<string>) {
+    const openOrders = await this.signedGet<OrderRow[]>("/fapi/v1/openOrders");
+    const stale = openOrders.filter((order) => {
+      const symbol = String(order.symbol ?? "").toUpperCase();
+      const clientId = String(order.clientOrderId ?? "");
+      return (
+        symbol &&
+        !openSymbols.has(symbol) &&
+        order.status === "NEW" &&
+        order.closePosition === true &&
+        (order.type === "STOP_MARKET" || order.type === "TAKE_PROFIT_MARKET") &&
+        clientId.startsWith("DDT-")
+      );
+    });
+
+    for (const order of stale) {
+      if (order.orderId === undefined && !order.clientOrderId) continue;
+      try {
+        await this.signedDelete<any>("/fapi/v1/order", {
+          symbol: String(order.symbol ?? "").toUpperCase(),
+          orderId: order.orderId === undefined ? "" : String(order.orderId),
+          origClientOrderId: order.orderId === undefined ? String(order.clientOrderId) : "",
+        });
+        console.info("[testnet cleanup]", order.symbol, order.clientOrderId);
+      } catch (error) {
+        console.error("[testnet cleanup]", order.symbol, error);
+      }
+    }
+  }
+
   private async placeCloseProtection(
     symbol: string,
     side: "BUY" | "SELL",
@@ -674,6 +715,34 @@ export class TestnetClient {
       throw new Error("Binance TESTNET " + response.status + ": " + body.slice(0, 300));
     }
 
+    return JSON.parse(body) as T;
+  }
+
+  private async signedDelete<T>(path: string, payload: Record<string, string>): Promise<T> {
+    const params = new URLSearchParams(
+      Object.fromEntries(Object.entries(payload).filter(([, value]) => value)),
+    );
+    params.set("recvWindow", "5000");
+    params.set("timestamp", String(Date.now()));
+
+    const signature = createHmac("sha256", config.testnetApiSecret)
+      .update(params.toString())
+      .digest("hex");
+    params.set("signature", signature);
+
+    const response = await fetch(this.baseUrl + path + "?" + params.toString(), {
+      method: "DELETE",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        "X-MBX-APIKEY": config.testnetApiKey,
+        "User-Agent": "DealDost/2.4",
+      },
+    });
+
+    const body = await response.text();
+    if (!response.ok) {
+      throw new Error("Binance TESTNET " + response.status + ": " + body.slice(0, 300));
+    }
     return JSON.parse(body) as T;
   }
 

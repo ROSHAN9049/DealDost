@@ -45,10 +45,14 @@ async function directScannerFallback() {
   const selected = top[index];
   if (!selected) throw new Error("No eligible Binance futures symbols");
 
-  const [m1, m5, m15] = await Promise.all([
+  const marketSymbol = "BTCUSDT";
+  const [m1, m5, m15, btc15] = await Promise.all([
     fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=1m&limit=120"),
     fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=5m&limit=120"),
-    fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=15m&limit=120")
+    fetchDirectBinance("/fapi/v1/klines?symbol=" + selected.symbol + "&interval=15m&limit=120"),
+    selected.symbol === marketSymbol
+      ? Promise.resolve(m15)
+      : fetchDirectBinance("/fapi/v1/klines?symbol=" + marketSymbol + "&interval=15m&limit=120")
   ]);
 
   localStorage.setItem("dealdost.scannerCursor", String((index + 1) % top.length));
@@ -80,7 +84,8 @@ async function directScannerFallback() {
         "1m": m1.map(toCandle),
         "5m": m5.map(toCandle),
         "15m": m15.map(toCandle)
-      }
+      },
+      btc15m: btc15.map(toCandle)
     })
   });
 
@@ -173,6 +178,12 @@ function render(state) {
   $("testnetStatus").className = "status " + (tn.connected ? "ok" : "warn");
   $("testnetBalance").textContent = money(tn.accountBalanceUsd);
   $("testnetOpen").textContent = String(tn.openPositions);
+  const tnError = $("testnetError");
+  if (tnError) {
+    tnError.textContent = tn.error ? String(tn.error).slice(0, 120) : "";
+    tnError.title = tn.error || "";
+    tnError.hidden = !tn.error;
+  }
 
   $("momentum").textContent = state.engines.momentum.open + "/" + state.engines.momentum.max;
   $("scalping").textContent = state.engines.scalping.open + "/" + state.engines.scalping.max;

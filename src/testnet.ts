@@ -302,7 +302,11 @@ export class TestnetClient {
         entryPrice: Number(position.entryPrice ?? 0),
         markPrice: Number(position.markPrice ?? 0),
         unrealizedPnlUsd: Number(position.unRealizedProfit ?? position.unrealizedProfit ?? 0),
-        leverage: Number.isFinite(Number(position.leverage)) ? Number(position.leverage) : null,
+        leverage: Number.isFinite(Number(position.leverage))
+          ? Number(position.leverage)
+          : item.engine
+            ? 1
+            : null,
         openedAt: Number(position.updateTime ?? 0),
         protection: item.protection,
       });

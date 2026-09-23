@@ -2,31 +2,16 @@ import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import { config } from "./config.js";
 import { atr, ema, macdHistogram, percentChange, rsi, vwap } from "./indicators.js";
+import { PaperBroker } from "./paper.js";
+import { ProfitRotationV3 } from "./rotation.js";
 import { RiskGovernor } from "./risk.js";
-import type {
-  Candle,
-  DashboardState,
-  Engine,
-  Regime,
-  Signal,
-  Side,
-  SymbolState,
-} from "./types.js";
+import type { Candle, DashboardState, Engine, Regime, Signal, Side, SymbolState } from "./types.js";
 
 type BinanceExchangeInfo = {
-  symbols: Array<{
-    symbol: string;
-    status: string;
-    quoteAsset: string;
-    contractType: string;
-  }>;
+  symbols: Array<{ symbol: string; status: string; quoteAsset: string; contractType: string }>;
 };
 
-type BinanceTicker = {
-  symbol: string;
-  quoteVolume: string;
-  lastPrice: string;
-};
+type BinanceTicker = { symbol: string; quoteVolume: string; lastPrice: string };
 
 export class BinanceScanner extends EventEmitter {
   private symbols = new Map<string, SymbolState>();
@@ -41,6 +26,8 @@ export class BinanceScanner extends EventEmitter {
   private btcPrice = 0;
   private signals = new Map<string, Signal>();
   private readonly risk = new RiskGovernor();
+  private readonly paper = new PaperBroker();
+  private readonly rotation = new ProfitRotationV3();
 
   async start() {
     await this.refreshUniverse();
@@ -69,19 +56,11 @@ export class BinanceScanner extends EventEmitter {
 
     return {
       mode: "PAPER",
-      auto: false,
-      market: {
-        regime: this.marketRegime,
-        btcPrice: this.btcPrice,
-        universeSize: this.symbols.size,
-      },
+      auto: this.paper.getAuto(),
+      market: { regime: this.marketRegime, btcPrice: this.btcPrice, universeSize: this.symbols.size },
       feed: {
         websocket: this.feedStatus,
-        data: !this.lastUpdateAt
-          ? "NO_DATA"
-          : Date.now() - this.lastUpdateAt < 15_000
-            ? "FRESH"
-            : "STALE",
+        data: !this.lastUpdateAt ? "NO_DATA" : Date.now() - this.lastUpdateAt < 15_000 ? "FRESH" : "STALE",
         lastUpdateAt: this.lastUpdateAt,
         reconnects: this.reconnects,
       },
@@ -99,24 +78,31 @@ export class BinanceScanner extends EventEmitter {
         totalOpen: risk.total,
         totalMax: this.risk.cfg.maxTotalPositions,
       },
-      risk: {
-        ...this.risk.cfg,
-        dailyRiskUsedPct: risk.dailyRiskUsedPct,
-        emergencyStop: risk.emergencyStop,
-      },
+      risk: { ...this.risk.cfg, dailyRiskUsedPct: risk.dailyRiskUsedPct, emergencyStop: risk.emergencyStop },
+      paper: this.paper.snapshot(),
+      rotation: this.rotation.snapshot(),
       signals: allSignals,
       updatedAt: Date.now(),
     };
   }
 
-  onUpdate(listener: () => void) {
-    this.on("update", listener);
+  setPaperAuto(enabled: boolean) {
+    this.paper.setAuto(enabled);
+    this.emit("update");
+    if (enabled) this.tryAutoEntries();
+  }
+
+  closePaperPosition(symbol: string) {
+    const trade = this.paper.closeManual(symbol);
+    if (trade) {
+      this.risk.registerClose(symbol);
+      this.rotation.onClosedTrade(trade);
+    }
+    this.emit("update");
   }
 
   private async request<T>(path: string): Promise<T> {
-    const response = await fetch(config.restBase + path, {
-      headers: { "User-Agent": "DealDost/2.0" },
-    });
+    const response = await fetch(config.restBase + path, { headers: { "User-Agent": "DealDost/2.0" } });
     if (!response.ok) {
       const body = await response.text();
       throw new Error("Binance REST " + response.status + ": " + body.slice(0, 300));
@@ -132,12 +118,7 @@ export class BinanceScanner extends EventEmitter {
 
     const eligible = new Set(
       info.symbols
-        .filter(
-          (s) =>
-            s.status === "TRADING" &&
-            s.quoteAsset === "USDT" &&
-            s.contractType === "PERPETUAL",
-        )
+        .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.contractType === "PERPETUAL")
         .map((s) => s.symbol),
     );
 
@@ -157,6 +138,7 @@ export class BinanceScanner extends EventEmitter {
         candles: previous?.candles ?? { "1m": [], "5m": [], "15m": [] },
       });
     }
+
     this.symbols = next;
     this.btcPrice = this.symbols.get("BTCUSDT")?.lastPrice ?? this.btcPrice;
     this.emit("update");
@@ -192,6 +174,8 @@ export class BinanceScanner extends EventEmitter {
       );
       this.emit("update");
     }
+
+    this.tryAutoEntries();
   }
 
   private toCandle = (row: any[]): Candle => ({
@@ -276,9 +260,17 @@ export class BinanceScanner extends EventEmitter {
           if (arr.length > 200) arr.shift();
         }
 
+        const closedTrade = this.paper.mark(symbol, state.lastPrice);
+        if (closedTrade) {
+          this.risk.registerClose(symbol);
+          this.rotation.onClosedTrade(closedTrade);
+        }
+
         if (k.x) {
           this.evaluate(symbol, interval === "1m" ? "SCALPING" : "MOMENTUM");
+          this.tryAutoEntries();
         }
+
         this.emit("update");
       } catch (error) {
         console.error("[websocket message]", error);
@@ -303,6 +295,20 @@ export class BinanceScanner extends EventEmitter {
     const delay = Math.min(30_000, 1_000 * 2 ** Math.min(5, this.reconnectAttempts));
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => this.connectWebSocket(), delay);
+  }
+
+  private tryAutoEntries() {
+    if (!this.paper.getAuto()) return;
+
+    const candidates = [...this.signals.values()]
+      .filter((s) => s.stage === "CONFIRMED" && s.risk.eligible)
+      .sort((a, b) => b.quality.total - a.quality.total);
+
+    for (const signal of candidates) {
+      if (this.paper.positionsList().length >= this.risk.cfg.maxTotalPositions) break;
+      const result = this.paper.tryOpen(signal);
+      if (result.opened) this.risk.registerOpen(signal.symbol, signal.engine);
+    }
   }
 
   private evaluate(symbol: string, engine: Engine) {
@@ -377,19 +383,13 @@ export class BinanceScanner extends EventEmitter {
     if (regime === "TREND_UP") long += 15;
     if (regime === "TREND_DOWN") short += 15;
     if (regime === "RANGE") { long += 5; short += 5; }
-    if (regime === "HIGH_VOLATILITY" || regime === "NO_TRADE") {
-      long -= 10;
-      short -= 10;
-    }
+    if (regime === "HIGH_VOLATILITY" || regime === "NO_TRADE") { long -= 10; short -= 10; }
 
     const side: Side = long >= short ? "LONG" : "SHORT";
     const winner = Math.max(long, short);
     const loser = Math.min(long, short);
     const separation = Math.max(0, winner - loser);
-    const total = Math.max(
-      0,
-      Math.min(100, Math.round(winner * 0.9 + Math.min(15, separation * 0.25))),
-    );
+    const total = Math.max(0, Math.min(100, Math.round(winner * 0.9 + Math.min(15, separation * 0.25))));
 
     const stage =
       regime === "NO_TRADE" || regime === "HIGH_VOLATILITY"
@@ -400,11 +400,7 @@ export class BinanceScanner extends EventEmitter {
             ? "SETUP"
             : "WATCH";
 
-    const atrDistance = Math.max(
-      a * (engine === "MOMENTUM" ? 1.4 : 1.1),
-      price * 0.003,
-    );
-
+    const atrDistance = Math.max(a * (engine === "MOMENTUM" ? 1.4 : 1.1), price * 0.003);
     const stop = side === "LONG" ? price - atrDistance : price + atrDistance;
     const tp1 = side === "LONG"
       ? price + atrDistance * (engine === "MOMENTUM" ? 1.5 : 1.1)
@@ -415,7 +411,8 @@ export class BinanceScanner extends EventEmitter {
 
     const signalKey = engine + ":" + symbol;
     const current = this.signals.get(signalKey);
-    const quality: Signal["quality"] = {
+
+    const quality = {
       trend: Math.min(20, Math.round((Math.abs(emaFast - emaSlow) / Math.max(a, 1e-8)) * 3 + 6)),
       momentum: Math.min(20, Math.round(Math.abs(momentumPct) * 16)),
       volume: Math.min(15, lastVol > avgVol ? 12 : 5),
@@ -428,12 +425,7 @@ export class BinanceScanner extends EventEmitter {
     const signal: Signal = {
       signalId:
         current?.signalId ??
-        "SIG-" +
-          new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14) +
-          "-" +
-          symbol +
-          "-" +
-          engine,
+        "SIG-" + new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14) + "-" + symbol + "-" + engine,
       symbol,
       engine,
       side,
@@ -462,7 +454,6 @@ export class BinanceScanner extends EventEmitter {
 
     signal.risk = this.risk.preview(signal);
     this.signals.set(signalKey, signal);
-
     if (this.signals.size > 250) {
       const oldest = [...this.signals.values()].sort((a, b) => a.updatedAt - b.updatedAt)[0];
       if (oldest) this.signals.delete(oldest.engine + ":" + oldest.symbol);

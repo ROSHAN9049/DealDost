@@ -124,6 +124,8 @@ export class TestnetClient {
       scalpingOpen: 0,
       unclassifiedOpenPositions: 0,
       dailyRiskUsedPct: 0,
+      realizedPnlTodayUsd: 0,
+      feesTodayUsd: 0,
       positions: [],
       lastSyncAt: 0,
       error: null,
@@ -166,6 +168,8 @@ export class TestnetClient {
       scalpingOpen: 0,
       unclassifiedOpenPositions: open.length,
       dailyRiskUsedPct: 0,
+      realizedPnlTodayUsd: 0,
+      feesTodayUsd: 0,
       positions: basicPositions,
       lastSyncAt: Date.now(),
     };
@@ -262,6 +266,8 @@ export class TestnetClient {
 
     const accountBalanceUsd = Number(usdt?.balance ?? 0);
     const availableBalanceUsd = Number(usdt?.availableBalance ?? 0);
+    const realizedPnlTodayUsd = income.reduce((sum, row) => sum + Number(row.income ?? 0), 0);
+    const feesTodayUsd = Math.abs(commission.reduce((sum, row) => sum + Number(row.income ?? 0), 0));
     const negativeRealized = income.reduce((sum, row) => {
       const value = Number(row.income ?? 0);
       return value < 0 ? sum + Math.abs(value) : sum;
@@ -288,6 +294,8 @@ export class TestnetClient {
       scalpingOpen,
       unclassifiedOpenPositions,
       dailyRiskUsedPct,
+      realizedPnlTodayUsd,
+      feesTodayUsd,
       lastClosedAt,
     };
   }

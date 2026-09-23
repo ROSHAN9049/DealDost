@@ -537,6 +537,73 @@ export class TestnetClient {
     };
   }
 
+  async ensureOpenPositionProtection(input: {
+    symbol: string;
+    side: Side;
+    quantity: number;
+    stopPrice: number;
+    takeProfitPrice: number;
+  }) {
+    if (!this.isExecutionEnabled()) throw new Error("TESTNET_EXECUTION_DISABLED");
+    const symbol = input.symbol.toUpperCase();
+
+    await this.buildMarketOrderPlan({
+      symbol,
+      side: input.side,
+      quantity: input.quantity,
+      stopPrice: input.stopPrice,
+      takeProfitPrice: input.takeProfitPrice,
+    });
+
+    const openOrders = await this.getOpenOrders(symbol);
+    if (this.getProtectionStatus(openOrders) === "OK") {
+      return { changed: false, protection: "OK" as const };
+    }
+
+    const closeSide: "BUY" | "SELL" = input.side === "LONG" ? "SELL" : "BUY";
+    const hasStop = openOrders.some(
+      (o) =>
+        o.status === "NEW" &&
+        o.closePosition === true &&
+        o.type === "STOP_MARKET" &&
+        String(o.clientOrderId ?? "").startsWith("DDT-"),
+    );
+    const hasTakeProfit = openOrders.some(
+      (o) =>
+        o.status === "NEW" &&
+        o.closePosition === true &&
+        o.type === "TAKE_PROFIT_MARKET" &&
+        String(o.clientOrderId ?? "").startsWith("DDT-"),
+    );
+
+    const baseId = "DDT-SAFETY-" + symbol;
+    if (!hasStop) {
+      await this.placeCloseProtection(
+        symbol,
+        closeSide,
+        "STOP_MARKET",
+        input.stopPrice,
+        baseId + "-SL",
+      );
+    }
+    if (!hasTakeProfit) {
+      await this.placeCloseProtection(
+        symbol,
+        closeSide,
+        "TAKE_PROFIT_MARKET",
+        input.takeProfitPrice,
+        baseId + "-TP",
+      );
+    }
+
+    const verified = await this.getOpenOrders(symbol);
+    if (this.getProtectionStatus(verified) !== "OK") {
+      throw new Error("TESTNET protection verification failed");
+    }
+
+    return { changed: true, protection: "OK" as const };
+  }
+
   private detectEngine(orders: OrderRow[]): Engine | null {
     const entry = [...orders]
       .filter((o) => o.status === "FILLED" && !o.reduceOnly && !o.closePosition && o.type === "MARKET")
@@ -702,6 +769,7 @@ export class TestnetClient {
       type,
       triggerPrice: this.formatNumber(normalizedPrice),
       closePosition: "true",
+      positionSide: "BOTH",
       workingType: "MARK_PRICE",
       priceProtect: "true",
       clientAlgoId: this.safeAlgoClientId(clientOrderId),

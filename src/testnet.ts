@@ -152,6 +152,27 @@ export class TestnetClient {
       (rules.filters ?? []).find((f) => f.filterType === "MIN_NOTIONAL")?.notional ?? 0,
     );
 
+    if (minNotional > 0) {
+      const mark = await this.publicGet<{ markPrice?: string }>(
+        "/fapi/v1/premiumIndex?symbol=" + encodeURIComponent(symbol),
+      );
+      const markPrice = Number(mark.markPrice ?? 0);
+      if (!Number.isFinite(markPrice) || markPrice <= 0) {
+        throw new Error("Unable to read TESTNET mark price for " + symbol);
+      }
+      const notional = quantity * markPrice;
+      if (notional < minNotional) {
+        throw new Error(
+          "TESTNET order notional below minimum for " +
+            symbol +
+            ": " +
+            notional.toFixed(4) +
+            " < " +
+            minNotional,
+        );
+      }
+    }
+
     return {
       symbol,
       side: input.side,

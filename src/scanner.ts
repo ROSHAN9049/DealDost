@@ -61,7 +61,15 @@ export class BinanceScanner extends EventEmitter {
 
   async startServerless() {
     this.serverlessMode = true;
-    await this.refreshUniverse();
+    try {
+      await this.refreshUniverse();
+    } catch (error) {
+      this.feedStatus = "OFFLINE";
+      console.error("[serverless universe]", error);
+      this.emit("update");
+      return;
+    }
+    // Do not make the entire API request fail if a single kline batch is slow.
     await this.bootstrapHistory(3);
     this.feedStatus = "ONLINE";
     this.lastUpdateAt = Date.now();

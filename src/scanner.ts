@@ -764,6 +764,78 @@ export class BinanceScanner extends EventEmitter {
     }
   }
 
+  private previewSignalRisk(
+    signal: Pick<Signal, "symbol" | "engine" | "side" | "entry" | "stop" | "takeProfit1" | "takeProfit2">,
+  ): Signal["risk"] {
+    const riskDistance = Math.abs(signal.entry - signal.stop);
+
+    if (!Number.isFinite(signal.entry) || signal.entry <= 0 || !Number.isFinite(riskDistance) || riskDistance <= 0) {
+      return {
+        eligible: false,
+        reason: "INVALID_RISK_DISTANCE",
+        entry: signal.entry,
+        stop: signal.stop,
+        takeProfit1: signal.takeProfit1,
+        takeProfit2: signal.takeProfit2,
+        riskDistancePct: 0,
+        riskUsd: 0,
+        notionalUsd: 0,
+      };
+    }
+
+    const riskDistancePct = (riskDistance / signal.entry) * 100;
+
+    if (this.mode !== "TESTNET") {
+      return this.risk.preview(signal as Signal);
+    }
+
+    const accountBalanceUsd = this.testnetState.accountBalanceUsd;
+    const riskUsd = accountBalanceUsd * (config.testnetRiskPerTradePct / 100);
+    const notionalUsd = riskDistance > 0 ? riskUsd * (signal.entry / riskDistance) : 0;
+    const positions = this.testnetState.positions ?? [];
+    const symbolOpen = positions.some((p) => p.symbol === signal.symbol);
+    let reason = "RISK_GATE_PASS";
+    let eligible = true;
+
+    if (!this.testnetState.connected || !this.testnetState.executionEnabled) {
+      eligible = false;
+      reason = "TESTNET_NOT_ARMED";
+    } else if (this.testnetState.unclassifiedOpenPositions > 0) {
+      eligible = false;
+      reason = "UNCLASSIFIED_POSITION";
+    } else if (this.testnetState.unprotectedOpenPositions > 0) {
+      eligible = false;
+      reason = "PROTECTION_GATE";
+    } else if (this.testnetState.openPositions >= config.testnetMaxTotalPositions) {
+      eligible = false;
+      reason = "TOTAL_POSITION_LIMIT";
+    } else if (signal.engine === "MOMENTUM" && this.testnetState.momentumOpen >= config.testnetMaxMomentumPositions) {
+      eligible = false;
+      reason = "MOMENTUM_LIMIT";
+    } else if (signal.engine === "SCALPING" && this.testnetState.scalpingOpen >= config.testnetMaxScalpingPositions) {
+      eligible = false;
+      reason = "SCALPING_LIMIT";
+    } else if (symbolOpen) {
+      eligible = false;
+      reason = "SYMBOL_ALREADY_OPEN";
+    } else if (this.testnetState.dailyRiskUsedPct >= config.testnetMaxDailyRiskPct) {
+      eligible = false;
+      reason = "DAILY_RISK_LIMIT";
+    }
+
+    return {
+      eligible,
+      reason,
+      entry: signal.entry,
+      stop: signal.stop,
+      takeProfit1: signal.takeProfit1,
+      takeProfit2: signal.takeProfit2,
+      riskDistancePct,
+      riskUsd,
+      notionalUsd,
+    };
+  }
+
   private evaluate(symbol: string, engine: Engine) {
     const state = this.symbols.get(symbol);
     if (!state) return;
@@ -905,7 +977,7 @@ export class BinanceScanner extends EventEmitter {
       },
     };
 
-    signal.risk = this.risk.preview(signal);
+    signal.risk = this.previewSignalRisk(signal);
     this.signals.set(signalKey, signal);
 
     if (this.signals.size > 250) {

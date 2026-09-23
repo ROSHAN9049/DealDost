@@ -506,9 +506,13 @@ export class TestnetClient {
   }
 
   private incomePath(type: "REALIZED_PNL" | "COMMISSION") {
-    const startTime = new Date();
-    startTime.setHours(0, 0, 0, 0);
-    return "/fapi/v1/income?incomeType=" + type + "&startTime=" + startTime.getTime() + "&limit=1000";
+    // DealDost is operated in India, so the daily risk window is IST midnight
+    // rather than the Vercel runtime's UTC/local timezone.
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(Date.now() + istOffsetMs);
+    istNow.setUTCHours(0, 0, 0, 0);
+    const startTime = istNow.getTime() - istOffsetMs;
+    return "/fapi/v1/income?incomeType=" + type + "&startTime=" + startTime + "&limit=1000";
   }
 
   private async getRecentOrders(symbol: string): Promise<OrderRow[]> {

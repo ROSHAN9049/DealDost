@@ -5,6 +5,7 @@ import { atr, ema, macdHistogram, percentChange, rsi, vwap } from "./indicators.
 import { PaperBroker } from "./paper.js";
 import { ProfitRotationV3 } from "./rotation.js";
 import { RiskGovernor } from "./risk.js";
+import { TestnetClient } from "./testnet.js";
 import type { Candle, DashboardState, Engine, Regime, Signal, Side, SymbolState } from "./types.js";
 
 type BinanceExchangeInfo = {
@@ -18,6 +19,7 @@ export class BinanceScanner extends EventEmitter {
   private ws?: WebSocket;
   private reconnectTimer?: NodeJS.Timeout;
   private universeTimer?: NodeJS.Timeout;
+  private testnetTimer?: NodeJS.Timeout;
   private reconnectAttempts = 0;
   private reconnects = 0;
   private feedStatus: DashboardState["feed"]["websocket"] = "OFFLINE";
@@ -28,6 +30,8 @@ export class BinanceScanner extends EventEmitter {
   private readonly risk = new RiskGovernor();
   private readonly paper = new PaperBroker();
   private readonly rotation = new ProfitRotationV3();
+  private readonly testnet = new TestnetClient();
+  private testnetState = this.testnet.emptyState();
 
   onUpdate(listener: () => void): () => void {
     this.on("update", listener);
@@ -38,6 +42,11 @@ export class BinanceScanner extends EventEmitter {
     await this.refreshUniverse();
     await this.bootstrapHistory();
     this.connectWebSocket();
+    void this.syncTestnet();
+
+    this.testnetTimer = setInterval(() => {
+      void this.syncTestnet();
+    }, 30_000);
 
     this.universeTimer = setInterval(() => {
       void this.refreshUniverse()
@@ -50,6 +59,7 @@ export class BinanceScanner extends EventEmitter {
   async stop() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.universeTimer) clearInterval(this.universeTimer);
+    if (this.testnetTimer) clearInterval(this.testnetTimer);
     this.ws?.close();
   }
 
@@ -85,6 +95,7 @@ export class BinanceScanner extends EventEmitter {
       },
       risk: { ...this.risk.cfg, dailyRiskUsedPct: risk.dailyRiskUsedPct, emergencyStop: risk.emergencyStop },
       paper: this.paper.snapshot(),
+      testnet: this.testnetState,
       rotation: this.rotation.snapshot(),
       signals: allSignals,
       updatedAt: Date.now(),
@@ -105,6 +116,21 @@ export class BinanceScanner extends EventEmitter {
       if (rotationEvent) trade.rotationId = rotationEvent.rotationId;
     }
     this.emit("update");
+  }
+
+  private async syncTestnet() {
+    try {
+      this.testnetState = await this.testnet.sync();
+      this.emit("update");
+    } catch (error) {
+      this.testnetState = {
+        ...this.testnet.emptyState(),
+        configured: this.testnet.isConfigured(),
+        executionEnabled: this.testnet.isExecutionEnabled(),
+        error: error instanceof Error ? error.message : String(error),
+      };
+      this.emit("update");
+    }
   }
 
   private async request<T>(path: string): Promise<T> {

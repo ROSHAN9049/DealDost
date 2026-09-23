@@ -50,6 +50,18 @@ function render(state) {
   $("available").textContent = money(state.paper.availableBalanceUsd);
   $("fees").textContent = money(state.paper.feesUsd);
 
+  const tn = state.testnet;
+  $("testnetStatus").textContent = tn.error
+    ? "ERROR"
+    : tn.connected
+      ? (tn.executionEnabled ? "CONNECTED • ARMED" : "CONNECTED • READ ONLY")
+      : tn.configured
+        ? "CONFIGURED • OFFLINE"
+        : "NOT CONFIGURED";
+  $("testnetStatus").className = "status " + (tn.connected ? "ok" : "warn");
+  $("testnetBalance").textContent = money(tn.accountBalanceUsd);
+  $("testnetOpen").textContent = String(tn.openPositions);
+
   $("momentum").textContent = state.engines.momentum.open + "/" + state.engines.momentum.max;
   $("scalping").textContent = state.engines.scalping.open + "/" + state.engines.scalping.max;
   $("total").textContent = state.engines.totalOpen + "/" + state.engines.totalMax;

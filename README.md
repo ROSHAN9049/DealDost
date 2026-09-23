@@ -36,3 +36,9 @@ Current execution boundary:
 - Never put real Binance API keys in the repository.
 
 Binance WebSocket market connections are treated as reconnectable streams, with heartbeat/reconnect handling and stale-data gating.
+
+
+Testnet phase 1:
+- Dedicated Binance Futures Demo/Testnet credentials are read only from environment variables.
+- Dashboard can sync testnet USDT balance and open positions without touching PAPER state.
+- Testnet execution remains disabled until explicitly enabled and is not wired into PAPER auto-trading.

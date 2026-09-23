@@ -125,6 +125,18 @@ export interface RotationStateView {
   events: unknown[];
 }
 
+export interface TestnetStateView {
+  configured: boolean;
+  executionEnabled: boolean;
+  connected: boolean;
+  accountBalanceUsd: number;
+  availableBalanceUsd: number;
+  unrealizedPnlUsd: number;
+  openPositions: number;
+  lastSyncAt: number;
+  error: string | null;
+}
+
 export interface DashboardState {
   mode: "PAPER" | "TESTNET" | "LIVE";
   auto: boolean;
@@ -143,6 +155,7 @@ export interface DashboardState {
   };
   risk: RiskConfig & { dailyRiskUsedPct: number; emergencyStop: boolean };
   paper: PaperStateView;
+  testnet: TestnetStateView;
   rotation: RotationStateView;
   signals: Signal[];
   updatedAt: number;

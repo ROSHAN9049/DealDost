@@ -53,6 +53,40 @@ app.get("/api/state", async (_req, res) => {
   }
 });
 
+app.post("/api/market/ingest", async (req, res) => {
+  try {
+    await ensureStarted();
+    const body = req.body ?? {};
+    const universe = Array.isArray(body.universe) ? body.universe : [];
+    const symbol = String(body.symbol ?? "").toUpperCase();
+    const candles = body.candles;
+
+    if (!symbol || !Array.isArray(candles?.["1m"]) || !Array.isArray(candles?.["5m"]) || !Array.isArray(candles?.["15m"])) {
+      res.status(400).json({ error: "invalid_market_payload" });
+      return;
+    }
+
+    const state = await scanner.ingestBrowserMarket({
+      universe: universe.map((t: any) => ({
+        symbol: String(t.symbol ?? "").toUpperCase(),
+        quoteVolume: Number(t.quoteVolume),
+        lastPrice: Number(t.lastPrice),
+      })),
+      symbol,
+      candles: {
+        "1m": candles["1m"],
+        "5m": candles["5m"],
+        "15m": candles["15m"],
+      },
+    });
+
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.json(state);
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.post("/api/paper/auto", async (req, res) => {
   try {
     await ensureStarted();

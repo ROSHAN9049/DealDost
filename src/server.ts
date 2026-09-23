@@ -19,19 +19,134 @@ export function createApp(scanner: BinanceScanner) {
 
   app.get("/api/health", (_req, res) => {
     const state = scanner.state();
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
     res.json({
       ok: true,
       service: "dealdost-scanner",
+      runtime: "railway-node",
       websocket: state.feed.websocket,
       data: state.feed.data,
       universe: state.market.universeSize,
       paperPositions: state.paper.positions.length,
+      testnetConfigured: state.testnet.configured,
+      testnetConnected: state.testnet.connected,
       updatedAt: state.updatedAt,
     });
   });
 
-  app.get("/api/state", (_req, res) => {
-    res.json(scanner.state());
+  app.get("/api/state", (req, res) => {
+    try {
+      const requested = String(req.get("x-dealdost-mode") ?? "").toUpperCase();
+      if (requested === "PAPER" || requested === "TESTNET") {
+        scanner.setRequestMode(requested, req.get("x-dealdost-auto") === "true", {
+          paperAuto: req.get("x-dealdost-paper-auto") === "true",
+          testnetAuto: req.get("x-dealdost-testnet-auto") === "true",
+        });
+      } else if (requested === "LIVE") {
+        return res.status(403).json({ error: "LIVE_EXECUTION_LOCKED" });
+      }
+
+      res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+      res.json(scanner.state());
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/market/ingest", async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const mode = String(body.mode ?? "").toUpperCase();
+      if (mode === "LIVE") {
+        return res.status(403).json({ error: "LIVE_EXECUTION_LOCKED" });
+      }
+      if (mode === "PAPER" || mode === "TESTNET") {
+        scanner.setRequestMode(mode, Boolean(body.auto), {
+          paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
+          testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),
+        });
+      }
+
+      const universe = Array.isArray(body.universe) ? body.universe : [];
+      const symbol = String(body.symbol ?? "").toUpperCase();
+      const candles = body.candles;
+
+      if (
+        !symbol ||
+        !Array.isArray(candles?.["1m"]) ||
+        !Array.isArray(candles?.["5m"]) ||
+        !Array.isArray(candles?.["15m"])
+      ) {
+        return res.status(400).json({ error: "invalid_market_payload" });
+      }
+
+      const state = await scanner.ingestBrowserMarket({
+        universe: universe.map((t: any) => ({
+          symbol: String(t.symbol ?? "").toUpperCase(),
+          quoteVolume: Number(t.quoteVolume),
+          lastPrice: Number(t.lastPrice),
+        })),
+        symbol,
+        candles: {
+          "1m": candles["1m"],
+          "5m": candles["5m"],
+          "15m": candles["15m"],
+        },
+        btc15m: Array.isArray(body.btc15m) ? body.btc15m : undefined,
+      });
+
+      res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+      res.json(state);
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/mode", async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const mode = String(body.mode ?? "").toUpperCase();
+      if (mode !== "PAPER" && mode !== "TESTNET") {
+        return res.status(mode === "LIVE" ? 403 : 400).json({
+          error: mode === "LIVE" ? "LIVE_EXECUTION_LOCKED" : "invalid_mode",
+        });
+      }
+
+      scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto), {
+        paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
+        testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),
+      });
+      res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+      res.json(scanner.state());
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/testnet/protection-sync", async (req, res) => {
+    try {
+      const symbol = String(req.body?.symbol ?? "").toUpperCase();
+      if (!symbol) return res.status(400).json({ error: "symbol_required" });
+
+      const state = await scanner.syncTestnetPositionProtection(symbol);
+      res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+      res.json(state);
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/testnet/close", async (req, res) => {
+    try {
+      const symbol = String(req.body?.symbol ?? "").toUpperCase();
+      if (!symbol) return res.status(400).json({ error: "symbol_required" });
+
+      const state = await scanner.closeManagedTestnetPosition(symbol);
+      res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+      res.json(state);
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   app.post("/api/paper/auto", (req, res) => {

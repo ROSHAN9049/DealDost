@@ -25,11 +25,24 @@ export function createApp(scanner: BinanceScanner) {
       websocket: state.feed.websocket,
       data: state.feed.data,
       universe: state.market.universeSize,
+      paperPositions: state.paper.positions.length,
       updatedAt: state.updatedAt,
     });
   });
 
   app.get("/api/state", (_req, res) => {
+    res.json(scanner.state());
+  });
+
+  app.post("/api/paper/auto", (req, res) => {
+    scanner.setPaperAuto(Boolean(req.body?.enabled));
+    res.json(scanner.state());
+  });
+
+  app.post("/api/paper/close", (req, res) => {
+    const symbol = String(req.body?.symbol ?? "").toUpperCase();
+    if (!symbol) return res.status(400).json({ error: "symbol_required" });
+    scanner.closePaperPosition(symbol);
     res.json(scanner.state());
   });
 

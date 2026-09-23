@@ -149,6 +149,7 @@ export interface TestnetStateView {
   momentumOpen: number;
   scalpingOpen: number;
   unclassifiedOpenPositions: number;
+  unprotectedOpenPositions: number;
   dailyRiskUsedPct: number;
   realizedPnlTodayUsd: number;
   feesTodayUsd: number;

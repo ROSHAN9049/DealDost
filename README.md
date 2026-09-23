@@ -56,3 +56,6 @@ TESTNET execution phase 2:
 - Market entries require protected STOP_MARKET and TAKE_PROFIT_MARKET orders; if protection cannot be installed, the entry is immediately emergency-closed.
 - LIVE remains locked and has no order path in V2.
 - Because Vercel is serverless, this reconciliation is exchange-authoritative but is not a distributed transactional lock; the system therefore fails closed on missing reconciliation data and should not be treated as an atomic multi-instance position lock.
+
+- TESTNET AUTO accepts only fresh CONFIRMED signals (Scalping <= 90s, Momentum <= 10m) and places at most one new entry per execution cycle.
+- Dashboard exposes TESTNET realized PNL and fees for the current IST trading day.

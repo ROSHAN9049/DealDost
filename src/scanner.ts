@@ -82,7 +82,7 @@ export class BinanceScanner extends EventEmitter {
     if (Date.now() - this.lastServerlessPollAt < 4000) return;
     this.lastServerlessPollAt = Date.now();
     await this.refreshUniverse();
-    await this.bootstrapHistory(10);
+    await this.bootstrapHistory(3);
     this.feedStatus = "ONLINE";
     this.lastUpdateAt = Date.now();
     this.emit("update");
@@ -175,19 +175,18 @@ export class BinanceScanner extends EventEmitter {
   }
 
   private async refreshUniverse() {
-    const [info, ticker] = await Promise.all([
-      this.request<BinanceExchangeInfo>("/fapi/v1/exchangeInfo"),
-      this.request<BinanceTicker[]>("/fapi/v1/ticker/24hr"),
-    ]);
+    let ticker: BinanceTicker[];
+    try {
+      ticker = await this.request<BinanceTicker[]>("/fapi/v1/ticker/24hr");
+    } catch (error) {
+      throw new Error("Binance market ticker unavailable: " + (error instanceof Error ? error.message : String(error)));
+    }
 
-    const eligible = new Set(
-      info.symbols
-        .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.contractType === "PERPETUAL")
-        .map((s) => s.symbol),
-    );
-
+    // The 24h futures ticker is the reliable public market-data path.
+    // Keep the universe filter conservative without making exchangeInfo a
+    // second mandatory network dependency for every serverless invocation.
     const top = ticker
-      .filter((t) => eligible.has(t.symbol) && Number(t.quoteVolume) >= config.minQuoteVolume)
+      .filter((t) => t.symbol.endsWith("USDT") && Number(t.quoteVolume) >= config.minQuoteVolume)
       .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
       .slice(0, config.universeSize);
 

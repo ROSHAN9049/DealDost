@@ -363,6 +363,20 @@ export class BinanceScanner extends EventEmitter {
     this.emit("update");
   }
 
+  async closeManagedTestnetPosition(symbol: string) {
+    if (this.mode !== "TESTNET") throw new Error("TESTNET_MODE_REQUIRED");
+    const result = await this.testnet.closeManagedPosition(symbol);
+    this.testnetState = {
+      ...this.testnetState,
+      ...result.snapshot,
+      auto: this.testnetAuto,
+      lastSyncAt: Date.now(),
+      error: null,
+    };
+    this.emit("update");
+    return this.state();
+  }
+
   private handlePaperMark(symbol: string, price: number) {
     const trade = this.paper.mark(symbol, price);
     if (!trade) return;

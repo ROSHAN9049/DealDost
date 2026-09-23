@@ -48,9 +48,21 @@ export class BinanceScanner extends EventEmitter {
 
   async start() {
     this.serverlessMode = false;
-    await this.refreshUniverse();
-    await this.bootstrapHistory();
-    this.connectWebSocket();
+
+    // Railway/host regions can be denied by Binance public REST with HTTP 451.
+    // Never let that external market-data restriction crash the persistent
+    // application. Keep the API/WebSocket server alive and retry in the
+    // background; browser market ingestion can also repopulate the scanner.
+    try {
+      await this.refreshUniverse();
+      await this.bootstrapHistory();
+      this.connectWebSocket();
+    } catch (error) {
+      this.feedStatus = "OFFLINE";
+      this.lastMarketError = error instanceof Error ? error.message : String(error);
+      console.error("[startup market feed]", this.lastMarketError);
+    }
+
     void this.syncTestnet();
 
     this.testnetTimer = setInterval(() => {
@@ -61,7 +73,12 @@ export class BinanceScanner extends EventEmitter {
       void this.refreshUniverse()
         .then(() => this.bootstrapHistory())
         .then(() => this.connectWebSocket())
-        .catch((error) => console.error("[universe refresh]", error));
+        .catch((error) => {
+          this.feedStatus = "OFFLINE";
+          this.lastMarketError = error instanceof Error ? error.message : String(error);
+          console.error("[universe refresh]", this.lastMarketError);
+          this.emit("update");
+        });
     }, 30 * 60_000);
   }
 

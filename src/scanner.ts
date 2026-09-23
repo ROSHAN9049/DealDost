@@ -192,6 +192,9 @@ export class BinanceScanner extends EventEmitter {
     state.lastDataAt = Date.now();
 
     this.symbols = next;
+    // Keep the global BTC card populated from the live universe ticker even
+    // when the rotating signal target is another symbol.
+    this.btcPrice = this.symbols.get("BTCUSDT")?.lastPrice ?? this.btcPrice;
     if (input.symbol === "BTCUSDT") this.btcPrice = state.lastPrice;
 
     this.evaluate(input.symbol, "MOMENTUM");

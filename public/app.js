@@ -247,7 +247,9 @@ function render(state) {
       : tn.configured
         ? "CONFIGURED • OFFLINE"
         : "NOT CONFIGURED";
-  $("testnetStatus").className = "status " + (tn.connected ? "ok" : "warn");
+  $("testnetStatus").className = "status " + (
+    tn.error ? "warn" : (tn.connected && tn.executionEnabled ? "ok" : "warn")
+  );
   $("paperAuto").dataset.executionEnabled = String(Boolean(tn.executionEnabled));
   $("testnetBalance").textContent = money(tn.accountBalanceUsd);
   $("testnetOpen").textContent = String(tn.openPositions);

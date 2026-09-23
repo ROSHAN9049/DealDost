@@ -11,6 +11,24 @@ const fmt = (n) =>
 
 const money = (n) => "$" + fmt(Number(n));
 
+function savePaperRuntime(state) {
+  try {
+    localStorage.setItem("dealdost.paperState", JSON.stringify(state.paper ?? null));
+    localStorage.setItem("dealdost.rotationState", JSON.stringify(state.rotation ?? null));
+  } catch {}
+}
+
+function loadPaperRuntime() {
+  try {
+    return {
+      paperState: JSON.parse(localStorage.getItem("dealdost.paperState") || "null"),
+      rotationState: JSON.parse(localStorage.getItem("dealdost.rotationState") || "null")
+    };
+  } catch {
+    return { paperState: null, rotationState: null };
+  }
+}
+
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
@@ -92,6 +110,7 @@ async function directScannerFallback() {
       auto: currentMode === "PAPER" ? paperAuto : testnetAuto,
       paperAuto,
       testnetAuto,
+      ...loadPaperRuntime(),
       universe: top.map((t) => ({
         symbol: t.symbol,
         quoteVolume: Number(t.quoteVolume),
@@ -253,6 +272,7 @@ async function closePaper(symbol) {
 }
 
 function render(state) {
+  savePaperRuntime(state);
   $("regime").textContent = state.market.regime.replaceAll("_", " ");
   $("btc").textContent = fmt(state.market.btcPrice);
   $("ws").textContent = state.feed.websocket;

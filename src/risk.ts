@@ -112,4 +112,33 @@ export class RiskGovernor {
     this.cooldowns.set(symbol, Date.now() + this.cfg.cooldownMinutes * 60_000);
     this.recordTradeResult(netPnlUsd);
   }
+
+  hydrate(
+    positions: Array<{ symbol: string; engine: Engine }>,
+    history: Array<{ symbol: string; netPnlUsd: number; closedAt: number }>,
+  ) {
+    this.openPositions.clear();
+    this.cooldowns.clear();
+    this.resetDailyRiskIfNeeded();
+
+    for (const position of positions) {
+      if ((position.engine === "MOMENTUM" || position.engine === "SCALPING") && position.symbol) {
+        this.openPositions.set(position.symbol.toUpperCase(), position.engine);
+      }
+    }
+
+    this.dailyRiskUsedPct = 0;
+    const now = Date.now();
+    const cooldownMs = this.cfg.cooldownMinutes * 60_000;
+    for (const trade of history) {
+      const loss = Number(trade.netPnlUsd);
+      if (loss < 0 && this.cfg.accountBalanceUsd > 0) {
+        this.dailyRiskUsedPct += (Math.abs(loss) / this.cfg.accountBalanceUsd) * 100;
+      }
+      const closedAt = Number(trade.closedAt);
+      if (trade.symbol && Number.isFinite(closedAt) && now - closedAt < cooldownMs) {
+        this.cooldowns.set(trade.symbol.toUpperCase(), closedAt + cooldownMs);
+      }
+    }
+  }
 }

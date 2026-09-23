@@ -55,6 +55,84 @@ export class PaperBroker {
   positionsList() { return [...this.positions.values()]; }
   historyList() { return [...this.history]; }
 
+  restore(snapshot: Partial<PaperStateView> | null | undefined) {
+    if (!snapshot || typeof snapshot !== "object") return;
+
+    const starting = Number(snapshot.startingBalanceUsd);
+    const realized = Number(snapshot.realizedPnlUsd);
+    const fees = Number(snapshot.feesUsd);
+
+    if (Number.isFinite(starting) && starting > 0 && starting <= this.startingBalance * 2) {
+      this.balance = starting + (Number.isFinite(realized) ? realized : 0);
+    } else if (Number.isFinite(realized)) {
+      this.balance = this.startingBalance + realized;
+    }
+
+    if (Number.isFinite(realized)) this.realizedPnl = realized;
+    if (Number.isFinite(fees) && fees >= 0) this.fees = fees;
+    if (typeof snapshot.auto === "boolean") this.auto = snapshot.auto;
+
+    const positions = Array.isArray(snapshot.positions) ? snapshot.positions : [];
+    this.positions.clear();
+    for (const raw of positions) {
+      const p = raw as Partial<PaperPosition>;
+      if (
+        typeof p.tradeId !== "string" ||
+        typeof p.signalId !== "string" ||
+        (p.engine !== "MOMENTUM" && p.engine !== "SCALPING") ||
+        (p.side !== "LONG" && p.side !== "SHORT") ||
+        typeof p.symbol !== "string" ||
+        !Number.isFinite(Number(p.quantity)) ||
+        Number(p.quantity) <= 0 ||
+        !Number.isFinite(Number(p.entry)) ||
+        !Number.isFinite(Number(p.markPrice)) ||
+        !Number.isFinite(Number(p.stop)) ||
+        !Number.isFinite(Number(p.takeProfit1)) ||
+        !Number.isFinite(Number(p.takeProfit2)) ||
+        !Number.isFinite(Number(p.marginReservedUsd))
+      ) continue;
+
+      this.positions.set(p.symbol.toUpperCase(), {
+        tradeId: p.tradeId,
+        signalId: p.signalId,
+        symbol: p.symbol.toUpperCase(),
+        engine: p.engine,
+        side: p.side,
+        quantity: Number(p.quantity),
+        entry: Number(p.entry),
+        markPrice: Number(p.markPrice),
+        stop: Number(p.stop),
+        takeProfit1: Number(p.takeProfit1),
+        takeProfit2: Number(p.takeProfit2),
+        openedAt: Number.isFinite(Number(p.openedAt)) ? Number(p.openedAt) : Date.now(),
+        entryFeeUsd: Number.isFinite(Number(p.entryFeeUsd)) ? Number(p.entryFeeUsd) : 0,
+        marginReservedUsd: Number(p.marginReservedUsd),
+        grossPnlUsd: Number.isFinite(Number(p.grossPnlUsd)) ? Number(p.grossPnlUsd) : 0,
+        netPnlUsd: Number.isFinite(Number(p.netPnlUsd)) ? Number(p.netPnlUsd) : 0,
+      });
+    }
+
+    const history = Array.isArray(snapshot.history) ? snapshot.history : [];
+    this.history = history
+      .filter((raw): raw is PaperTrade => {
+        const t = raw as Partial<PaperTrade>;
+        return typeof t.tradeId === "string" &&
+          typeof t.signalId === "string" &&
+          typeof t.symbol === "string" &&
+          (t.engine === "MOMENTUM" || t.engine === "SCALPING") &&
+          (t.side === "LONG" || t.side === "SHORT") &&
+          Number.isFinite(Number(t.netPnlUsd)) &&
+          Number.isFinite(Number(t.closedAt));
+      })
+      .slice(-100)
+      .map((t) => ({ ...t, symbol: t.symbol.toUpperCase(), rotationId: typeof t.rotationId === "string" ? t.rotationId : null }));
+
+    this.openedSignals = new Set([
+      ...this.history.map((t) => t.signalId),
+      ...this.positionsList().map((p) => p.signalId),
+    ]);
+  }
+
   private reservedMargin() {
     return [...this.positions.values()].reduce((sum, p) => sum + p.marginReservedUsd, 0);
   }

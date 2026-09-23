@@ -79,6 +79,7 @@ app.post("/api/market/ingest", async (req, res) => {
     await ensureStarted();
     const body = req.body ?? {};
     applyRequestMode(body);
+    scanner.restorePaperRuntime(body.paperState, body.rotationState);
     const universe = Array.isArray(body.universe) ? body.universe : [];
     const symbol = String(body.symbol ?? "").toUpperCase();
     const candles = body.candles;

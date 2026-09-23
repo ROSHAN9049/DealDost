@@ -115,6 +115,21 @@ export class BinanceScanner extends EventEmitter {
     this.ws?.close();
   }
 
+  restorePaperRuntime(paperSnapshot: unknown, rotationSnapshot?: unknown) {
+    this.paper.restore(paperSnapshot as any);
+
+    const history = this.paper.historyList();
+    this.risk.hydrate(
+      this.paper.positionsList().map((p) => ({ symbol: p.symbol, engine: p.engine })),
+      history.map((t) => ({ symbol: t.symbol, netPnlUsd: t.netPnlUsd, closedAt: t.closedAt })),
+    );
+
+    const events = rotationSnapshot && typeof rotationSnapshot === "object"
+      ? (rotationSnapshot as any).events
+      : undefined;
+    this.rotation.restore(Array.isArray(events) ? events : []);
+  }
+
   state(): DashboardState {
     const risk = this.risk.snapshot();
     const allSignals = [...this.signals.values()]
@@ -673,20 +688,36 @@ export class BinanceScanner extends EventEmitter {
 
     for (const position of snapshot.positions.filter((p) => p.engine && p.protection !== "OK")) {
       const signal = this.signals.get(position.engine + ":" + position.symbol);
-      if (!signal || signal.side !== position.side || signal.stage === "BLOCKED") continue;
 
-      // Protection repair is safer than leaving a live Demo position naked.
-      // The exchange-side plan validation below still rejects stale prices
-      // that are no longer on the correct side of the current market.
-      if (now - signal.updatedAt > 10 * 60_000) continue;
+      let stopPrice: number | undefined;
+      let takeProfitPrice: number | undefined;
+
+      if (signal && signal.side === position.side && signal.stage !== "BLOCKED" && now - signal.updatedAt <= 10 * 60_000) {
+        stopPrice = signal.stop;
+        takeProfitPrice = signal.takeProfit1;
+      } else {
+        // Serverless restarts can lose in-memory signal history while the
+        // exchange position remains open. Safety repair must not depend on
+        // an in-memory signal being present.
+        const base = position.entryPrice;
+        if (!Number.isFinite(base) || base <= 0) continue;
+
+        const stopPct = position.engine === "MOMENTUM" ? 0.0042 : 0.0030;
+        const takePct = position.engine === "MOMENTUM" ? 0.0063 : 0.0033;
+
+        stopPrice = position.side === "LONG" ? base * (1 - stopPct) : base * (1 + stopPct);
+        takeProfitPrice = position.side === "LONG" ? base * (1 + takePct) : base * (1 - takePct);
+
+        errorMessage = "Signal memory unavailable for " + position.symbol + "; using emergency entry-based protection";
+      }
 
       try {
         await this.testnet.ensureOpenPositionProtection({
           symbol: position.symbol,
           side: position.side,
           quantity: position.quantity,
-          stopPrice: signal.stop,
-          takeProfitPrice: signal.takeProfit1,
+          stopPrice,
+          takeProfitPrice,
         });
         changed = true;
       } catch (error) {

@@ -37,6 +37,29 @@ export class ProfitRotationV3 {
     return event;
   }
 
+  restore(events: unknown[] | null | undefined) {
+    if (!Array.isArray(events)) return;
+
+    this.events = events
+      .filter((raw): raw is RotationEvent => {
+        const e = raw as Partial<RotationEvent>;
+        return typeof e.rotationId === "string" &&
+          typeof e.sourceTradeId === "string" &&
+          Number.isFinite(Number(e.createdAt)) &&
+          Number.isFinite(Number(e.releasedUsd)) &&
+          Number.isFinite(Number(e.allocatedUsd)) &&
+          Number.isFinite(Number(e.retainedUsd)) &&
+          e.status === "PLANNED";
+      })
+      .slice(-100)
+      .map((e) => ({ ...e }));
+
+    this.sequence = this.events.reduce((max, e) => {
+      const n = Number(e.rotationId.replace(/^ROT-/, ""));
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
+  }
+
   snapshot(): RotationStateView {
     const today = new Date().toDateString();
 

@@ -197,6 +197,22 @@ async function toggleAuto() {
   }
 }
 
+async function syncTestnetProtection(symbol) {
+  try {
+    const response = await fetch("/api/testnet/protection-sync", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ symbol })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    render(body);
+  } catch (error) {
+    showApiError("Protection sync failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+}
+
 async function closePaper(symbol) {
   try {
     const response = await fetch("/api/paper/close", {
@@ -309,11 +325,20 @@ function render(state) {
         "<td>" + fmt(p.markPrice) + "</td>" +
         "<td>" + money(p.unrealizedPnlUsd) + "</td>" +
         "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
-        "<td><span class=\"stage " + String(p.protection || "MISSING").toLowerCase() + "\">" + esc(p.protection || "MISSING") + "</span></td>" +
+        "<td>" +
+          "<span class=\"stage " + String(p.protection || "MISSING").toLowerCase() + "\">" + esc(p.protection || "MISSING") + "</span>" +
+          ((p.protection || "MISSING") !== "OK" && p.engine
+            ? ' <button class="protect-btn" data-symbol="' + esc(p.symbol) + '">SYNC</button>'
+            : "") +
+        "</td>" +
         "</tr>"
       ).join("");
     }
   }
+
+  document.querySelectorAll(".protect-btn").forEach((button) => {
+    button.onclick = () => syncTestnetProtection(button.dataset.symbol);
+  });
 
   $("paperStats").textContent = state.paper.tradeCount + " trades • " + state.paper.winRate.toFixed(1) + "% WR";
 

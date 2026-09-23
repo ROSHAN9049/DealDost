@@ -57,3 +57,11 @@ tr:hover td { background:#0d1c2d; }
 
 .protect-btn { margin-left:6px; padding:4px 7px; border:1px solid #6b4f24; border-radius:7px; background:#211b0e; color:#f0d083; font:800 9px/1 Inter,system-ui,sans-serif; letter-spacing:.08em; cursor:pointer; }
 .protect-btn:hover { border-color:#9a7334; }
+
+
+.mode { flex-wrap: wrap; }
+.mode button.auto { min-width: 132px; }
+@media (max-width: 640px) {
+  .mode { gap: 6px; }
+  .mode button.auto { flex: 1 1 140px; }
+}

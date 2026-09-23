@@ -207,5 +207,7 @@ async function load() {
 }
 
 $("paperAuto").onclick = toggleAuto;
+// Prime market cards immediately so the dashboard is never stuck on the static loading shell.
+void directBinanceFallback().catch(() => {});
 load();
 setInterval(load, 3000);

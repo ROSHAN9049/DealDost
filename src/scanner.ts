@@ -158,12 +158,14 @@ export class BinanceScanner extends EventEmitter {
         momentum: {
           open: engineOpen.momentum,
           max: this.risk.cfg.maxMomentumPositions,
-          status: engineOpen.momentum >= this.risk.cfg.maxMomentumPositions ? "FULL" : "READY",
+          status: engineOpen.momentum > this.risk.cfg.maxMomentumPositions ? "BLOCKED" :
+            engineOpen.momentum >= this.risk.cfg.maxMomentumPositions ? "FULL" : "READY",
         },
         scalping: {
           open: engineOpen.scalping,
           max: this.risk.cfg.maxScalpingPositions,
-          status: engineOpen.scalping >= this.risk.cfg.maxScalpingPositions ? "FULL" : "READY",
+          status: engineOpen.scalping > this.risk.cfg.maxScalpingPositions ? "BLOCKED" :
+            engineOpen.scalping >= this.risk.cfg.maxScalpingPositions ? "FULL" : "READY",
         },
         totalOpen: engineOpen.total,
         totalMax: this.risk.cfg.maxTotalPositions,
@@ -795,6 +797,11 @@ export class BinanceScanner extends EventEmitter {
       if (!snapshot.connected) return;
       if (snapshot.unclassifiedOpenPositions > 0) return;
       if (snapshot.unprotectedOpenPositions > 0) return;
+      // A reconciliation that finds an engine already above its configured
+      // 3-position cap is a hard safety stop. Do not "rebalance" by guessing
+      // which existing Demo position should be closed.
+      if (snapshot.momentumOpen > config.testnetMaxMomentumPositions) return;
+      if (snapshot.scalpingOpen > config.testnetMaxScalpingPositions) return;
       if (snapshot.openPositions >= config.testnetMaxTotalPositions) return;
       if (snapshot.dailyRiskUsedPct >= config.testnetMaxDailyRiskPct) return;
 
@@ -946,6 +953,9 @@ export class BinanceScanner extends EventEmitter {
     } else if (this.testnetState.unprotectedOpenPositions > 0) {
       eligible = false;
       reason = "PROTECTION_GATE";
+    } else if (this.testnetState.momentumOpen > config.testnetMaxMomentumPositions || this.testnetState.scalpingOpen > config.testnetMaxScalpingPositions) {
+      eligible = false;
+      reason = "ENGINE_POSITION_OVER_LIMIT";
     } else if (this.testnetState.openPositions >= config.testnetMaxTotalPositions) {
       eligible = false;
       reason = "TOTAL_POSITION_LIMIT";

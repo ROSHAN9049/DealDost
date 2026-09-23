@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 let currentMode = localStorage.getItem("dealdost.mode") === "TESTNET" ? "TESTNET" : "PAPER";
-let testnetAuto = false;
+let testnetAuto = localStorage.getItem("dealdost.testnetAuto") === "true";
 let paperAuto = localStorage.getItem("dealdost.paperAuto") === "true";
 
 const fmt = (n) =>
@@ -90,6 +90,8 @@ async function directScannerFallback() {
     body: JSON.stringify({
       mode: currentMode,
       auto: currentMode === "PAPER" ? paperAuto : testnetAuto,
+      paperAuto,
+      testnetAuto,
       universe: top.map((t) => ({
         symbol: t.symbol,
         quoteVolume: Number(t.quoteVolume),
@@ -146,7 +148,7 @@ async function setMode(mode) {
     const response = await fetch("/api/mode", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode, auto })
+      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto })
     });
     if (!response.ok) {
       let detail = "HTTP " + response.status;
@@ -163,19 +165,10 @@ async function setMode(mode) {
   }
 }
 
-async function toggleAuto() {
-  if (currentMode === "TESTNET" && $("paperAuto").dataset.executionEnabled !== "true") {
-    showApiError("TESTNET execution is READ ONLY. Enable BINANCE_TESTNET_EXECUTION_ENABLED first.");
-    return;
-  }
-  const enabled = currentMode === "PAPER" ? !paperAuto : !testnetAuto;
-  if (currentMode === "PAPER") {
-    paperAuto = enabled;
-    localStorage.setItem("dealdost.paperAuto", String(enabled));
-  } else {
-    testnetAuto = enabled;
-    localStorage.setItem("dealdost.testnetAuto", String(enabled));
-  }
+async function togglePaperAuto() {
+  const enabled = !paperAuto;
+  paperAuto = enabled;
+  localStorage.setItem("dealdost.paperAuto", String(enabled));
 
   $("paperAuto").disabled = true;
   try {
@@ -185,7 +178,8 @@ async function toggleAuto() {
       body: JSON.stringify({
         mode: currentMode,
         auto: enabled,
-        testnetAuto: currentMode === "TESTNET" ? enabled : false
+        paperAuto,
+        testnetAuto
       })
     });
     if (response.ok) render(await response.json());
@@ -194,6 +188,37 @@ async function toggleAuto() {
     showApiError("API error: " + (error instanceof Error ? error.message : String(error)));
   } finally {
     $("paperAuto").disabled = false;
+  }
+}
+
+async function toggleTestnetAuto() {
+  if ($("testnetAuto").dataset.executionEnabled !== "true") {
+    showApiError("TESTNET execution is READ ONLY. Enable BINANCE_TESTNET_EXECUTION_ENABLED first.");
+    return;
+  }
+
+  const enabled = !testnetAuto;
+  testnetAuto = enabled;
+  localStorage.setItem("dealdost.testnetAuto", String(enabled));
+
+  $("testnetAuto").disabled = true;
+  try {
+    const response = await fetch("/api/mode", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "TESTNET",
+        auto: enabled,
+        paperAuto,
+        testnetAuto
+      })
+    });
+    if (response.ok) render(await response.json());
+    else showApiError("API error: HTTP " + response.status);
+  } catch (error) {
+    showApiError("API error: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    $("testnetAuto").disabled = false;
   }
 }
 
@@ -238,18 +263,26 @@ function render(state) {
   $("universe").textContent = state.market.universeSize;
 
   currentMode = state.mode === "TESTNET" ? "TESTNET" : "PAPER";
-  if (currentMode === "PAPER") paperAuto = Boolean(state.auto);
-  else testnetAuto = Boolean(state.auto);
+  paperAuto = Boolean(state.paper?.auto);
+  testnetAuto = Boolean(state.testnet?.auto);
   localStorage.setItem("dealdost.mode", currentMode);
   localStorage.setItem("dealdost.paperAuto", String(paperAuto));
-  // TESTNET AUTO is intentionally session-only; it never re-arms on refresh.
+  localStorage.setItem("dealdost.testnetAuto", String(testnetAuto));
 
   ["paperMode", "testnetMode", "liveMode"].forEach((id) => $(id)?.classList.remove("active"));
   $(currentMode === "PAPER" ? "paperMode" : "testnetMode")?.classList.add("active");
 
-  $("paperAuto").textContent = currentMode + " AUTO " + (state.auto ? "ON" : "OFF");
-  $("paperAuto").dataset.enabled = String(state.auto);
-  $("paperAuto").className = state.auto ? "auto on" : "auto";
+  $("paperAuto").textContent = "PAPER AUTO " + (paperAuto ? "ON" : "OFF");
+  $("paperAuto").dataset.enabled = String(paperAuto);
+  $("paperAuto").className = paperAuto ? "auto on" : "auto";
+
+  const testnetAutoButton = $("testnetAuto");
+  if (testnetAutoButton) {
+    testnetAutoButton.textContent = "TESTNET AUTO " + (testnetAuto ? "ON" : "OFF");
+    testnetAutoButton.dataset.enabled = String(testnetAuto);
+    testnetAutoButton.className = testnetAuto ? "auto on" : "auto";
+    testnetAutoButton.dataset.executionEnabled = String(Boolean(tn.executionEnabled));
+  }
 
   $("equity").textContent = money(state.paper.balanceUsd);
   $("available").textContent = money(state.paper.availableBalanceUsd);
@@ -266,7 +299,7 @@ function render(state) {
   $("testnetStatus").className = "status " + (
     tn.error ? "warn" : (tn.connected && tn.executionEnabled ? "ok" : "warn")
   );
-  $("paperAuto").dataset.executionEnabled = String(Boolean(tn.executionEnabled));
+  $("paperAuto").dataset.executionEnabled = "false";
   $("testnetBalance").textContent = money(tn.accountBalanceUsd);
   $("testnetOpen").textContent = String(tn.openPositions);
   $("testnetPnl").textContent = money(tn.realizedPnlTodayUsd);
@@ -484,7 +517,8 @@ async function load() {
   }
 }
 
-$("paperAuto").onclick = toggleAuto;
+$("paperAuto").onclick = togglePaperAuto;
+$("testnetAuto")?.addEventListener("click", toggleTestnetAuto);
 $("paperMode")?.addEventListener("click", () => setMode("PAPER"));
 $("testnetMode")?.addEventListener("click", () => setMode("TESTNET"));
 $("liveMode")?.addEventListener("click", () => setMode("LIVE"));

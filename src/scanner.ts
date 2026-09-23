@@ -202,7 +202,7 @@ export class BinanceScanner extends EventEmitter {
     // ticker so unrealized P&L and SL/TP exits keep working.
     for (const position of this.paper.positionsList()) {
       const livePrice = this.symbols.get(position.symbol)?.lastPrice;
-      if (Number.isFinite(livePrice) && livePrice > 0) {
+      if (livePrice !== undefined && Number.isFinite(livePrice) && livePrice > 0) {
         this.handlePaperMark(position.symbol, livePrice);
       }
     }

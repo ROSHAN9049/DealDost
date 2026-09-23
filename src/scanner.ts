@@ -62,7 +62,7 @@ export class BinanceScanner extends EventEmitter {
   async startServerless() {
     this.serverlessMode = true;
     await this.refreshUniverse();
-    await this.bootstrapHistory(10);
+    await this.bootstrapHistory(3);
     this.feedStatus = "ONLINE";
     this.lastUpdateAt = Date.now();
     void this.syncTestnet();

@@ -32,6 +32,8 @@ export class BinanceScanner extends EventEmitter {
   private readonly rotation = new ProfitRotationV3();
   private readonly testnet = new TestnetClient();
   private testnetState = this.testnet.emptyState();
+  private serverlessMode = false;
+  private lastServerlessPollAt = 0;
 
   onUpdate(listener: () => void): () => void {
     this.on("update", listener);
@@ -39,6 +41,7 @@ export class BinanceScanner extends EventEmitter {
   }
 
   async start() {
+    this.serverlessMode = false;
     await this.refreshUniverse();
     await this.bootstrapHistory();
     this.connectWebSocket();
@@ -54,6 +57,27 @@ export class BinanceScanner extends EventEmitter {
         .then(() => this.connectWebSocket())
         .catch((error) => console.error("[universe refresh]", error));
     }, 30 * 60_000);
+  }
+
+  async startServerless() {
+    this.serverlessMode = true;
+    await this.refreshUniverse();
+    await this.bootstrapHistory(10);
+    this.feedStatus = "ONLINE";
+    this.lastUpdateAt = Date.now();
+    void this.syncTestnet();
+    this.emit("update");
+  }
+
+  async serverlessTick() {
+    if (!this.serverlessMode) return;
+    if (Date.now() - this.lastServerlessPollAt < 4000) return;
+    this.lastServerlessPollAt = Date.now();
+    await this.refreshUniverse();
+    await this.bootstrapHistory(10);
+    this.feedStatus = "ONLINE";
+    this.lastUpdateAt = Date.now();
+    this.emit("update");
   }
 
   async stop() {
@@ -176,8 +200,8 @@ export class BinanceScanner extends EventEmitter {
     this.emit("update");
   }
 
-  private async bootstrapHistory() {
-    const states = [...this.symbols.values()];
+  private async bootstrapHistory(limit = this.symbols.size) {
+    const states = [...this.symbols.values()].slice(0, limit);
     const concurrency = 5;
 
     for (let i = 0; i < states.length; i += concurrency) {
@@ -241,6 +265,8 @@ export class BinanceScanner extends EventEmitter {
     if (!streams) return;
 
     this.feedStatus = this.reconnectAttempts > 0 ? "RECONNECTING" : "CONNECTING";
+    if (this.serverlessMode) return;
+
     const ws = new WebSocket(config.wsBase + "?streams=" + streams);
     this.ws = ws;
 

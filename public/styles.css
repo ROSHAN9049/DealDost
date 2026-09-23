@@ -11,6 +11,9 @@ body { margin: 0; background: radial-gradient(circle at top right, #13263e 0, #0
 .subtitle,.label { color:#8ea3bb; font-size:11px; letter-spacing:.12em; font-weight:800; }
 .mode { display:flex; gap:7px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
 .pill,.auto,.badge,.stage { border:1px solid #30455f; padding:6px 9px; border-radius:999px; font-size:10px; font-weight:900; letter-spacing:.08em; }
+.pill { background:transparent; color:#b7c6d6; cursor:pointer; font-family:inherit; }
+.pill:hover:not(.disabled) { border-color:#4a6686; }
+.pill.disabled { cursor:not-allowed; opacity:.55; }
 .pill.active { background:#163c2a; border-color:#2a7652; color:#8bf0b9; }
 .pill.disabled { color:#6d7f94; }
 .auto { color:#f1d58a; border-color:#695b2c; }

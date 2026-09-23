@@ -9,7 +9,7 @@ const money = (n) => "$" + fmt(Number(n));
 
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", """: "&quot;", "'": "&#039;"
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
   }[c]));
 
 async function directBinanceFallback() {

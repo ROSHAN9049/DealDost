@@ -1,7 +1,10 @@
 const $ = (id) => document.getElementById(id);
 
-let currentMode = localStorage.getItem("dealdost.mode") === "TESTNET" ? "TESTNET" : "PAPER";
+let currentMode = ["PAPER", "TESTNET", "LIVE"].includes(localStorage.getItem("dealdost.mode"))
+  ? localStorage.getItem("dealdost.mode")
+  : "PAPER";
 let testnetAuto = localStorage.getItem("dealdost.testnetAuto") === "true";
+let liveAuto = localStorage.getItem("dealdost.liveAuto") === "true";
 let paperAuto = localStorage.getItem("dealdost.paperAuto") === "true";
 
 const fmt = (n) =>
@@ -110,6 +113,7 @@ async function directScannerFallback() {
       auto: currentMode === "PAPER" ? paperAuto : testnetAuto,
       paperAuto,
       testnetAuto,
+      liveAuto,
       ...loadPaperRuntime(),
       universe: top.map((t) => ({
         symbol: t.symbol,
@@ -157,11 +161,7 @@ function showApiError(message) {
 }
 
 async function setMode(mode) {
-  if (mode === "LIVE") {
-    showApiError("LIVE trading is locked in V2.");
-    return;
-  }
-  const auto = mode === "PAPER" ? paperAuto : testnetAuto;
+  const auto = mode === "PAPER" ? paperAuto : mode === "TESTNET" ? testnetAuto : liveAuto;
   $("paperAuto").disabled = true;
   try {
     const response = await fetch("/api/mode", {
@@ -299,15 +299,23 @@ function render(state) {
   $("data").className = "muted";
   $("universe").textContent = state.market.universeSize;
 
-  currentMode = state.mode === "TESTNET" ? "TESTNET" : "PAPER";
+  currentMode = ["PAPER", "TESTNET", "LIVE"].includes(state.mode) ? state.mode : "PAPER";
   paperAuto = Boolean(state.paper?.auto);
   testnetAuto = Boolean(state.testnet?.auto);
+  liveAuto = Boolean(state.live?.auto);
   localStorage.setItem("dealdost.mode", currentMode);
   localStorage.setItem("dealdost.paperAuto", String(paperAuto));
   localStorage.setItem("dealdost.testnetAuto", String(testnetAuto));
+  localStorage.setItem("dealdost.liveAuto", String(liveAuto));
 
   ["paperMode", "testnetMode", "liveMode"].forEach((id) => $(id)?.classList.remove("active"));
-  $(currentMode === "PAPER" ? "paperMode" : "testnetMode")?.classList.add("active");
+  $(
+    currentMode === "PAPER"
+      ? "paperMode"
+      : currentMode === "TESTNET"
+        ? "testnetMode"
+        : "liveMode"
+  )?.classList.add("active");
 
   $("paperAuto").textContent = "PAPER AUTO " + (paperAuto ? "ON" : "OFF");
   $("paperAuto").dataset.enabled = String(paperAuto);

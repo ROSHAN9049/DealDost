@@ -36,6 +36,9 @@ export function createApp(scanner: BinanceScanner) {
 
   app.get("/api/state", (req, res) => {
     try {
+      if (req.get("x-dealdost-emergency-stop") !== undefined) {
+        scanner.setEmergencyStop(req.get("x-dealdost-emergency-stop") === "true");
+      }
       const requested = String(req.get("x-dealdost-mode") ?? "").toUpperCase();
       if (requested === "PAPER" || requested === "TESTNET" || requested === "LIVE") {
         scanner.setRequestMode(requested, req.get("x-dealdost-auto") === "true", {
@@ -55,6 +58,7 @@ export function createApp(scanner: BinanceScanner) {
   app.post("/api/market/ingest", async (req, res) => {
     try {
       const body = req.body ?? {};
+      if (body.emergencyStop !== undefined) scanner.setEmergencyStop(Boolean(body.emergencyStop));
       const mode = String(body.mode ?? "").toUpperCase();
       if (mode === "LIVE") {
         return res.status(403).json({ error: "LIVE_EXECUTION_LOCKED" });
@@ -133,6 +137,7 @@ export function createApp(scanner: BinanceScanner) {
         return res.status(400).json({ error: "invalid_mode" });
       }
 
+      if (body.emergencyStop !== undefined) scanner.setEmergencyStop(Boolean(body.emergencyStop));
       scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto ?? body.liveAuto), {
         paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
         testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),

@@ -10,7 +10,7 @@
   <header class="topbar">
     <div>
       <div class="brand">DEALDOST</div>
-      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260924.4</span></div>
+      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260924.5</span></div>
     </div>
     <div class="mode">
       <button id="paperMode" class="pill active" type="button">PAPER</button>
@@ -32,9 +32,9 @@
       <article class="card"><div class="label">LIVE ACCOUNT</div><div id="liveStatus" class="status warn">LOCKED</div><div class="muted">Balance <span id="liveBalance">$0</span> • Open <span id="liveOpen">0</span></div><div class="muted">Today P&L <span id="livePnl">$0</span> • Fees <span id="liveFees">$0</span></div><div id="liveError" class="muted error" hidden></div><div id="liveExecutionHint" class="muted" hidden></div></article>
     </section>
     <section class="engine-grid">
-      <article class="card engine"><div><div class="label">MOMENTUM</div><div id="momentum" class="big">0/3</div></div><span id="momentumStatus" class="badge">READY</span></article>
-      <article class="card engine"><div><div class="label">SCALPING</div><div id="scalping" class="big">0/3</div></div><span id="scalpingStatus" class="badge">READY</span></article>
-      <article class="card engine"><div><div class="label">TOTAL</div><div id="total" class="big">0/6</div></div><span class="badge">POSITION GATE</span></article>
+      <article class="card engine"><div><div id="momentumLabel" class="label">MOMENTUM</div><div id="momentum" class="big">0/3</div></div><span id="momentumStatus" class="badge">READY</span></article>
+      <article class="card engine"><div><div id="scalpingLabel" class="label">SCALPING</div><div id="scalping" class="big">0/3</div></div><span id="scalpingStatus" class="badge">READY</span></article>
+      <article class="card engine"><div><div id="totalLabel" class="label">TOTAL</div><div id="total" class="big">0/6</div></div><span class="badge">POSITION GATE</span></article>
     </section>
     <section class="card">
       <div class="section-head"><div><div class="label">PAPER POSITIONS</div><div class="muted">No-leverage simulation • fee and slippage included</div></div><div id="paperStats" class="badge">0 trades • 0% WR</div></div>
@@ -80,10 +80,10 @@
         setBoot("PROMISE ERROR • " + reason.slice(0, 120), true);
       });
       const script = document.createElement("script");
-      script.src = "/app.js?build=20260924.4";
+      script.src = "/app.js?build=20260924.5";
       script.defer = true;
       script.onload = () => setBoot("BOOT OK • loading market data…");
-      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260924.4", true);
+      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260924.5", true);
       document.head.appendChild(script);
     })();
   </script>

@@ -167,7 +167,7 @@ async function setMode(mode) {
     const response = await fetch("/api/mode", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto })
+      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto, liveAuto })
     });
     if (!response.ok) {
       let detail = "HTTP " + response.status;

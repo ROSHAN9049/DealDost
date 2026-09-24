@@ -241,6 +241,38 @@ async function toggleTestnetAuto() {
   }
 }
 
+async function toggleLiveAuto() {
+  if ($("liveAuto").dataset.executionEnabled !== "true") {
+    showApiError("LIVE execution is locked. Enable BINANCE_LIVE_EXECUTION_ENABLED only after reviewing the 16-gate safety path.");
+    return;
+  }
+
+  const enabled = !liveAuto;
+  liveAuto = enabled;
+  localStorage.setItem("dealdost.liveAuto", String(enabled));
+
+  $("liveAuto").disabled = true;
+  try {
+    const response = await fetch("/api/mode", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "LIVE",
+        auto: enabled,
+        paperAuto,
+        liveAuto
+      })
+    });
+    if (response.ok) render(await response.json());
+    else showApiError("API error: HTTP " + response.status);
+  } catch (error) {
+    showApiError("API error: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    $("liveAuto").disabled = false;
+  }
+}
+
+
 async function syncTestnetProtection(symbol) {
   try {
     const response = await fetch("/api/testnet/protection-sync", {
@@ -256,6 +288,23 @@ async function syncTestnetProtection(symbol) {
     showApiError("Protection sync failed: " + (error instanceof Error ? error.message : String(error)));
   }
 }
+
+async function syncLiveProtection(symbol) {
+  try {
+    const response = await fetch("/api/live/protection-sync", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ symbol })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    render(body);
+  } catch (error) {
+    showApiError("Protection sync failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+}
+
 
 async function closePaper(symbol) {
   try {
@@ -287,6 +336,24 @@ async function closeTestnet(symbol) {
     showApiError("TESTNET close failed: " + (error instanceof Error ? error.message : String(error)));
   }
 }
+
+async function closeLive(symbol) {
+  if (!window.confirm("Close managed LIVE position " + symbol + " at market?")) return;
+  try {
+    const response = await fetch("/api/live/close", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ symbol })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    render(body);
+  } catch (error) {
+    showApiError("LIVE close failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+}
+
 
 function render(state) {
   savePaperRuntime(state);

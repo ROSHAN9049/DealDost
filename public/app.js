@@ -59,6 +59,7 @@ async function fetchDirectBinance(path) {
 
 async function directScannerFallback() {
   const requestMode = currentMode;
+  const requestToken = modeChangeToken;
   const ticker = await fetchDirectBinance("/fapi/v1/ticker/24hr");
   const top = ticker
     .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
@@ -104,6 +105,8 @@ async function directScannerFallback() {
     quoteVolume: Number(row[7]),
     trades: Number(row[8])
   });
+
+  if (requestToken !== modeChangeToken || requestMode !== currentMode) return;
 
   const response = await fetch("/api/market/ingest", {
     method: "POST",
@@ -730,6 +733,7 @@ async function load() {
   if (polling) return;
   polling = true;
   const requestMode = currentMode;
+  const requestToken = modeChangeToken;
   try {
     const response = await fetch("/api/state", {
       cache: "no-store",
@@ -743,7 +747,7 @@ async function load() {
     });
     if (response.ok) {
       const state = await response.json();
-      if (requestMode !== currentMode) return; // discard stale mode response
+      if (requestToken !== modeChangeToken || requestMode !== currentMode) return; // discard stale mode response
       if (
         state?.market?.universeSize > 0 &&
         state?.feed?.websocket === "ONLINE"
@@ -761,7 +765,7 @@ async function load() {
           await directScannerFallback();
           lastBrowserIngestAt = Date.now();
         } catch (fallbackError) {
-          if (requestMode === currentMode) render(state);
+          if (requestToken === modeChangeToken && requestMode === currentMode) render(state);
         }
       }
     } else {

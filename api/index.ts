@@ -12,15 +12,13 @@ app.use(express.static(path.resolve(process.cwd(), "public")));
 
 function applyRequestMode(input: any) {
   const requested = String(input?.mode ?? "").toUpperCase();
-  if (requested === "PAPER" || requested === "TESTNET") {
+  if (requested === "PAPER" || requested === "TESTNET" || requested === "LIVE") {
     const automation = {
       paperAuto: input?.paperAuto === undefined ? undefined : Boolean(input.paperAuto),
       testnetAuto: input?.testnetAuto === undefined ? undefined : Boolean(input.testnetAuto),
       liveAuto: input?.liveAuto === undefined ? undefined : Boolean(input.liveAuto),
     };
     scanner.setRequestMode(requested, Boolean(input?.auto), automation);
-  } else if (requested === "LIVE") {
-    throw new Error("LIVE_EXECUTION_LOCKED");
   }
 }
 
@@ -120,7 +118,7 @@ app.post("/api/mode", async (req, res) => {
     const body = req.body ?? {};
     const mode = String(body.mode ?? "").toUpperCase();
     if (mode !== "PAPER" && mode !== "TESTNET" && mode !== "LIVE") {
-      res.status(400).json({ error: mode === "LIVE" ? "LIVE_EXECUTION_LOCKED" : "invalid_mode" });
+      res.status(400).json({ error: "invalid_mode" });
       return;
     }
     scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto ?? body.liveAuto), {

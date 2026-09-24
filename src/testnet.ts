@@ -482,8 +482,8 @@ export class TestnetClient {
         .map((order) => ({
           time: Number(order.time ?? order.updateTime ?? 0),
           symbol: String(order.symbol ?? ""),
-          engine: String(order.clientOrderId ?? "").startsWith("DDT-MOM-") ? "MOMENTUM"
-            : String(order.clientOrderId ?? "").startsWith("DDT-SCALP-") ? "SCALPING" : "DDT",
+          engine: String(order.clientOrderId ?? "").includes("MOM-") ? "MOMENTUM"
+            : String(order.clientOrderId ?? "").includes("SCALP-") ? "SCALPING" : "DDT",
           type: String(order.type ?? ""),
           side: String(order.side ?? ""),
           status: String(order.status ?? ""),
@@ -783,7 +783,9 @@ export class TestnetClient {
       reduceOnly: "true",
       positionSide: "BOTH",
       newClientOrderId: this.safeClientOrderId(
-        (reason === "TP1" ? "DDT-TP-" : "DDT-MAN-") + symbol + "-" + Date.now().toString(36),
+        (reason === "TP1" ? "DDT-TP-" : "DDT-MAN-") +
+          (position.engine === "MOMENTUM" ? "MOM-" : "SCALP-") +
+          symbol + "-" + Date.now().toString(36),
       ),
       newOrderRespType: "RESULT",
     });

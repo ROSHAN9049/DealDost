@@ -1,7 +1,10 @@
 const $ = (id) => document.getElementById(id);
 
-let currentMode = localStorage.getItem("dealdost.mode") === "TESTNET" ? "TESTNET" : "PAPER";
+let currentMode = ["PAPER", "TESTNET", "LIVE"].includes(localStorage.getItem("dealdost.mode"))
+  ? localStorage.getItem("dealdost.mode")
+  : "PAPER";
 let testnetAuto = localStorage.getItem("dealdost.testnetAuto") === "true";
+let liveAuto = localStorage.getItem("dealdost.liveAuto") === "true";
 let paperAuto = localStorage.getItem("dealdost.paperAuto") === "true";
 
 const fmt = (n) =>
@@ -110,6 +113,7 @@ async function directScannerFallback() {
       auto: currentMode === "PAPER" ? paperAuto : testnetAuto,
       paperAuto,
       testnetAuto,
+      liveAuto,
       ...loadPaperRuntime(),
       universe: top.map((t) => ({
         symbol: t.symbol,
@@ -157,17 +161,13 @@ function showApiError(message) {
 }
 
 async function setMode(mode) {
-  if (mode === "LIVE") {
-    showApiError("LIVE trading is locked in V2.");
-    return;
-  }
-  const auto = mode === "PAPER" ? paperAuto : testnetAuto;
+  const auto = mode === "PAPER" ? paperAuto : mode === "TESTNET" ? testnetAuto : liveAuto;
   $("paperAuto").disabled = true;
   try {
     const response = await fetch("/api/mode", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto })
+      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto, liveAuto })
     });
     if (!response.ok) {
       let detail = "HTTP " + response.status;
@@ -241,6 +241,38 @@ async function toggleTestnetAuto() {
   }
 }
 
+async function toggleLiveAuto() {
+  if ($("liveAuto").dataset.executionEnabled !== "true") {
+    showApiError("LIVE execution is locked. Enable BINANCE_LIVE_EXECUTION_ENABLED only after reviewing the 16-gate safety path.");
+    return;
+  }
+
+  const enabled = !liveAuto;
+  liveAuto = enabled;
+  localStorage.setItem("dealdost.liveAuto", String(enabled));
+
+  $("liveAuto").disabled = true;
+  try {
+    const response = await fetch("/api/mode", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "LIVE",
+        auto: enabled,
+        paperAuto,
+        liveAuto
+      })
+    });
+    if (response.ok) render(await response.json());
+    else showApiError("API error: HTTP " + response.status);
+  } catch (error) {
+    showApiError("API error: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    $("liveAuto").disabled = false;
+  }
+}
+
+
 async function syncTestnetProtection(symbol) {
   try {
     const response = await fetch("/api/testnet/protection-sync", {
@@ -256,6 +288,23 @@ async function syncTestnetProtection(symbol) {
     showApiError("Protection sync failed: " + (error instanceof Error ? error.message : String(error)));
   }
 }
+
+async function syncLiveProtection(symbol) {
+  try {
+    const response = await fetch("/api/live/protection-sync", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ symbol })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    render(body);
+  } catch (error) {
+    showApiError("Protection sync failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+}
+
 
 async function closePaper(symbol) {
   try {
@@ -288,6 +337,24 @@ async function closeTestnet(symbol) {
   }
 }
 
+async function closeLive(symbol) {
+  if (!window.confirm("Close managed LIVE position " + symbol + " at market?")) return;
+  try {
+    const response = await fetch("/api/live/close", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ symbol })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    render(body);
+  } catch (error) {
+    showApiError("LIVE close failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+}
+
+
 function render(state) {
   savePaperRuntime(state);
   $("regime").textContent = state.market.regime.replaceAll("_", " ");
@@ -299,15 +366,23 @@ function render(state) {
   $("data").className = "muted";
   $("universe").textContent = state.market.universeSize;
 
-  currentMode = state.mode === "TESTNET" ? "TESTNET" : "PAPER";
+  currentMode = ["PAPER", "TESTNET", "LIVE"].includes(state.mode) ? state.mode : "PAPER";
   paperAuto = Boolean(state.paper?.auto);
   testnetAuto = Boolean(state.testnet?.auto);
+  liveAuto = Boolean(state.live?.auto);
   localStorage.setItem("dealdost.mode", currentMode);
   localStorage.setItem("dealdost.paperAuto", String(paperAuto));
   localStorage.setItem("dealdost.testnetAuto", String(testnetAuto));
+  localStorage.setItem("dealdost.liveAuto", String(liveAuto));
 
   ["paperMode", "testnetMode", "liveMode"].forEach((id) => $(id)?.classList.remove("active"));
-  $(currentMode === "PAPER" ? "paperMode" : "testnetMode")?.classList.add("active");
+  $(
+    currentMode === "PAPER"
+      ? "paperMode"
+      : currentMode === "TESTNET"
+        ? "testnetMode"
+        : "liveMode"
+  )?.classList.add("active");
 
   $("paperAuto").textContent = "PAPER AUTO " + (paperAuto ? "ON" : "OFF");
   $("paperAuto").dataset.enabled = String(paperAuto);
@@ -378,6 +453,113 @@ function render(state) {
       tnHint.hidden = true;
     }
   }
+
+  const lv = state.live || {};
+  const liveAutoButton = $("liveAuto");
+  if (liveAutoButton) {
+    liveAutoButton.textContent = "LIVE AUTO " + (liveAuto ? "ON" : "OFF");
+    liveAutoButton.dataset.enabled = String(liveAuto);
+    liveAutoButton.className = liveAuto ? "auto on" : "auto";
+    liveAutoButton.dataset.executionEnabled = String(Boolean(lv.executionEnabled));
+  }
+
+  const liveButton = $("liveMode");
+  if (liveButton) {
+    const locked = !Boolean(lv.executionEnabled);
+    liveButton.classList.toggle("disabled", locked);
+    liveButton.title = locked
+      ? "LIVE is locked until LIVE credentials and BINANCE_LIVE_EXECUTION_ENABLED=true are configured"
+      : "LIVE execution enabled • 16-gate preflight required";
+  }
+
+  $("liveStatus").textContent = lv.error
+    ? "ERROR"
+    : lv.connected
+      ? (lv.executionEnabled ? "CONNECTED • ARMED" : "CONNECTED • READ ONLY")
+      : lv.configured
+        ? "CONFIGURED • OFFLINE"
+        : "CREDENTIALS REQUIRED";
+  $("liveStatus").className = "status " + (
+    lv.error ? "warn" : (lv.connected && lv.executionEnabled ? "ok" : "warn")
+  );
+  $("liveBalance").textContent = money(lv.accountBalanceUsd);
+  $("liveOpen").textContent = String(lv.openPositions ?? 0);
+  $("livePnl").textContent = money(lv.realizedPnlTodayUsd);
+  $("liveFees").textContent = money(lv.feesTodayUsd);
+
+  const lvError = $("liveError");
+  const lvHint = $("liveExecutionHint");
+  if (lvError) {
+    lvError.textContent = lv.error ? String(lv.error).slice(0, 140) : "";
+    lvError.title = lv.error || "";
+    lvError.hidden = !lv.error;
+  }
+  if (lvHint) {
+    if (!lv.configured) {
+      lvHint.textContent = "LIVE credentials required • execution remains OFF";
+      lvHint.hidden = false;
+    } else if (!lv.executionEnabled) {
+      lvHint.textContent = lv.connected
+        ? "LIVE connected in READ ONLY mode • execution flag is OFF"
+        : "LIVE configured • waiting for account connection";
+      lvHint.hidden = false;
+    } else if (currentMode === "LIVE" && liveAuto) {
+      lvHint.textContent = "LIVE execution ARMED • AUTO ON • 16-gate preflight on every entry";
+      lvHint.hidden = false;
+    } else if (currentMode === "LIVE") {
+      lvHint.textContent = "LIVE execution ARMED • AUTO OFF";
+      lvHint.hidden = false;
+    } else {
+      lvHint.textContent = "";
+      lvHint.hidden = true;
+    }
+  }
+
+  const lvGate = $("livePositionGate");
+  if (lvGate) {
+    lvGate.textContent = lv.positions?.length
+      ? lv.positions.length + " open" +
+        (lv.unclassifiedOpenPositions ? " • " + lv.unclassifiedOpenPositions + " unclassified" : "")
+      : "0 open";
+  }
+
+  const lvPositions = $("livePositions");
+  if (lvPositions) {
+    if (!lv.positions?.length) {
+      lvPositions.innerHTML = '<tr><td colspan="10" class="empty">No LIVE positions.</td></tr>';
+    } else {
+      lvPositions.innerHTML = lv.positions.map((p) =>
+        "<tr>" +
+        "<td><strong>" + esc(p.symbol) + "</strong></td>" +
+        "<td>" + esc(p.engine || "UNCLASSIFIED") + "</td>" +
+        '<td class="' + (p.side === "LONG" ? "long" : "short") + '">' + esc(p.side) + "</td>" +
+        "<td>" + fmt(p.quantity) + "</td>" +
+        "<td>" + fmt(p.entryPrice) + "</td>" +
+        "<td>" + fmt(p.markPrice) + "</td>" +
+        "<td>" + money(p.unrealizedPnlUsd) + "</td>" +
+        "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
+        "<td>" +
+          '<span class="stage ' + String(p.protection || "MISSING").toLowerCase() + '">' + esc(p.protection || "MISSING") + "</span>" +
+          ((p.protection || "MISSING") !== "OK" && p.engine
+            ? ' <button class="protect-btn" data-live-symbol="' + esc(p.symbol) + '">SYNC</button>'
+            : "") +
+        "</td>" +
+        "<td>" +
+          (p.engine
+            ? '<button class="live-close-btn" data-symbol="' + esc(p.symbol) + '">Close</button>'
+            : "—") +
+        "</td>" +
+        "</tr>"
+      ).join("");
+    }
+  }
+
+  document.querySelectorAll("[data-live-symbol]").forEach((button) => {
+    button.onclick = () => syncLiveProtection(button.dataset.liveSymbol);
+  });
+  document.querySelectorAll(".live-close-btn").forEach((button) => {
+    button.onclick = () => closeLive(button.dataset.symbol);
+  });
 
   $("momentum").textContent = state.engines.momentum.open + "/" + state.engines.momentum.max;
   $("scalping").textContent = state.engines.scalping.open + "/" + state.engines.scalping.max;
@@ -530,7 +712,8 @@ async function load() {
         "x-dealdost-mode": currentMode,
         "x-dealdost-auto": String(currentMode === "PAPER" ? paperAuto : testnetAuto),
         "x-dealdost-paper-auto": String(paperAuto),
-        "x-dealdost-testnet-auto": String(testnetAuto)
+        "x-dealdost-testnet-auto": String(testnetAuto),
+        "x-dealdost-live-auto": String(liveAuto)
       }
     });
     if (response.ok) {
@@ -589,6 +772,7 @@ async function load() {
 
 $("paperAuto").onclick = togglePaperAuto;
 $("testnetAuto")?.addEventListener("click", toggleTestnetAuto);
+$("liveAuto")?.addEventListener("click", toggleLiveAuto);
 $("paperMode")?.addEventListener("click", () => setMode("PAPER"));
 $("testnetMode")?.addEventListener("click", () => setMode("TESTNET"));
 $("liveMode")?.addEventListener("click", () => setMode("LIVE"));

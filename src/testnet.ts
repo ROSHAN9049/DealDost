@@ -117,16 +117,30 @@ export interface TestnetExecutionSnapshot {
 }
 
 export class TestnetClient {
-  private readonly baseUrl = config.testnetRestBase;
-  private exchangeInfo?: ExchangeInfo;
-  private exchangeInfoAt = 0;
+  constructor(private readonly profile: "TESTNET" | "LIVE" = "TESTNET") {}
+
+  private get baseUrl() {
+    return this.profile === "LIVE" ? config.liveRestBase : config.testnetRestBase;
+  }
+
+  private get apiKey() {
+    return this.profile === "LIVE" ? config.liveApiKey : config.testnetApiKey;
+  }
+
+  private get apiSecret() {
+    return this.profile === "LIVE" ? config.liveApiSecret : config.testnetApiSecret;
+  }
+
+  private get executionFlag() {
+    return this.profile === "LIVE" ? config.liveExecutionEnabled : config.testnetExecutionEnabled;
+  }
 
   isConfigured() {
-    return Boolean(config.testnetApiKey && config.testnetApiSecret);
+    return Boolean(this.apiKey && this.apiSecret);
   }
 
   isExecutionEnabled() {
-    return this.isConfigured() && config.testnetExecutionEnabled;
+    return this.isConfigured() && this.executionFlag;
   }
 
   emptyState(): TestnetStateView {
@@ -351,7 +365,7 @@ export class TestnetClient {
   }
 
   async setOneXLeverage(symbol: string) {
-    if (!this.isExecutionEnabled()) throw new Error("TESTNET_EXECUTION_DISABLED");
+    if (!this.isExecutionEnabled()) throw new Error(this.profile + "_EXECUTION_DISABLED");
     await this.signedPost<any>("/fapi/v1/leverage", {
       symbol: symbol.toUpperCase(),
       leverage: "1",
@@ -367,12 +381,12 @@ export class TestnetClient {
   }): Promise<TestnetOrderPlan> {
     const symbol = input.symbol.toUpperCase();
     if (!/^[A-Z0-9]+USDT$/.test(symbol)) {
-      throw new Error("TESTNET symbol must be a USDT-M symbol: " + symbol);
+      throw new Error(this.profile + " symbol must be a USDT-M symbol: " + symbol);
     }
 
     const rules = await this.getSymbolRules(symbol);
     if (rules.status !== "TRADING" || rules.quoteAsset !== "USDT" || rules.contractType !== "PERPETUAL") {
-      throw new Error("TESTNET symbol is not an active USDT perpetual: " + symbol);
+      throw new Error(this.profile + " symbol is not an active USDT perpetual: " + symbol);
     }
 
     const lot = (rules.filters ?? []).find((f) => f.filterType === "MARKET_LOT_SIZE")
@@ -382,7 +396,7 @@ export class TestnetClient {
     const stepSize = Number(lot?.stepSize ?? 0);
 
     if (!Number.isFinite(minQty) || !Number.isFinite(stepSize) || stepSize <= 0) {
-      throw new Error("Missing TESTNET quantity filters for " + symbol);
+      throw new Error("Missing " + this.profile + " quantity filters for " + symbol);
     }
 
     const mark = await this.publicGet<{ markPrice?: string }>(
@@ -404,10 +418,10 @@ export class TestnetClient {
 
     const quantity = this.floorToStep(input.quantity, stepSize);
     if (quantity < minQty || quantity <= 0) {
-      throw new Error("TESTNET quantity below minimum for " + symbol + ": " + quantity);
+      throw new Error(this.profile + " quantity below minimum for " + symbol + ": " + quantity);
     }
     if (quantity > maxQty) {
-      throw new Error("TESTNET quantity above maximum for " + symbol + ": " + quantity);
+      throw new Error(this.profile + " quantity above maximum for " + symbol + ": " + quantity);
     }
 
     const minNotional = Number(
@@ -416,7 +430,7 @@ export class TestnetClient {
     const notional = quantity * markPrice;
     if (minNotional > 0 && notional < minNotional) {
       throw new Error(
-        "TESTNET order notional below minimum for " +
+        this.profile + " order notional below minimum for " +
           symbol +
           ": " +
           notional.toFixed(4) +
@@ -450,8 +464,8 @@ export class TestnetClient {
     if (!this.isExecutionEnabled()) {
       throw new Error(
         this.isConfigured()
-          ? "TESTNET_EXECUTION_DISABLED"
-          : "TESTNET_NOT_CONFIGURED",
+          ? this.profile + "_EXECUTION_DISABLED"
+          : this.profile + "_NOT_CONFIGURED",
       );
     }
 
@@ -504,7 +518,7 @@ export class TestnetClient {
     if (!executedQty || !avgPrice) {
       const status = String(order.status ?? "UNKNOWN");
       throw new Error(
-        "TESTNET market entry not filled: status=" + status +
+        this.profile + " market entry not filled: status=" + status +
         " orderId=" + String(order.orderId ?? "—"),
       );
     }
@@ -546,14 +560,14 @@ export class TestnetClient {
         });
       } catch (closeError) {
         throw new Error(
-          "TESTNET protection failed and emergency close also failed: " +
+          this.profile + " protection failed and emergency close also failed: " +
             (error instanceof Error ? error.message : String(error)) +
             " | close: " +
             (closeError instanceof Error ? closeError.message : String(closeError)),
         );
       }
       throw new Error(
-        "TESTNET protection failed; entry was emergency-closed: " +
+        this.profile + " protection failed; entry was emergency-closed: " +
           (error instanceof Error ? error.message : String(error)),
       );
     }
@@ -578,7 +592,7 @@ export class TestnetClient {
     stopPrice: number;
     takeProfitPrice: number;
   }) {
-    if (!this.isExecutionEnabled()) throw new Error("TESTNET_EXECUTION_DISABLED");
+    if (!this.isExecutionEnabled()) throw new Error(this.profile + "_EXECUTION_DISABLED");
     const symbol = input.symbol.toUpperCase();
 
     await this.buildMarketOrderPlan({
@@ -632,14 +646,14 @@ export class TestnetClient {
 
     const verified = await this.getOpenOrders(symbol);
     if (this.getProtectionStatus(verified) !== "OK") {
-      throw new Error("TESTNET protection verification failed");
+      throw new Error(this.profile + " protection verification failed");
     }
 
     return { changed: true, protection: "OK" as const };
   }
 
   async closeManagedPosition(symbolInput: string) {
-    if (!this.isExecutionEnabled()) throw new Error("TESTNET_EXECUTION_DISABLED");
+    if (!this.isExecutionEnabled()) throw new Error(this.profile + "_EXECUTION_DISABLED");
     const symbol = symbolInput.toUpperCase();
 
     const snapshot = await this.getExecutionSnapshot();
@@ -693,7 +707,7 @@ export class TestnetClient {
 
     if (!executedQty || !avgPrice) {
       throw new Error(
-        "TESTNET manual close not filled: status=" + String(order.status ?? "UNKNOWN") +
+        this.profile + " manual close not filled: status=" + String(order.status ?? "UNKNOWN") +
         " orderId=" + String(order.orderId ?? "—"),
       );
     }
@@ -951,7 +965,7 @@ export class TestnetClient {
 
     const row = this.exchangeInfo.symbols?.find((item) => item.symbol === symbol);
     if (!row) {
-      throw new Error("TESTNET symbol not found in exchange info: " + symbol);
+      throw new Error(this.profile + " symbol not found in exchange info: " + symbol);
     }
     return row;
   }
@@ -992,7 +1006,7 @@ export class TestnetClient {
     });
     const body = await response.text();
     if (!response.ok) {
-      throw new Error("Binance TESTNET public " + response.status + ": " + body.slice(0, 300));
+      throw new Error("Binance " + this.profile + " public " + response.status + ": " + body.slice(0, 300));
     }
     return JSON.parse(body) as T;
   }
@@ -1002,7 +1016,7 @@ export class TestnetClient {
     const params = new URLSearchParams(rawQuery);
     params.set("recvWindow", "5000");
     params.set("timestamp", String(Date.now()));
-    const signature = createHmac("sha256", config.testnetApiSecret)
+    const signature = createHmac("sha256", this.apiSecret)
       .update(params.toString())
       .digest("hex");
     params.set("signature", signature);
@@ -1010,14 +1024,14 @@ export class TestnetClient {
     const response = await fetch(this.baseUrl + pathname + "?" + params.toString(), {
       signal: AbortSignal.timeout(7000),
       headers: {
-        "X-MBX-APIKEY": config.testnetApiKey,
+        "X-MBX-APIKEY": this.apiKey,
         "User-Agent": "DealDost/2.4",
       },
     });
 
     const body = await response.text();
     if (!response.ok) {
-      throw new Error("Binance TESTNET " + response.status + ": " + body.slice(0, 300));
+      throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
     }
 
     return JSON.parse(body) as T;
@@ -1030,7 +1044,7 @@ export class TestnetClient {
     params.set("recvWindow", "5000");
     params.set("timestamp", String(Date.now()));
 
-    const signature = createHmac("sha256", config.testnetApiSecret)
+    const signature = createHmac("sha256", this.apiSecret)
       .update(params.toString())
       .digest("hex");
     params.set("signature", signature);
@@ -1039,14 +1053,14 @@ export class TestnetClient {
       method: "DELETE",
       signal: AbortSignal.timeout(10_000),
       headers: {
-        "X-MBX-APIKEY": config.testnetApiKey,
+        "X-MBX-APIKEY": this.apiKey,
         "User-Agent": "DealDost/2.4",
       },
     });
 
     const body = await response.text();
     if (!response.ok) {
-      throw new Error("Binance TESTNET " + response.status + ": " + body.slice(0, 300));
+      throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
     }
     return JSON.parse(body) as T;
   }
@@ -1056,7 +1070,7 @@ export class TestnetClient {
     params.set("recvWindow", "5000");
     params.set("timestamp", String(Date.now()));
 
-    const signature = createHmac("sha256", config.testnetApiSecret)
+    const signature = createHmac("sha256", this.apiSecret)
       .update(params.toString())
       .digest("hex");
     params.set("signature", signature);
@@ -1065,14 +1079,14 @@ export class TestnetClient {
       method: "POST",
       signal: AbortSignal.timeout(10_000),
       headers: {
-        "X-MBX-APIKEY": config.testnetApiKey,
+        "X-MBX-APIKEY": this.apiKey,
         "User-Agent": "DealDost/2.4",
       },
     });
 
     const body = await response.text();
     if (!response.ok) {
-      throw new Error("Binance TESTNET " + response.status + ": " + body.slice(0, 300));
+      throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
     }
 
     return JSON.parse(body) as T;

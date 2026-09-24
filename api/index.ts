@@ -12,14 +12,13 @@ app.use(express.static(path.resolve(process.cwd(), "public")));
 
 function applyRequestMode(input: any) {
   const requested = String(input?.mode ?? "").toUpperCase();
-  if (requested === "PAPER" || requested === "TESTNET") {
+  if (requested === "PAPER" || requested === "TESTNET" || requested === "LIVE") {
     const automation = {
       paperAuto: input?.paperAuto === undefined ? undefined : Boolean(input.paperAuto),
       testnetAuto: input?.testnetAuto === undefined ? undefined : Boolean(input.testnetAuto),
+      liveAuto: input?.liveAuto === undefined ? undefined : Boolean(input.liveAuto),
     };
     scanner.setRequestMode(requested, Boolean(input?.auto), automation);
-  } else if (requested === "LIVE") {
-    throw new Error("LIVE_EXECUTION_LOCKED");
   }
 }
 
@@ -65,6 +64,8 @@ app.get("/api/state", async (req, res) => {
         req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "PAPER",
       testnetAuto: req.get("x-dealdost-testnet-auto") === "true" ||
         req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "TESTNET",
+      liveAuto: req.get("x-dealdost-live-auto") === "true" ||
+        req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "LIVE",
     });
     await scanner.serverlessTick();
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
@@ -116,13 +117,14 @@ app.post("/api/mode", async (req, res) => {
     await ensureStarted();
     const body = req.body ?? {};
     const mode = String(body.mode ?? "").toUpperCase();
-    if (mode !== "PAPER" && mode !== "TESTNET") {
-      res.status(400).json({ error: mode === "LIVE" ? "LIVE_EXECUTION_LOCKED" : "invalid_mode" });
+    if (mode !== "PAPER" && mode !== "TESTNET" && mode !== "LIVE") {
+      res.status(400).json({ error: "invalid_mode" });
       return;
     }
-    scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto), {
+    scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto ?? body.liveAuto), {
       paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
       testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),
+      liveAuto: body.liveAuto === undefined ? undefined : Boolean(body.liveAuto),
     });
     res.json(scanner.state());
   } catch (error) {
@@ -156,6 +158,38 @@ app.post("/api/testnet/close", async (req, res) => {
       return;
     }
     const state = await scanner.closeManagedTestnetPosition(symbol);
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.json(state);
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/live/protection-sync", async (req, res) => {
+  try {
+    await ensureStarted();
+    const symbol = String(req.body?.symbol ?? "").toUpperCase();
+    if (!symbol) {
+      res.status(400).json({ error: "symbol_required" });
+      return;
+    }
+    const state = await scanner.syncLivePositionProtection(symbol);
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.json(state);
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/live/close", async (req, res) => {
+  try {
+    await ensureStarted();
+    const symbol = String(req.body?.symbol ?? "").toUpperCase();
+    if (!symbol) {
+      res.status(400).json({ error: "symbol_required" });
+      return;
+    }
+    const state = await scanner.closeManagedLivePosition(symbol);
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
     res.json(state);
   } catch (error) {

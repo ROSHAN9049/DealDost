@@ -175,11 +175,25 @@ async function directBinanceFallback() {
   $("universe").textContent = top.length;
 }
 
+function friendlyBinanceError(message) {
+  const value = String(message || "");
+  if (value.includes("-2015") || value.includes("Invalid API-key")) {
+    return "BINANCE AUTH ERROR (-2015): TESTNET key, IP restriction, or permissions are invalid.";
+  }
+  if (value.includes("429") || value.includes("-1003")) {
+    return "BINANCE RATE LIMIT (429): REST backoff active; scanner uses cached/low-frequency market requests.";
+  }
+  if (value.includes("-4120")) {
+    return "BINANCE CONDITIONAL ORDER API ERROR (-4120): outdated conditional-order endpoint.";
+  }
+  return value;
+}
+
 function showApiError(message) {
   const isTestnet = currentMode === "TESTNET";
   const target = isTestnet ? $("testnetError") : $("data");
   if (target) {
-    target.textContent = message;
+    target.textContent = friendlyBinanceError(message);
     target.className = "muted error";
     if (isTestnet) target.hidden = false;
   }
@@ -419,6 +433,18 @@ function paperAnalytics(state) {
       averageLossUsd: losses ? grossLoss / losses : 0,
       maxDrawdownUsd: maxDrawdown
     },
+    trades: history.slice(0, 50).map(t => ({
+      time: Number(t.closedAt || 0),
+      symbol: t.symbol,
+      engine: t.engine,
+      side: t.side,
+      stage: t.signalStage || "CONFIRMED",
+      quality: Number(t.qualityScore || 0),
+      exit: Number(t.exit || 0),
+      reason: t.reason,
+      netPnlUsd: Number(t.netPnlUsd || 0),
+      rotationId: t.rotationId || null
+    })),
     daily: [...dailyMap.values()].sort((a,b)=>b.date.localeCompare(a.date)),
     coverage: { incomeRows: 0, orderRows: history.length, orderRowsLimit: history.length, note: "PAPER analytics use the locally stored DealDost trade history on this browser." }
   };
@@ -462,6 +488,25 @@ function renderAnalytics(data) {
         ).join("")
       : '<tr><td colspan="4" class="empty">No account history in the selected window.</td></tr>';
   }
+  const tradeRows = Array.isArray(data.trades) ? data.trades : [];
+  const tradeBody = $("tradeHistory");
+  if (tradeBody) {
+    tradeBody.innerHTML = tradeRows.length
+      ? tradeRows.map(t =>
+          "<tr><td>" + esc(t.time ? new Date(Number(t.time)).toLocaleString() : "—") + "</td>" +
+          "<td>" + esc(t.symbol || "—") + "</td>" +
+          "<td>" + esc(t.engine || "—") + "</td>" +
+          "<td>" + esc(t.side || "—") + "</td>" +
+          "<td>" + esc(t.stage || "—") + "</td>" +
+          "<td>" + (t.quality ? esc(String(t.quality)) : "—") + "</td>" +
+          "<td>" + (t.exit ? fmt(t.exit) : "—") + "</td>" +
+          "<td>" + esc(t.reason || t.type || t.status || "—") + "</td>" +
+          "<td>" + (t.netPnlUsd == null ? "—" : money(t.netPnlUsd)) + "</td>" +
+          "<td>" + esc(t.rotationId || t.clientOrderId || "—") + "</td></tr>"
+        ).join("")
+      : '<tr><td colspan="10" class="empty">No trade history in the selected window.</td></tr>';
+  }
+
   const note = $("analyticsNote");
   if (note) {
     const coverage = data.coverage?.note || "";
@@ -621,13 +666,13 @@ function render(state) {
   const tnError = $("testnetError");
   const tnHint = $("testnetExecutionHint");
   if (tnError) {
-    tnError.textContent = tn.error ? String(tn.error).slice(0, 120) : "";
+    tnError.textContent = tn.error ? friendlyBinanceError(String(tn.error).slice(0, 160)) : "";
     tnError.title = tn.error || "";
     tnError.hidden = !tn.error;
   }
   if (tnHint) {
     if (currentMode === "TESTNET" && !tn.configured) {
-      tnHint.textContent = "TESTNET credentials required • add API key + secret in Railway Variables • execution stays OFF";
+      tnHint.textContent = "TESTNET Demo/Futures key + secret required in the running deployment environment • execution stays OFF";
       tnHint.hidden = false;
     } else if (currentMode === "TESTNET" && !tn.executionEnabled) {
       tnHint.textContent = tn.connected

@@ -348,9 +348,15 @@ export class BinanceScanner extends EventEmitter {
       this.liveAuto = auto;
     }
 
-    if (!this.risk.snapshot().emergencyStop && this.testnetAuto) void this.tryTestnetEntries();
-    if (!this.risk.snapshot().emergencyStop && this.liveAuto) void this.tryLiveEntries();
-    if (this.paper.getAuto()) this.tryPaperEntries();
+    if (this.risk.snapshot().emergencyStop) {
+      this.testnetAuto = false;
+      this.liveAuto = false;
+      this.paper.setAuto(false);
+    } else {
+      if (this.testnetAuto) void this.tryTestnetEntries();
+      if (this.liveAuto) void this.tryLiveEntries();
+      if (this.paper.getAuto()) this.tryPaperEntries();
+    }
     this.emit("update");
   }
 

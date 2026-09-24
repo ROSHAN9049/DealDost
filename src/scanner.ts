@@ -43,7 +43,10 @@ export class BinanceScanner extends EventEmitter {
   private lastLiveSyncAt = 0;
   private serverlessMode = false;
   private lastServerlessPollAt = 0;
+  private lastServerlessHistoryAt = 0;
   private serverlessCursor = 0;
+  private lastUniverseRefreshAt = 0;
+  private universeRefreshInFlight?: Promise<void>;
   private lastMarketError: string | null = null;
 
   onUpdate(listener: () => void): () => void {
@@ -114,13 +117,16 @@ export class BinanceScanner extends EventEmitter {
     try {
       await this.refreshUniverse();
       const states = [...this.symbols.values()];
-      if (states.length) {
-        // Always score BTC first so a fresh Vercel invocation produces a
-        // deterministic server-owned market/signal result.
+      if (states.length && Date.now() - this.lastServerlessHistoryAt >= config.serverlessHistoryRefreshMs) {
+        // Historical klines are a fallback for server-owned scoring. Browser
+        // market ingestion remains the primary high-frequency market path.
+        // Throttle this REST dependency so Vercel invocations cannot spam
+        // Binance every second.
         const btc = this.symbols.get("BTCUSDT");
         const target = btc ?? states[this.serverlessCursor % states.length];
         this.serverlessCursor = (this.serverlessCursor + 1) % states.length;
         await this.bootstrapHistoryForStates([target]);
+        this.lastServerlessHistoryAt = Date.now();
       }
       await this.syncTestnetIfDue();
       await this.syncLiveIfDue();
@@ -660,7 +666,14 @@ export class BinanceScanner extends EventEmitter {
         });
         const body = await response.text();
         if (!response.ok) {
-          failures.push(base + " -> HTTP " + response.status + " " + body.slice(0, 160));
+          const retryAfter = response.headers.get("retry-after");
+          const retrySuffix = retryAfter ? " • Retry-After " + retryAfter + "s" : "";
+          failures.push(base + " -> HTTP " + response.status + retrySuffix + " " + body.slice(0, 160));
+
+          // Binance explicitly requires clients to back off after HTTP 429.
+          // Trying every fallback host immediately only repeats the same
+          // IP-based rate-limit pressure and can escalate to an IP ban.
+          if (response.status === 429 || response.status === 418) break;
           continue;
         }
         this.lastMarketError = null;
@@ -675,39 +688,52 @@ export class BinanceScanner extends EventEmitter {
     throw new Error(message);
   }
 
-  private async refreshUniverse() {
-    let ticker: BinanceTicker[];
+  private async refreshUniverse(): Promise<void> {
+    const now = Date.now();
+    if (this.symbols.size && now - this.lastUniverseRefreshAt < config.universeRefreshMs) return;
+    if (this.universeRefreshInFlight) return this.universeRefreshInFlight;
+
+    this.universeRefreshInFlight = (async () => {
+      let ticker: BinanceTicker[];
+      try {
+        ticker = await this.request<BinanceTicker[]>("/fapi/v1/ticker/24hr");
+      } catch (error) {
+        this.feedStatus = "OFFLINE";
+        this.lastMarketError = error instanceof Error ? error.message : String(error);
+        throw new Error("Binance market ticker unavailable: " + this.lastMarketError);
+      }
+
+      // The 24h futures ticker is only for universe selection. Cache it for
+      // several minutes in serverless mode; high-frequency prices/candles are
+      // supplied by browser ingestion or the websocket in persistent mode.
+      const top = ticker
+        .filter((t) => t.symbol.endsWith("USDT") && Number(t.quoteVolume) >= config.minQuoteVolume)
+        .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
+        .slice(0, config.universeSize);
+
+      const next = new Map<string, SymbolState>();
+      for (const t of top) {
+        const previous = this.symbols.get(t.symbol);
+        next.set(t.symbol, {
+          symbol: t.symbol,
+          quoteVolume24h: Number(t.quoteVolume),
+          lastPrice: Number(t.lastPrice),
+          lastDataAt: previous?.lastDataAt ?? 0,
+          candles: previous?.candles ?? { "1m": [], "5m": [], "15m": [] },
+        });
+      }
+
+      this.symbols = next;
+      this.btcPrice = this.symbols.get("BTCUSDT")?.lastPrice ?? this.btcPrice;
+      this.lastUniverseRefreshAt = Date.now();
+      this.emit("update");
+    })();
+
     try {
-      ticker = await this.request<BinanceTicker[]>("/fapi/v1/ticker/24hr");
-    } catch (error) {
-      this.feedStatus = "OFFLINE";
-      this.lastMarketError = error instanceof Error ? error.message : String(error);
-      throw new Error("Binance market ticker unavailable: " + this.lastMarketError);
+      await this.universeRefreshInFlight;
+    } finally {
+      this.universeRefreshInFlight = undefined;
     }
-
-    // The 24h futures ticker is the reliable public market-data path.
-    // Keep the universe filter conservative without making exchangeInfo a
-    // second mandatory network dependency for every serverless invocation.
-    const top = ticker
-      .filter((t) => t.symbol.endsWith("USDT") && Number(t.quoteVolume) >= config.minQuoteVolume)
-      .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
-      .slice(0, config.universeSize);
-
-    const next = new Map<string, SymbolState>();
-    for (const t of top) {
-      const previous = this.symbols.get(t.symbol);
-      next.set(t.symbol, {
-        symbol: t.symbol,
-        quoteVolume24h: Number(t.quoteVolume),
-        lastPrice: Number(t.lastPrice),
-        lastDataAt: previous?.lastDataAt ?? 0,
-        candles: previous?.candles ?? { "1m": [], "5m": [], "15m": [] },
-      });
-    }
-
-    this.symbols = next;
-    this.btcPrice = this.symbols.get("BTCUSDT")?.lastPrice ?? this.btcPrice;
-    this.emit("update");
   }
 
   private async bootstrapHistory(limit = this.symbols.size) {

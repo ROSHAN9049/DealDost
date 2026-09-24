@@ -133,6 +133,31 @@ app.post("/api/mode", async (req, res) => {
   }
 });
 
+app.get("/api/analytics", async (req, res) => {
+  try {
+    await ensureStarted();
+    const requested = String(req.query?.mode ?? req.get("x-dealdost-mode") ?? "").toUpperCase();
+    const mode = requested === "LIVE" ? "LIVE" : "TESTNET";
+    const days = Math.min(90, Math.max(1, Number(req.query?.days ?? 30) || 30));
+    const analytics = await scanner.accountAnalytics(mode, days);
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.json(analytics);
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/risk/emergency-stop", async (req, res) => {
+  try {
+    await ensureStarted();
+    scanner.setEmergencyStop(Boolean(req.body?.enabled));
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.json(scanner.state());
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.post("/api/testnet/protection-sync", async (req, res) => {
   try {
     await ensureStarted();

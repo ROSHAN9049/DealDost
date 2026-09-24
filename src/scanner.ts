@@ -363,6 +363,9 @@ export class BinanceScanner extends EventEmitter {
 
   setPaperAuto(enabled: boolean) {
     this.mode = "PAPER";
+    if (enabled && this.risk.snapshot().emergencyStop) {
+      throw new Error("EMERGENCY_ENTRY_STOP");
+    }
     this.paper.setAuto(enabled);
     this.emit("update");
     if (enabled) this.tryPaperEntries();
@@ -370,6 +373,9 @@ export class BinanceScanner extends EventEmitter {
 
   setTestnetAuto(enabled: boolean) {
     this.mode = "TESTNET";
+    if (enabled && this.risk.snapshot().emergencyStop) {
+      throw new Error("EMERGENCY_ENTRY_STOP");
+    }
     this.testnetAuto = Boolean(enabled);
     this.emit("update");
     if (this.testnetAuto) void this.tryTestnetEntries();
@@ -997,7 +1003,6 @@ export class BinanceScanner extends EventEmitter {
       dailyRiskUsedPct: state.dailyRiskUsedPct,
       realizedPnlTodayUsd: state.realizedPnlTodayUsd,
       feesTodayUsd: state.feesTodayUsd,
-      netPnlTodayUsd: state.netPnlTodayUsd,
       netPnlTodayUsd: state.netPnlTodayUsd,
       lastClosedAt: {},
     });

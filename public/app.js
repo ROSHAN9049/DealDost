@@ -1002,7 +1002,7 @@ async function load() {
       cache: "no-store",
       headers: {
         "x-dealdost-mode": currentMode,
-        "x-dealdost-auto": String(currentMode === "PAPER" ? paperAuto : testnetAuto),
+        "x-dealdost-auto": String(currentMode === "PAPER" ? paperAuto : currentMode === "TESTNET" ? testnetAuto : liveAuto),
         "x-dealdost-paper-auto": String(paperAuto),
         "x-dealdost-testnet-auto": String(testnetAuto),
         "x-dealdost-live-auto": String(liveAuto),

@@ -6,6 +6,9 @@ let currentMode = ["PAPER", "TESTNET", "LIVE"].includes(localStorage.getItem("de
 let testnetAuto = localStorage.getItem("dealdost.testnetAuto") === "true";
 let liveAuto = localStorage.getItem("dealdost.liveAuto") === "true";
 let paperAuto = localStorage.getItem("dealdost.paperAuto") === "true";
+let emergencyStop = localStorage.getItem("dealdost.emergencyStop") === "true";
+let analyticsLoading = false;
+let lastAnalyticsLoadedAt = 0;
 
 const fmt = (n) =>
   Number.isFinite(Number(n))
@@ -37,7 +40,14 @@ const esc = (s) =>
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
   }[c]));
 
+let directBinanceBlockedUntil = 0;
+
 async function fetchDirectBinance(path) {
+  const now = Date.now();
+  if (now < directBinanceBlockedUntil) {
+    throw new Error("Binance REST backoff active");
+  }
+
   const bases = [
     "https://fapi.binance.com",
     "https://fapi1.binance.com",
@@ -48,10 +58,18 @@ async function fetchDirectBinance(path) {
   for (const base of bases) {
     try {
       const response = await fetch(base + path, { cache: "no-store" });
-      if (!response.ok) throw new Error(base + " HTTP " + response.status);
+      if (!response.ok) {
+        const retryAfter = Number(response.headers.get("retry-after") || 0);
+        if (response.status === 429 || response.status === 418) {
+          directBinanceBlockedUntil = Date.now() + Math.max(15000, (retryAfter || 30) * 1000);
+          throw new Error(base + " HTTP " + response.status + " • backoff active");
+        }
+        throw new Error(base + " HTTP " + response.status);
+      }
       return await response.json();
     } catch (error) {
       lastError = error;
+      if (String(error?.message || "").includes("backoff active")) break;
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Binance market API unavailable");
@@ -118,6 +136,7 @@ async function directScannerFallback() {
       paperAuto,
       testnetAuto,
       liveAuto,
+      emergencyStop,
       ...loadPaperRuntime(),
       universe: top.map((t) => ({
         symbol: t.symbol,
@@ -186,7 +205,7 @@ async function setMode(mode) {
       method: "POST",
       headers: { "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto, liveAuto })
+      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto, liveAuto, emergencyStop })
     });
     if (!response.ok) {
       let detail = "HTTP " + response.status;
@@ -224,7 +243,8 @@ async function togglePaperAuto() {
         mode: currentMode,
         auto: enabled,
         paperAuto,
-        testnetAuto
+        testnetAuto,
+        emergencyStop
       })
     });
     if (response.ok) render(await response.json());
@@ -255,7 +275,8 @@ async function toggleTestnetAuto() {
         mode: "TESTNET",
         auto: enabled,
         paperAuto,
-        testnetAuto
+        testnetAuto,
+        emergencyStop
       })
     });
     if (response.ok) render(await response.json());
@@ -286,7 +307,8 @@ async function toggleLiveAuto() {
         mode: "LIVE",
         auto: enabled,
         paperAuto,
-        liveAuto
+        liveAuto,
+        emergencyStop
       })
     });
     if (response.ok) render(await response.json());
@@ -298,6 +320,158 @@ async function toggleLiveAuto() {
   }
 }
 
+
+async function toggleEmergencyStop() {
+  const enabled = !emergencyStop;
+  $("emergencyStop").disabled = true;
+  try {
+    const response = await fetch("/api/risk/emergency-stop", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    emergencyStop = Boolean(body?.risk?.emergencyStop ?? enabled);
+    localStorage.setItem("dealdost.emergencyStop", String(emergencyStop));
+    render(body);
+  } catch (error) {
+    showApiError("Entry stop failed: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    $("emergencyStop").disabled = false;
+  }
+}
+
+async function loadAccountAnalytics(force = false) {
+  if (analyticsLoading) return;
+  if (currentMode === "PAPER") return;
+  if (!force && Date.now() - lastAnalyticsLoadedAt < 60000) return;
+
+  analyticsLoading = true;
+  try {
+    const response = await fetch("/api/analytics?mode=" + encodeURIComponent(currentMode) + "&days=30", {
+      cache: "no-store"
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || ("HTTP " + response.status));
+    lastAnalyticsLoadedAt = Date.now();
+    renderAccountAnalytics(body);
+  } catch (error) {
+    const note = $("analyticsNote");
+    if (note) note.textContent = "Account analytics unavailable: " + (error instanceof Error ? error.message : String(error));
+  } finally {
+    analyticsLoading = false;
+  }
+}
+
+function paperAnalytics(state) {
+  const history = Array.isArray(state?.paper?.history) ? [...state.paper.history].reverse() : [];
+  const dailyMap = new Map();
+
+  for (const trade of history) {
+    const ts = Number(trade.closedAt || 0);
+    if (!Number.isFinite(ts) || !ts) continue;
+    const date = new Date(ts + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const row = dailyMap.get(date) || { date, realizedPnlUsd: 0, feesUsd: 0, netPnlUsd: 0 };
+    row.realizedPnlUsd += Number(trade.grossPnlUsd || 0);
+    row.feesUsd += Math.max(0, Number(trade.feesUsd || 0));
+    row.netPnlUsd += Number(trade.netPnlUsd || 0);
+    dailyMap.set(date, row);
+  }
+
+  const wins = history.filter(t => Number(t.netPnlUsd) > 0).length;
+  const losses = history.filter(t => Number(t.netPnlUsd) <= 0).length;
+  const grossProfit = history.filter(t => Number(t.netPnlUsd) > 0).reduce((s,t)=>s+Number(t.netPnlUsd),0);
+  const grossLoss = history.filter(t => Number(t.netPnlUsd) < 0).reduce((s,t)=>s+Number(t.netPnlUsd),0);
+  const momentumEntries = history.filter(t => t.engine === "MOMENTUM").length;
+  const scalpingEntries = history.filter(t => t.engine === "SCALPING").length;
+
+  let equity = Number(state?.paper?.startingBalanceUsd || 0);
+  let peak = equity;
+  let maxDrawdown = 0;
+  for (const trade of history) {
+    equity += Number(trade.netPnlUsd || 0);
+    peak = Math.max(peak, equity);
+    maxDrawdown = Math.max(maxDrawdown, peak - equity);
+  }
+
+  return {
+    profile: "PAPER",
+    generatedAt: Date.now(),
+    windowDays: 30,
+    totals: {
+      realizedPnlUsd: history.reduce((s,t)=>s+Number(t.grossPnlUsd || 0),0),
+      feesUsd: history.reduce((s,t)=>s+Math.max(0,Number(t.feesUsd || 0)),0),
+      netPnlUsd: history.reduce((s,t)=>s+Number(t.netPnlUsd || 0),0)
+    },
+    ddt: {
+      filledEntries: history.length,
+      momentumEntries,
+      scalpingEntries,
+      protectionOrders: 0
+    },
+    stats: {
+      wins,
+      losses,
+      winRate: history.length ? wins / history.length * 100 : 0,
+      profitFactor: grossLoss < 0 ? grossProfit / Math.abs(grossLoss) : grossProfit > 0 ? Infinity : 0,
+      averageWinUsd: wins ? grossProfit / wins : 0,
+      averageLossUsd: losses ? grossLoss / losses : 0,
+      maxDrawdownUsd: maxDrawdown
+    },
+    daily: [...dailyMap.values()].sort((a,b)=>b.date.localeCompare(a.date)),
+    coverage: { incomeRows: 0, orderRows: history.length, orderRowsLimit: history.length, note: "PAPER analytics use the locally stored DealDost trade history on this browser." }
+  };
+}
+
+function renderAnalytics(data) {
+  if (!data) return;
+  const totals = data.totals || {};
+  const ddt = data.ddt || {};
+  $("analyticsRealized").textContent = money(totals.realizedPnlUsd);
+  $("analyticsFees").textContent = money(totals.feesUsd);
+  $("analyticsNet").textContent = money(totals.netPnlUsd);
+  $("analyticsEntries").textContent = String(ddt.filledEntries || 0);
+
+  const stats = data.stats;
+  const engine = $("engineAnalytics");
+  if (engine) {
+    if (stats) {
+      engine.textContent =
+        "Win rate " + Number(stats.winRate || 0).toFixed(1) + "% • " +
+        "Profit factor " + (Number.isFinite(Number(stats.profitFactor)) ? Number(stats.profitFactor).toFixed(2) : "∞") + " • " +
+        "Avg win " + money(stats.averageWinUsd) + " • Avg loss " + money(stats.averageLossUsd) + " • " +
+        "Max drawdown " + money(stats.maxDrawdownUsd);
+    } else {
+      engine.textContent =
+        "Momentum entries " + String(ddt.momentumEntries || 0) + " • " +
+        "Scalping entries " + String(ddt.scalpingEntries || 0) + " • " +
+        "DDT entries " + String(ddt.filledEntries || 0);
+    }
+  }
+
+  const rows = Array.isArray(data.daily) ? data.daily : [];
+  const tbody = $("analyticsDaily");
+  if (tbody) {
+    tbody.innerHTML = rows.length
+      ? rows.map(row =>
+          "<tr><td>" + esc(row.date) + "</td>" +
+          "<td>" + money(row.realizedPnlUsd) + "</td>" +
+          "<td>" + money(row.feesUsd) + "</td>" +
+          "<td>" + money(row.netPnlUsd) + "</td></tr>"
+        ).join("")
+      : '<tr><td colspan="4" class="empty">No account history in the selected window.</td></tr>';
+  }
+  const note = $("analyticsNote");
+  if (note) {
+    const coverage = data.coverage?.note || "";
+    note.textContent = String(coverage) + " • 30-day view";
+  }
+}
+
+function renderAccountAnalytics(data) {
+  renderAnalytics(data);
+}
 
 async function syncTestnetProtection(symbol) {
   try {
@@ -383,6 +557,8 @@ async function closeLive(symbol) {
 
 function render(state) {
   savePaperRuntime(state);
+  emergencyStop = Boolean(state?.risk?.emergencyStop);
+  localStorage.setItem("dealdost.emergencyStop", String(emergencyStop));
   $("regime").textContent = state.market.regime.replaceAll("_", " ");
   $("btc").textContent = fmt(state.market.btcPrice);
   $("ws").textContent = state.feed.websocket;
@@ -441,6 +617,7 @@ function render(state) {
   $("testnetOpen").textContent = String(tn.openPositions);
   $("testnetPnl").textContent = money(tn.realizedPnlTodayUsd);
   $("testnetFees").textContent = money(tn.feesTodayUsd);
+  $("testnetNet").textContent = money(tn.netPnlTodayUsd);
   const tnError = $("testnetError");
   const tnHint = $("testnetExecutionHint");
   if (tnError) {
@@ -512,6 +689,7 @@ function render(state) {
   $("liveOpen").textContent = String(lv.openPositions ?? 0);
   $("livePnl").textContent = money(lv.realizedPnlTodayUsd);
   $("liveFees").textContent = money(lv.feesTodayUsd);
+  $("liveNet").textContent = money(lv.netPnlTodayUsd);
 
   const lvError = $("liveError");
   const lvHint = $("liveExecutionHint");
@@ -566,6 +744,7 @@ function render(state) {
         "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
         "<td>" +
           '<span class="stage ' + String(p.protection || "MISSING").toLowerCase() + '">' + esc(p.protection || "MISSING") + "</span>" +
+          (p.tpManagedByEngine && p.takeProfitPrice ? " TP@" + fmt(p.takeProfitPrice) : "") +
           ((p.protection || "MISSING") !== "OK" && p.engine
             ? ' <button class="protect-btn" data-live-symbol="' + esc(p.symbol) + '">SYNC</button>'
             : "") +
@@ -604,6 +783,11 @@ function render(state) {
   $("riskTrade").textContent = state.risk.riskPerTradePct + "%";
   $("riskDaily").textContent = state.risk.dailyRiskUsedPct.toFixed(2) + "% / " + state.risk.maxDailyRiskPct + "%";
   $("emergency").textContent = state.risk.emergencyStop ? "ON" : "OFF";
+  const emergencyButton = $("emergencyStop");
+  if (emergencyButton) {
+    emergencyButton.textContent = state.risk.emergencyStop ? "ENTRY STOP ON" : "ENTRY STOP OFF";
+    emergencyButton.className = state.risk.emergencyStop ? "auto danger on" : "auto danger";
+  }
   const tnGate = $("testnetPositionGate");
   if (tnGate) {
     tnGate.textContent = tn.positions?.length
@@ -634,6 +818,7 @@ function render(state) {
         "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
         "<td>" +
           "<span class=\"stage " + String(p.protection || "MISSING").toLowerCase() + "\">" + esc(p.protection || "MISSING") + "</span>" +
+          (p.tpManagedByEngine && p.takeProfitPrice ? " TP@" + fmt(p.takeProfitPrice) : "") +
           ((p.protection || "MISSING") !== "OK" && p.engine
             ? ' <button class="protect-btn" data-symbol="' + esc(p.symbol) + '">SYNC</button>'
             : "") +
@@ -732,6 +917,11 @@ function render(state) {
   $("rotLast").textContent = state.rotation.last
     ? "Last: " + state.rotation.last.rotationId + " • " + money(state.rotation.last.allocatedUsd) + " allocated"
     : "No profitable rotation yet.";
+
+  if (currentMode === "PAPER") {
+    renderAnalytics(paperAnalytics(state));
+  }
+  void loadAccountAnalytics(false);
 }
 
 let polling = false;
@@ -739,7 +929,7 @@ let lastBrowserIngestAt = 0;
 let modeChangeToken = 0;
 let directTickerCache = null;
 let directTickerCachedAt = 0;
-const DIRECT_TICKER_CACHE_MS = 15000;
+const DIRECT_TICKER_CACHE_MS = 60000;
 
 async function fetchDirectTicker() {
   if (directTickerCache && Date.now() - directTickerCachedAt < DIRECT_TICKER_CACHE_MS) {
@@ -763,7 +953,8 @@ async function load() {
         "x-dealdost-auto": String(currentMode === "PAPER" ? paperAuto : testnetAuto),
         "x-dealdost-paper-auto": String(paperAuto),
         "x-dealdost-testnet-auto": String(testnetAuto),
-        "x-dealdost-live-auto": String(liveAuto)
+        "x-dealdost-live-auto": String(liveAuto),
+        "x-dealdost-emergency-stop": String(emergencyStop)
       }
     });
     if (response.ok) {
@@ -824,6 +1015,12 @@ async function load() {
 $("paperAuto").onclick = togglePaperAuto;
 $("testnetAuto")?.addEventListener("click", toggleTestnetAuto);
 $("liveAuto")?.addEventListener("click", toggleLiveAuto);
+$("emergencyStop")?.addEventListener("click", toggleEmergencyStop);
+$("analyticsRefresh")?.addEventListener("click", () => {
+  if (currentMode === "PAPER") return;
+  lastAnalyticsLoadedAt = 0;
+  void loadAccountAnalytics(true);
+});
 $("paperMode")?.addEventListener("click", () => setMode("PAPER"));
 $("testnetMode")?.addEventListener("click", () => setMode("TESTNET"));
 $("liveMode")?.addEventListener("click", () => setMode("LIVE"));

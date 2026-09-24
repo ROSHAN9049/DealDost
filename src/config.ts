@@ -35,6 +35,8 @@ export const config = {
   liveApiSecret: credential("BINANCE_LIVE_API_SECRET"),
   liveExecutionEnabled: bool("BINANCE_LIVE_EXECUTION_ENABLED", false),
   universeSize: n("UNIVERSE_SIZE", 50),
+  universeRefreshMs: n("UNIVERSE_REFRESH_MS", 5 * 60_000),
+  serverlessHistoryRefreshMs: n("SERVERLESS_HISTORY_REFRESH_MS", 15_000),
   minQuoteVolume: n("MIN_24H_QUOTE_VOLUME_USDT", 10_000_000),
   paperBalance: n("PAPER_BALANCE_USDT", 1000),
   paperFeeBps: n("PAPER_FEE_BPS", 5),

@@ -79,7 +79,8 @@ async function fetchDirectBinance(path) {
 async function directScannerFallback() {
   if (browserIngestInFlight) return;
   browserIngestInFlight = true;
-  const requestMode = currentMode;
+  try {
+    const requestMode = currentMode;
   const requestToken = modeChangeToken;
   const ticker = await fetchDirectTicker();
   const top = ticker

@@ -119,6 +119,9 @@ export interface TestnetExecutionSnapshot {
 export class TestnetClient {
   constructor(private readonly profile: "TESTNET" | "LIVE" = "TESTNET") {}
 
+  private exchangeInfo?: ExchangeInfo;
+  private exchangeInfoAt = 0;
+
   private get baseUrl() {
     return this.profile === "LIVE" ? config.liveRestBase : config.testnetRestBase;
   }

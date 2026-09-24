@@ -7,6 +7,9 @@ export interface PaperPosition {
   symbol: string;
   engine: Engine;
   side: Side;
+  signalStage: "WATCH" | "SETUP" | "CONFIRMED" | "BLOCKED";
+  qualityScore: number;
+  regime: "TREND_UP" | "TREND_DOWN" | "RANGE" | "HIGH_VOLATILITY" | "LOW_VOLATILITY" | "NO_TRADE";
   quantity: number;
   entry: number;
   markPrice: number;
@@ -32,6 +35,9 @@ export interface PaperTrade {
   grossPnlUsd: number;
   feesUsd: number;
   netPnlUsd: number;
+  signalStage: "WATCH" | "SETUP" | "CONFIRMED" | "BLOCKED";
+  qualityScore: number;
+  regime: "TREND_UP" | "TREND_DOWN" | "RANGE" | "HIGH_VOLATILITY" | "LOW_VOLATILITY" | "NO_TRADE";
   reason: "TP1" | "TP2" | "SL" | "MANUAL";
   openedAt: number;
   closedAt: number;
@@ -98,6 +104,9 @@ export class PaperBroker {
         symbol: p.symbol.toUpperCase(),
         engine: p.engine,
         side: p.side,
+        signalStage: ["WATCH","SETUP","CONFIRMED","BLOCKED"].includes(String(p.signalStage)) ? p.signalStage as PaperPosition["signalStage"] : "CONFIRMED",
+        qualityScore: Number.isFinite(Number(p.qualityScore)) ? Number(p.qualityScore) : 0,
+        regime: ["TREND_UP","TREND_DOWN","RANGE","HIGH_VOLATILITY","LOW_VOLATILITY","NO_TRADE"].includes(String(p.regime)) ? p.regime as PaperPosition["regime"] : "NO_TRADE",
         quantity: Number(p.quantity),
         entry: Number(p.entry),
         markPrice: Number(p.markPrice),
@@ -124,8 +133,15 @@ export class PaperBroker {
           Number.isFinite(Number(t.netPnlUsd)) &&
           Number.isFinite(Number(t.closedAt));
       })
-      .slice(-100)
-      .map((t) => ({ ...t, symbol: t.symbol.toUpperCase(), rotationId: typeof t.rotationId === "string" ? t.rotationId : null }));
+.slice(-500)
+      .map((t) => ({
+        ...t,
+        symbol: t.symbol.toUpperCase(),
+        signalStage: ["WATCH","SETUP","CONFIRMED","BLOCKED"].includes(String(t.signalStage)) ? t.signalStage as PaperTrade["signalStage"] : "CONFIRMED",
+        qualityScore: Number.isFinite(Number(t.qualityScore)) ? Number(t.qualityScore) : 0,
+        regime: ["TREND_UP","TREND_DOWN","RANGE","HIGH_VOLATILITY","LOW_VOLATILITY","NO_TRADE"].includes(String(t.regime)) ? t.regime as PaperTrade["regime"] : "NO_TRADE",
+        rotationId: typeof t.rotationId === "string" ? t.rotationId : null
+      }));
 
     this.openedSignals = new Set([
       ...this.history.map((t) => t.signalId),
@@ -157,7 +173,7 @@ export class PaperBroker {
       unrealizedPnlUsd: unrealized,
       feesUsd: this.fees,
       positions: this.positionsList(),
-      history: [...this.history].reverse().slice(0, 100),
+      history: [...this.history].reverse().slice(0, 500),
       tradeCount: this.history.length,
       wins,
       losses,
@@ -211,6 +227,9 @@ export class PaperBroker {
       symbol: signal.symbol,
       engine: signal.engine,
       side: signal.side,
+      signalStage: signal.stage,
+      qualityScore: signal.quality.total,
+      regime: signal.regime,
       quantity,
       entry: fillPrice,
       markPrice: fillPrice,
@@ -289,6 +308,9 @@ export class PaperBroker {
       grossPnlUsd: grossPnl,
       feesUsd: totalFees,
       netPnlUsd: netPnl,
+      signalStage: position.signalStage,
+      qualityScore: position.qualityScore,
+      regime: position.regime,
       reason,
       openedAt: position.openedAt,
       closedAt: Date.now(),

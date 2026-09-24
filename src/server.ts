@@ -56,13 +56,11 @@ export function createApp(scanner: BinanceScanner) {
     try {
       const body = req.body ?? {};
       const mode = String(body.mode ?? "").toUpperCase();
-      if (mode === "LIVE") {
-        return res.status(403).json({ error: "LIVE_EXECUTION_LOCKED" });
-      }
-      if (mode === "PAPER" || mode === "TESTNET") {
+      if (mode === "PAPER" || mode === "TESTNET" || mode === "LIVE") {
         scanner.setRequestMode(mode, Boolean(body.auto), {
           paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
           testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),
+          liveAuto: body.liveAuto === undefined ? undefined : Boolean(body.liveAuto),
         });
       }
 

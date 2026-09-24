@@ -60,12 +60,17 @@ export class ProfitRotationV3 {
     }, 0);
   }
 
+  private getIstDateKey(timestamp = Date.now()) {
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    return new Date(timestamp + istOffsetMs).toISOString().slice(0, 10);
+  }
+
   snapshot(): RotationStateView {
-    const today = new Date().toDateString();
+    const today = this.getIstDateKey();
 
     return {
       enabled: true,
-      eventsToday: this.events.filter((e) => new Date(e.createdAt).toDateString() === today).length,
+      eventsToday: this.events.filter((e) => this.getIstDateKey(e.createdAt) === today).length,
       totalReleasedUsd: this.events.reduce((s, e) => s + e.releasedUsd, 0),
       totalAllocatedUsd: this.events.reduce((s, e) => s + e.allocatedUsd, 0),
       last: this.events.at(-1) ?? null,

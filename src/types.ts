@@ -50,6 +50,9 @@ export interface Signal {
   symbol: string;
   engine: Engine;
   side: Side;
+  signalStage: Stage;
+  qualityScore: number;
+  regime: Regime;
   stage: Stage;
   quality: QualityBreakdown;
   regime: Regime;

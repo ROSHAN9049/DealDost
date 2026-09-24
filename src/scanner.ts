@@ -1097,7 +1097,7 @@ export class BinanceScanner extends EventEmitter {
       // Never bypass the protection gate if repair cannot be verified.
       let repairError: string | null = null;
       if (snapshot.unprotectedOpenPositions > 0) {
-        const repaired = await this.repairManagedLiveProtection(snapshot);
+        const repaired = await this.repairManagedTestnetProtection(snapshot);
         snapshot = repaired.snapshot;
         repairError = repaired.error;
       }
@@ -1191,7 +1191,7 @@ export class BinanceScanner extends EventEmitter {
           else scalping += 1;
 
           this.testnetState.error = null;
-          console.info("[live entry]", result);
+          console.info("[testnet entry]", result);
           // One new entry per execution cycle keeps balance/risk sizing
           // authoritative and avoids a burst of orders from one stale snapshot.
           break;

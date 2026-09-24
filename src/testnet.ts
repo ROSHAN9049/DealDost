@@ -935,6 +935,15 @@ export class TestnetClient {
     return shifted.getTime() - istOffsetMs;
   }
 
+  private getIstDateKey(timestamp: number): string {
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const shifted = new Date(timestamp + istOffsetMs);
+    const year = shifted.getUTCFullYear();
+    const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(shifted.getUTCDate()).padStart(2, "0");
+    return year + "-" + month + "-" + day;
+  }
+
   private async getAccountOrdersForAnalytics(startTime: number): Promise<OrderRow[]> {
     const orders: OrderRow[] = [];
     let cursor = startTime;

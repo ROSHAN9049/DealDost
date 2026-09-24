@@ -136,6 +136,8 @@ export interface TestnetPositionView {
   leverage: number | null;
   openedAt: number;
   protection: "OK" | "PARTIAL" | "MISSING";
+  takeProfitPrice: number | null;
+  tpManagedByEngine: boolean;
 }
 
 export interface TestnetStateView {
@@ -154,6 +156,7 @@ export interface TestnetStateView {
   dailyRiskUsedPct: number;
   realizedPnlTodayUsd: number;
   feesTodayUsd: number;
+  netPnlTodayUsd: number;
   positions: TestnetPositionView[];
   lastSyncAt: number;
   error: string | null;

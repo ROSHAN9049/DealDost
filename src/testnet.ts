@@ -758,7 +758,7 @@ export class TestnetClient {
     return { changed: true, protection: "OK" as const };
   }
 
-  async closeManagedPosition(symbolInput: string) {
+  async closeManagedPosition(symbolInput: string, reason: "TP1" | "MANUAL" = "MANUAL") {
     if (!this.isExecutionEnabled()) throw new Error(this.profile + "_EXECUTION_DISABLED");
     const symbol = symbolInput.toUpperCase();
 
@@ -782,6 +782,9 @@ export class TestnetClient {
       quantity: this.formatNumber(plan.quantity),
       reduceOnly: "true",
       positionSide: "BOTH",
+      newClientOrderId: this.safeClientOrderId(
+        (reason === "TP1" ? "DDT-TP-" : "DDT-MAN-") + symbol + "-" + Date.now().toString(36),
+      ),
       newOrderRespType: "RESULT",
     });
 

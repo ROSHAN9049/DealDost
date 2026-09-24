@@ -587,6 +587,14 @@ function render(state) {
     button.onclick = () => closeLive(button.dataset.symbol);
   });
 
+  const momentumLabel = $("momentumLabel");
+  const scalpingLabel = $("scalpingLabel");
+  const totalLabel = $("totalLabel");
+  const gateMode = currentMode;
+  if (momentumLabel) momentumLabel.textContent = "MOMENTUM • " + gateMode;
+  if (scalpingLabel) scalpingLabel.textContent = "SCALPING • " + gateMode;
+  if (totalLabel) totalLabel.textContent = "TOTAL • " + gateMode;
+
   $("momentum").textContent = state.engines.momentum.open + "/" + state.engines.momentum.max;
   $("scalping").textContent = state.engines.scalping.open + "/" + state.engines.scalping.max;
   $("total").textContent = state.engines.totalOpen + "/" + state.engines.totalMax;

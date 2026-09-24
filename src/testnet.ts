@@ -378,6 +378,112 @@ export class TestnetClient {
     };
   }
 
+  async getAnalytics(daysInput = 30) {
+    if (!this.isConfigured()) {
+      throw new Error(this.profile + "_NOT_CONFIGURED");
+    }
+
+    const days = Math.min(90, Math.max(1, Math.floor(Number(daysInput) || 30)));
+    const endTime = Date.now();
+    const startTime = this.getIstDayStartMsForAnalytics(endTime - (days - 1) * 24 * 60 * 60 * 1000);
+
+    const [realizedIncome, commissionIncome, orders] = await Promise.all([
+      this.signedGet<IncomeRow[]>(
+        this.incomePath("REALIZED_PNL", startTime),
+      ),
+      this.signedGet<IncomeRow[]>(
+        this.incomePath("COMMISSION", startTime),
+      ),
+      this.getAccountOrdersForAnalytics(startTime),
+    ]);
+    const income = [...realizedIncome, ...commissionIncome];
+
+    const dayKeys = Array.from({ length: days }, (_, index) => {
+      const ts = startTime + index * 24 * 60 * 60 * 1000;
+      return this.getIstDateKey(ts);
+    });
+
+    const daily = dayKeys.map((date) => ({
+      date,
+      realizedPnlUsd: 0,
+      feesUsd: 0,
+      netPnlUsd: 0,
+    }));
+    const byDay = new Map(daily.map((row) => [row.date, row]));
+
+    for (const row of income) {
+      const value = Number(row.income ?? 0);
+      const timestamp = Number(row.time ?? 0);
+      if (!Number.isFinite(value) || !Number.isFinite(timestamp)) continue;
+      const day = byDay.get(this.getIstDateKey(timestamp));
+      if (!day) continue;
+
+      if (row.incomeType === "REALIZED_PNL") {
+        day.realizedPnlUsd += value;
+      } else if (row.incomeType === "COMMISSION") {
+        day.feesUsd += Math.abs(value);
+      }
+    }
+
+    for (const day of daily) {
+      day.netPnlUsd = day.realizedPnlUsd - day.feesUsd;
+    }
+
+    let momentumEntries = 0;
+    let scalpingEntries = 0;
+    let ddtFilledEntries = 0;
+    let ddtProtectionOrders = 0;
+
+    for (const order of orders) {
+      const clientId = String(order.clientOrderId ?? "");
+      const status = String(order.status ?? "");
+      const type = String(order.type ?? "");
+      if (status !== "FILLED") continue;
+
+      if (clientId.startsWith("DDT-MOM-") && type === "MARKET" && !order.reduceOnly && !order.closePosition) {
+        momentumEntries += 1;
+        ddtFilledEntries += 1;
+      } else if (clientId.startsWith("DDT-SCALP-") && type === "MARKET" && !order.reduceOnly && !order.closePosition) {
+        scalpingEntries += 1;
+        ddtFilledEntries += 1;
+      }
+
+      if (clientId.startsWith("DDT-") && (type === "STOP_MARKET" || type === "TAKE_PROFIT_MARKET")) {
+        ddtProtectionOrders += 1;
+      }
+    }
+
+    const realizedPnlUsd = daily.reduce((sum, row) => sum + row.realizedPnlUsd, 0);
+    const feesUsd = daily.reduce((sum, row) => sum + row.feesUsd, 0);
+    const netPnlUsd = realizedPnlUsd - feesUsd;
+
+    return {
+      profile: this.profile,
+      generatedAt: Date.now(),
+      windowDays: days,
+      startTime,
+      endTime,
+      totals: {
+        realizedPnlUsd,
+        feesUsd,
+        netPnlUsd,
+      },
+      ddt: {
+        filledEntries: ddtFilledEntries,
+        momentumEntries: momentumEntries,
+        scalpingEntries: scalpingEntries,
+        protectionOrders: ddtProtectionOrders,
+      },
+      daily,
+      coverage: {
+        incomeRows: income.length,
+        orderRows: orders.length,
+        orderRowsLimit: 1000,
+        note: "Fees and realized P&L are account-level Binance income data; they may include activity outside DealDost. Engine counts use DDT client order IDs.",
+      },
+    };
+  }
+
   async setOneXLeverage(symbol: string) {
     if (!this.isExecutionEnabled()) throw new Error(this.profile + "_EXECUTION_DISABLED");
     await this.signedPost<any>("/fapi/v1/leverage", {
@@ -802,14 +908,44 @@ export class TestnetClient {
     return Number.isFinite(value) && value > 0 ? value : null;
   }
 
-  private incomePath(type: "REALIZED_PNL" | "COMMISSION") {
-    // DealDost is operated in India, so the daily risk window is IST midnight
-    // rather than the Vercel runtime's UTC/local timezone.
+  private getIstDayStartMsForAnalytics(timestamp: number) {
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
-    const istNow = new Date(Date.now() + istOffsetMs);
-    istNow.setUTCHours(0, 0, 0, 0);
-    const startTime = istNow.getTime() - istOffsetMs;
-    return "/fapi/v1/income?incomeType=" + type + "&startTime=" + startTime + "&limit=1000";
+    const shifted = new Date(timestamp + istOffsetMs);
+    shifted.setUTCHours(0, 0, 0, 0);
+    return shifted.getTime() - istOffsetMs;
+  }
+
+  private async getAccountOrdersForAnalytics(startTime: number): Promise<OrderRow[]> {
+    const orders: OrderRow[] = [];
+    let cursor = startTime;
+
+    // Binance currently caps one allOrders response at 1000 rows. Paginate
+    // modestly by the last orderId so analytics does not hammer the API.
+    for (let page = 0; page < 5; page += 1) {
+      const suffix = page === 0
+        ? "&startTime=" + cursor
+        : "&orderId=" + encodeURIComponent(String(Math.max(1, cursor))) +
+          "&startTime=" + startTime;
+      const batch = await this.signedGet<OrderRow[]>(
+        "/fapi/v1/allOrders?limit=1000" + suffix,
+      );
+      if (!batch.length) break;
+      orders.push(...batch);
+
+      if (batch.length < 1000) break;
+      const lastId = Number(batch.at(-1)?.orderId ?? 0);
+      if (!Number.isFinite(lastId) || lastId <= 0) break;
+      cursor = lastId + 1;
+    }
+
+    return orders;
+  }
+
+  private incomePath(type: "REALIZED_PNL" | "COMMISSION", startTime?: number) {
+    const effectiveStart = Number.isFinite(Number(startTime))
+      ? Number(startTime)
+      : this.getIstDayStartMsForAnalytics(Date.now());
+    return "/fapi/v1/income?incomeType=" + type + "&startTime=" + effectiveStart + "&limit=1000";
   }
 
   private async getRecentOrders(symbol: string): Promise<OrderRow[]> {

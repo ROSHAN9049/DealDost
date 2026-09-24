@@ -11,6 +11,13 @@ const bool = (key: string, fallback: boolean) => {
   return value.toLowerCase() === "true";
 };
 
+const credential = (key: string) => {
+  // Vercel secret values are entered as plain strings. Be tolerant of
+  // accidental copy/paste whitespace/newlines so Node fetch never receives
+  // an invalid HTTP header value.
+  return (process.env[key] ?? "").trim().replace(/\s+/g, "");
+};
+
 export const config = {
   port: n("PORT", 3000),
   restBase: process.env.BINANCE_REST_BASE ?? "https://fapi.binance.com",
@@ -20,12 +27,12 @@ export const config = {
     .filter(Boolean),
   wsBase: process.env.BINANCE_WS_BASE ?? "wss://fstream.binance.com/stream",
   testnetRestBase: (process.env.BINANCE_TESTNET_REST_BASE ?? "https://demo-fapi.binance.com").replace(/\/+$/, ""),
-  testnetApiKey: process.env.BINANCE_TESTNET_API_KEY ?? "",
-  testnetApiSecret: process.env.BINANCE_TESTNET_API_SECRET ?? "",
+  testnetApiKey: credential("BINANCE_TESTNET_API_KEY"),
+  testnetApiSecret: credential("BINANCE_TESTNET_API_SECRET"),
   testnetExecutionEnabled: bool("BINANCE_TESTNET_EXECUTION_ENABLED", false),
   liveRestBase: (process.env.BINANCE_LIVE_REST_BASE ?? "https://fapi.binance.com").replace(/\/+$/, ""),
-  liveApiKey: process.env.BINANCE_LIVE_API_KEY ?? "",
-  liveApiSecret: process.env.BINANCE_LIVE_API_SECRET ?? "",
+  liveApiKey: credential("BINANCE_LIVE_API_KEY"),
+  liveApiSecret: credential("BINANCE_LIVE_API_SECRET"),
   liveExecutionEnabled: bool("BINANCE_LIVE_EXECUTION_ENABLED", false),
   universeSize: n("UNIVERSE_SIZE", 50),
   minQuoteVolume: n("MIN_24H_QUOTE_VOLUME_USDT", 10_000_000),

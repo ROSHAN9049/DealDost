@@ -130,19 +130,19 @@ export function createApp(scanner: BinanceScanner) {
       const body = req.body ?? {};
       const mode = String(body.mode ?? "").toUpperCase();
       if (mode !== "PAPER" && mode !== "TESTNET" && mode !== "LIVE") {
-        return res.status(mode === "LIVE" ? 403 : 400).json({
-          error: mode === "LIVE" ? "LIVE_EXECUTION_LOCKED" : "invalid_mode",
-        });
+        return res.status(400).json({ error: "invalid_mode" });
       }
 
-      scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto), {
+      scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto ?? body.liveAuto), {
         paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
         testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),
+        liveAuto: body.liveAuto === undefined ? undefined : Boolean(body.liveAuto),
       });
       res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
       res.json(scanner.state());
     } catch (error) {
-      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+      res.status(error instanceof Error && error.message === "LIVE_EXECUTION_LOCKED" ? 403 : 503)
+        .json({ error: error instanceof Error ? error.message : String(error) });
     }
   });
 

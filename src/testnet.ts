@@ -475,11 +475,26 @@ export class TestnetClient {
         protectionOrders: ddtProtectionOrders,
       },
       daily,
+      recentOrders: orders
+        .filter((order) => String(order.clientOrderId ?? "").startsWith("DDT-"))
+        .sort((a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0))
+        .slice(0, 50)
+        .map((order) => ({
+          time: Number(order.time ?? order.updateTime ?? 0),
+          symbol: String(order.symbol ?? ""),
+          engine: String(order.clientOrderId ?? "").startsWith("DDT-MOM-") ? "MOMENTUM"
+            : String(order.clientOrderId ?? "").startsWith("DDT-SCALP-") ? "SCALPING" : "DDT",
+          type: String(order.type ?? ""),
+          side: String(order.side ?? ""),
+          status: String(order.status ?? ""),
+          clientOrderId: String(order.clientOrderId ?? ""),
+        })),
       coverage: {
         incomeRows: income.length,
         orderRows: orders.length,
         orderRowsLimit: 1000,
-        note: "Fees and realized P&L are account-level Binance income data; they may include activity outside DealDost. Engine counts use DDT client order IDs.",
+        truncated: orders.length >= 5000,
+        note: "Fees and realized P&L are account-level Binance income data; they may include activity outside DealDost. Engine counts use DDT client order IDs. Individual exchange trade P&L attribution is not inferred unless supported by Binance income/order data.",
       },
     };
   }

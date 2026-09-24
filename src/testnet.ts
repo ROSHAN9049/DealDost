@@ -928,6 +928,11 @@ export class TestnetClient {
     return Number.isFinite(value) && value > 0 ? value : null;
   }
 
+  private getIstDateKey(timestamp = Date.now()) {
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    return new Date(timestamp + istOffsetMs).toISOString().slice(0, 10);
+  }
+
   private getIstDayStartMsForAnalytics(timestamp: number) {
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
     const shifted = new Date(timestamp + istOffsetMs);

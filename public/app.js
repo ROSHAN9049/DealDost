@@ -60,7 +60,7 @@ async function fetchDirectBinance(path) {
 async function directScannerFallback() {
   const requestMode = currentMode;
   const requestToken = modeChangeToken;
-  const ticker = await fetchDirectBinance("/fapi/v1/ticker/24hr");
+  const ticker = await fetchDirectTicker();
   const top = ticker
     .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
     .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
@@ -737,6 +737,19 @@ function render(state) {
 let polling = false;
 let lastBrowserIngestAt = 0;
 let modeChangeToken = 0;
+let directTickerCache = null;
+let directTickerCachedAt = 0;
+const DIRECT_TICKER_CACHE_MS = 15000;
+
+async function fetchDirectTicker() {
+  if (directTickerCache && Date.now() - directTickerCachedAt < DIRECT_TICKER_CACHE_MS) {
+    return directTickerCache;
+  }
+  const ticker = await fetchDirectBinance("/fapi/v1/ticker/24hr");
+  directTickerCache = ticker;
+  directTickerCachedAt = Date.now();
+  return ticker;
+}
 async function load() {
   if (polling) return;
   polling = true;

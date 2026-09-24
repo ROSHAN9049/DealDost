@@ -39,6 +39,8 @@ export class BinanceScanner extends EventEmitter {
   private liveAuto = false;
   private testnetExecutionInFlight = false;
   private liveExecutionInFlight = false;
+  private testnetCloseInFlight = new Set<string>();
+  private liveCloseInFlight = new Set<string>();
   private lastTestnetSyncAt = 0;
   private lastLiveSyncAt = 0;
   private serverlessMode = false;
@@ -435,6 +437,7 @@ export class BinanceScanner extends EventEmitter {
       dailyRiskUsedPct: refreshed.dailyRiskUsedPct,
       realizedPnlTodayUsd: refreshed.realizedPnlTodayUsd,
       feesTodayUsd: refreshed.feesTodayUsd,
+      netPnlTodayUsd: refreshed.netPnlTodayUsd,
       positions: refreshed.positions,
       lastSyncAt: Date.now(),
       error: null,
@@ -488,6 +491,7 @@ export class BinanceScanner extends EventEmitter {
       dailyRiskUsedPct: refreshed.dailyRiskUsedPct,
       realizedPnlTodayUsd: refreshed.realizedPnlTodayUsd,
       feesTodayUsd: refreshed.feesTodayUsd,
+      netPnlTodayUsd: refreshed.netPnlTodayUsd,
       positions: refreshed.positions,
       lastSyncAt: Date.now(),
       error: null,
@@ -569,6 +573,7 @@ export class BinanceScanner extends EventEmitter {
             dailyRiskUsedPct: repaired.snapshot.dailyRiskUsedPct,
             realizedPnlTodayUsd: repaired.snapshot.realizedPnlTodayUsd,
             feesTodayUsd: repaired.snapshot.feesTodayUsd,
+            netPnlTodayUsd: repaired.snapshot.netPnlTodayUsd,
             positions: repaired.snapshot.positions,
             lastSyncAt: Date.now(),
           };
@@ -582,6 +587,7 @@ export class BinanceScanner extends EventEmitter {
         error: repairError,
       };
       this.lastTestnetSyncAt = Date.now();
+      this.processManagedTakeProfits();
       this.emit("update");
     } catch (error) {
       this.testnetState = {
@@ -622,6 +628,7 @@ export class BinanceScanner extends EventEmitter {
             dailyRiskUsedPct: repaired.snapshot.dailyRiskUsedPct,
             realizedPnlTodayUsd: repaired.snapshot.realizedPnlTodayUsd,
             feesTodayUsd: repaired.snapshot.feesTodayUsd,
+            netPnlTodayUsd: repaired.snapshot.netPnlTodayUsd,
             positions: repaired.snapshot.positions,
             lastSyncAt: Date.now(),
           };
@@ -635,6 +642,7 @@ export class BinanceScanner extends EventEmitter {
         error: repairError,
       };
       this.lastLiveSyncAt = Date.now();
+      this.processManagedTakeProfits();
       this.emit("update");
     } catch (error) {
       this.liveState = {
@@ -984,6 +992,7 @@ export class BinanceScanner extends EventEmitter {
       realizedPnlTodayUsd: state.realizedPnlTodayUsd,
       feesTodayUsd: state.feesTodayUsd,
       netPnlTodayUsd: state.netPnlTodayUsd,
+      netPnlTodayUsd: state.netPnlTodayUsd,
       lastClosedAt: {},
     });
 
@@ -994,27 +1003,37 @@ export class BinanceScanner extends EventEmitter {
   }
 
   private processManagedTakeProfits() {
-    if (this.testnetExecutionInFlight || this.liveExecutionInFlight) return;
+    if (this.risk.snapshot().emergencyStop) return;
 
     const maybeClose = (
       profile: "TESTNET" | "LIVE",
       positions: typeof this.testnetState.positions,
     ) => {
+      const inFlight = profile === "TESTNET" ? this.testnetCloseInFlight : this.liveCloseInFlight;
+
       for (const position of positions) {
         if (!position.engine || !position.tpManagedByEngine || !position.takeProfitPrice) continue;
         if (!Number.isFinite(position.markPrice) || position.markPrice <= 0) continue;
+        if (inFlight.has(position.symbol)) continue;
 
         const hit = position.side === "LONG"
           ? position.markPrice >= position.takeProfitPrice
           : position.markPrice <= position.takeProfitPrice;
 
         if (!hit) continue;
+
+        inFlight.add(position.symbol);
         const closer = profile === "TESTNET"
           ? this.closeManagedTestnetPosition(position.symbol)
           : this.closeManagedLivePosition(position.symbol);
-        void closer.catch((error) => {
-          console.error("[engine take-profit]", profile, position.symbol, error);
-        });
+
+        void closer
+          .catch((error) => {
+            console.error("[engine take-profit]", profile, position.symbol, error);
+          })
+          .finally(() => {
+            inFlight.delete(position.symbol);
+          });
       }
     };
 
@@ -1245,6 +1264,7 @@ export class BinanceScanner extends EventEmitter {
         dailyRiskUsedPct: snapshot.dailyRiskUsedPct,
         realizedPnlTodayUsd: snapshot.realizedPnlTodayUsd,
         feesTodayUsd: snapshot.feesTodayUsd,
+        netPnlTodayUsd: snapshot.netPnlTodayUsd,
         positions: snapshot.positions,
         lastSyncAt: Date.now(),
         error: repairError,
@@ -1349,6 +1369,7 @@ export class BinanceScanner extends EventEmitter {
         dailyRiskUsedPct: refreshed.dailyRiskUsedPct,
         realizedPnlTodayUsd: refreshed.realizedPnlTodayUsd,
         feesTodayUsd: refreshed.feesTodayUsd,
+        netPnlTodayUsd: refreshed.netPnlTodayUsd,
         positions: refreshed.positions,
         lastSyncAt: Date.now(),
         // A successful exchange reconciliation clears stale candidate/order
@@ -1405,6 +1426,7 @@ export class BinanceScanner extends EventEmitter {
         dailyRiskUsedPct: snapshot.dailyRiskUsedPct,
         realizedPnlTodayUsd: snapshot.realizedPnlTodayUsd,
         feesTodayUsd: snapshot.feesTodayUsd,
+        netPnlTodayUsd: snapshot.netPnlTodayUsd,
         positions: snapshot.positions,
         lastSyncAt: Date.now(),
         error: repairError,
@@ -1498,6 +1520,7 @@ export class BinanceScanner extends EventEmitter {
         dailyRiskUsedPct: refreshed.dailyRiskUsedPct,
         realizedPnlTodayUsd: refreshed.realizedPnlTodayUsd,
         feesTodayUsd: refreshed.feesTodayUsd,
+        netPnlTodayUsd: refreshed.netPnlTodayUsd,
         positions: refreshed.positions,
         lastSyncAt: Date.now(),
         // A successful exchange reconciliation clears stale candidate/order

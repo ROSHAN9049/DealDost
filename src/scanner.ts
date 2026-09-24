@@ -516,9 +516,9 @@ export class BinanceScanner extends EventEmitter {
     this.emit("update");
   }
 
-  async closeManagedTestnetPosition(symbol: string) {
+  async closeManagedTestnetPosition(symbol: string, reason: "TP1" | "MANUAL" = "MANUAL") {
     if (this.mode !== "TESTNET") throw new Error("TESTNET_MODE_REQUIRED");
-    const result = await this.testnet.closeManagedPosition(symbol);
+    const result = await this.testnet.closeManagedPosition(symbol, reason);
     this.testnetState = {
       ...this.testnetState,
       ...result.snapshot,
@@ -529,9 +529,9 @@ export class BinanceScanner extends EventEmitter {
     this.emit("update");
     return this.state();
   }
-  async closeManagedLivePosition(symbol: string) {
+  async closeManagedLivePosition(symbol: string, reason: "TP1" | "MANUAL" = "MANUAL") {
     if (this.mode !== "LIVE") throw new Error("LIVE_MODE_REQUIRED");
-    const result = await this.live.closeManagedPosition(symbol);
+    const result = await this.live.closeManagedPosition(symbol, reason);
     this.liveState = {
       ...this.liveState,
       ...result.snapshot,
@@ -1030,8 +1030,8 @@ export class BinanceScanner extends EventEmitter {
 
         inFlight.add(position.symbol);
         const closer = profile === "TESTNET"
-          ? this.closeManagedTestnetPosition(position.symbol)
-          : this.closeManagedLivePosition(position.symbol);
+          ? this.closeManagedTestnetPosition(position.symbol, "TP1")
+          : this.closeManagedLivePosition(position.symbol, "TP1");
 
         void closer
           .catch((error) => {

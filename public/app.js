@@ -41,6 +41,7 @@ const esc = (s) =>
   }[c]));
 
 let directBinanceBlockedUntil = 0;
+let browserIngestInFlight = false;
 
 async function fetchDirectBinance(path) {
   const now = Date.now();
@@ -76,6 +77,8 @@ async function fetchDirectBinance(path) {
 }
 
 async function directScannerFallback() {
+  if (browserIngestInFlight) return;
+  browserIngestInFlight = true;
   const requestMode = currentMode;
   const requestToken = modeChangeToken;
   const ticker = await fetchDirectTicker();
@@ -157,6 +160,9 @@ async function directScannerFallback() {
   const state = await response.json();
   if (requestMode !== currentMode) return; // newer mode selection wins
   render(state);
+  } finally {
+    browserIngestInFlight = false;
+  }
 }
 
 async function directBinanceFallback() {

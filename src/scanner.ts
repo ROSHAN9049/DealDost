@@ -94,16 +94,15 @@ export class BinanceScanner extends EventEmitter {
 
   async startServerless() {
     this.serverlessMode = true;
-    try {
-      await this.refreshUniverse();
-      this.feedStatus = "ONLINE";
-      this.lastUpdateAt = Date.now();
-    } catch (error) {
-      this.feedStatus = "OFFLINE";
-      console.error("[serverless universe]", error);
-    }
-    // Do not block the API startup on kline history. Vercel serverless
-    // invocations must return quickly; scoring happens inside /api/state.
+
+    // Vercel/serverless market data is browser-owned. A cold start must never
+    // fire the 24h ticker request (weight 40) and historical klines just to
+    // render /api/state; that pattern creates avoidable Binance 429 pressure.
+    this.feedStatus = this.symbols.size ? "ONLINE" : "CONNECTING";
+    if (this.symbols.size) this.lastUpdateAt = Date.now();
+
+    // Exchange account reconciliation remains server-side because credentials
+    // must never be sent to the browser.
     void this.syncTestnet();
     void this.syncLive();
     this.emit("update");
@@ -115,25 +114,14 @@ export class BinanceScanner extends EventEmitter {
     this.lastServerlessPollAt = Date.now();
 
     try {
-      await this.refreshUniverse();
-      const states = [...this.symbols.values()];
-      if (states.length && Date.now() - this.lastServerlessHistoryAt >= config.serverlessHistoryRefreshMs) {
-        // Historical klines are a fallback for server-owned scoring. Browser
-        // market ingestion remains the primary high-frequency market path.
-        // Throttle this REST dependency so Vercel invocations cannot spam
-        // Binance every second.
-        const btc = this.symbols.get("BTCUSDT");
-        const target = btc ?? states[this.serverlessCursor % states.length];
-        this.serverlessCursor = (this.serverlessCursor + 1) % states.length;
-        await this.bootstrapHistoryForStates([target]);
-        this.lastServerlessHistoryAt = Date.now();
-      }
+      // No Binance public market REST here. This avoids duplicate ticker/kline
+      // polling across Vercel cold instances; /api/market/ingest supplies the
+      // current browser market snapshot.
       await this.syncTestnetIfDue();
       await this.syncLiveIfDue();
-      this.feedStatus = "ONLINE";
-      this.lastUpdateAt = Date.now();
+      if (this.symbols.size) this.feedStatus = "ONLINE";
+      if (this.lastUpdateAt) this.lastUpdateAt = Date.now();
     } catch (error) {
-      this.feedStatus = "OFFLINE";
       console.error("[serverless tick]", error);
     }
 
@@ -166,6 +154,15 @@ export class BinanceScanner extends EventEmitter {
     this.risk.syncOpenPositions(
       this.paper.positionsList().map((p) => ({ symbol: p.symbol, engine: p.engine })),
     );
+  }
+
+  async accountAnalytics(
+    mode: "TESTNET" | "LIVE",
+    days = 30,
+  ) {
+    return mode === "TESTNET"
+      ? this.testnet.getAnalytics(days)
+      : this.live.getAnalytics(days);
   }
 
   state(): DashboardState {
@@ -317,6 +314,7 @@ export class BinanceScanner extends EventEmitter {
     this.lastMarketError = null;
     this.feedStatus = "ONLINE";
     this.lastUpdateAt = Date.now();
+    this.processManagedTakeProfits();
     this.tryActiveEntries();
     this.emit("update");
 
@@ -328,9 +326,6 @@ export class BinanceScanner extends EventEmitter {
     auto?: boolean,
     automation?: { paperAuto?: boolean; testnetAuto?: boolean; liveAuto?: boolean },
   ) {
-    if (mode === "LIVE" && !this.live.isExecutionEnabled()) {
-      throw new Error("LIVE_EXECUTION_LOCKED");
-    }
     this.mode = mode;
 
     if (typeof automation?.paperAuto === "boolean") {
@@ -351,8 +346,8 @@ export class BinanceScanner extends EventEmitter {
       this.liveAuto = auto;
     }
 
-    if (this.testnetAuto) void this.tryTestnetEntries();
-    if (this.liveAuto) void this.tryLiveEntries();
+    if (!this.risk.snapshot().emergencyStop && this.testnetAuto) void this.tryTestnetEntries();
+    if (!this.risk.snapshot().emergencyStop && this.liveAuto) void this.tryLiveEntries();
     if (this.paper.getAuto()) this.tryPaperEntries();
     this.emit("update");
   }
@@ -380,6 +375,19 @@ export class BinanceScanner extends EventEmitter {
     this.liveAuto = Boolean(enabled);
     this.emit("update");
     if (this.liveAuto) void this.tryLiveEntries();
+  }
+
+  setEmergencyStop(enabled: boolean) {
+    this.risk.setEmergencyStop(Boolean(enabled));
+    if (enabled) {
+      // Emergency stop is an ENTRY stop. It does not force-close existing
+      // positions; hard exchange SLs and engine-managed TP continue to protect
+      // already-open positions.
+      this.testnetAuto = false;
+      this.liveAuto = false;
+      this.paper.setAuto(false);
+    }
+    this.emit("update");
   }
 
   async syncLivePositionProtection(symbol: string) {
@@ -536,14 +544,14 @@ export class BinanceScanner extends EventEmitter {
 
   private async syncTestnet() {
     try {
-      let synced = await this.testnet.sync();
+      let synced = this.decorateExecutionState(await this.testnet.sync());
       let repairError: string | null = null;
 
       // Protection is a safety requirement independent of AUTO. When a
       // DDT-managed position is missing SL/TP, attempt a verified repair
       // during reconciliation rather than waiting for AUTO to be enabled.
       if (this.testnet.isExecutionEnabled() && synced.unprotectedOpenPositions > 0) {
-        const reconciled = await this.testnet.getExecutionSnapshot();
+        const reconciled = this.decorateExecutionSnapshot(await this.testnet.getExecutionSnapshot());
         const repaired = await this.repairManagedTestnetProtection(reconciled);
         repairError = repaired.error;
         if (repaired.snapshot !== reconciled || repaired.error) {
@@ -567,6 +575,7 @@ export class BinanceScanner extends EventEmitter {
         }
       }
 
+      synced = this.decorateExecutionState(synced);
       this.testnetState = {
         ...synced,
         auto: this.testnetAuto,
@@ -588,14 +597,14 @@ export class BinanceScanner extends EventEmitter {
   }
   private async syncLive() {
     try {
-      let synced = await this.live.sync();
+      let synced = this.decorateExecutionState(await this.live.sync());
       let repairError: string | null = null;
 
       // Protection is a safety requirement independent of AUTO. When a
       // DDT-managed position is missing SL/TP, attempt a verified repair
       // during reconciliation rather than waiting for AUTO to be enabled.
       if (this.live.isExecutionEnabled() && synced.unprotectedOpenPositions > 0) {
-        const reconciled = await this.live.getExecutionSnapshot();
+        const reconciled = this.decorateExecutionSnapshot(await this.live.getExecutionSnapshot());
         const repaired = await this.repairManagedLiveProtection(reconciled);
         repairError = repaired.error;
         if (repaired.snapshot !== reconciled || repaired.error) {
@@ -619,6 +628,7 @@ export class BinanceScanner extends EventEmitter {
         }
       }
 
+      synced = this.decorateExecutionState(synced);
       this.liveState = {
         ...synced,
         auto: this.liveAuto,
@@ -859,6 +869,7 @@ export class BinanceScanner extends EventEmitter {
         }
 
         this.handlePaperMark(symbol, state.lastPrice);
+        this.processManagedTakeProfits();
 
         if (k.x) {
           this.evaluate(symbol, interval === "1m" ? "SCALPING" : "MOMENTUM");
@@ -901,7 +912,7 @@ export class BinanceScanner extends EventEmitter {
   }
 
   private tryPaperEntries() {
-    if (!this.paper.getAuto()) return;
+    if (!this.paper.getAuto() || this.risk.snapshot().emergencyStop) return;
 
     // Reconcile the risk layer from the broker's actual open positions before
     // every entry cycle so a restart/restore or UI refresh cannot make the
@@ -926,6 +937,92 @@ export class BinanceScanner extends EventEmitter {
 
       const result = this.paper.tryOpen(refreshed);
       if (result.opened) this.risk.registerOpen(signal.symbol, signal.engine);
+    }
+  }
+
+  private tpDistancePct(engine: Engine) {
+    return engine === "MOMENTUM" ? 0.0063 : 0.0033;
+  }
+
+  private decorateExecutionSnapshot(
+    snapshot: Awaited<ReturnType<TestnetClient["getExecutionSnapshot"]>>,
+  ) {
+    return {
+      ...snapshot,
+      positions: snapshot.positions.map((position) => {
+        if (!position.engine || position.takeProfitPrice && position.takeProfitPrice > 0) {
+          return { ...position, tpManagedByEngine: Boolean(position.engine) };
+        }
+
+        const distance = this.tpDistancePct(position.engine);
+        const takeProfitPrice = position.side === "LONG"
+          ? position.entryPrice * (1 + distance)
+          : position.entryPrice * (1 - distance);
+
+        return {
+          ...position,
+          takeProfitPrice,
+          tpManagedByEngine: true,
+        };
+      }),
+    };
+  }
+
+  private decorateExecutionState(state: typeof this.testnetState): typeof this.testnetState {
+    const snapshot = this.decorateExecutionSnapshot({
+      connected: state.connected,
+      accountBalanceUsd: state.accountBalanceUsd,
+      availableBalanceUsd: state.availableBalanceUsd,
+      unrealizedPnlUsd: state.unrealizedPnlUsd,
+      positions: state.positions,
+      openPositions: state.openPositions,
+      momentumOpen: state.momentumOpen,
+      scalpingOpen: state.scalpingOpen,
+      unclassifiedOpenPositions: state.unclassifiedOpenPositions,
+      unprotectedOpenPositions: state.unprotectedOpenPositions,
+      dailyRiskUsedPct: state.dailyRiskUsedPct,
+      realizedPnlTodayUsd: state.realizedPnlTodayUsd,
+      feesTodayUsd: state.feesTodayUsd,
+      netPnlTodayUsd: state.netPnlTodayUsd,
+      lastClosedAt: {},
+    });
+
+    return {
+      ...state,
+      positions: snapshot.positions,
+    };
+  }
+
+  private processManagedTakeProfits() {
+    if (this.testnetExecutionInFlight || this.liveExecutionInFlight) return;
+
+    const maybeClose = (
+      profile: "TESTNET" | "LIVE",
+      positions: typeof this.testnetState.positions,
+    ) => {
+      for (const position of positions) {
+        if (!position.engine || !position.tpManagedByEngine || !position.takeProfitPrice) continue;
+        if (!Number.isFinite(position.markPrice) || position.markPrice <= 0) continue;
+
+        const hit = position.side === "LONG"
+          ? position.markPrice >= position.takeProfitPrice
+          : position.markPrice <= position.takeProfitPrice;
+
+        if (!hit) continue;
+        const closer = profile === "TESTNET"
+          ? this.closeManagedTestnetPosition(position.symbol)
+          : this.closeManagedLivePosition(position.symbol);
+        void closer.catch((error) => {
+          console.error("[engine take-profit]", profile, position.symbol, error);
+        });
+      }
+    };
+
+    if (this.mode === "TESTNET" && this.testnet.isExecutionEnabled()) {
+      maybeClose("TESTNET", this.testnetState.positions);
+    }
+    if (this.mode === "LIVE" && this.live.isExecutionEnabled()) {
+      maybeClose("LIVE", this.liveState.positions);
     }
   }
 
@@ -1113,6 +1210,7 @@ export class BinanceScanner extends EventEmitter {
 
   private async tryTestnetEntries() {
     if (
+      this.risk.snapshot().emergencyStop ||
       this.mode !== "TESTNET" ||
       !this.testnetAuto ||
       !this.testnet.isExecutionEnabled() ||
@@ -1121,7 +1219,7 @@ export class BinanceScanner extends EventEmitter {
 
     this.testnetExecutionInFlight = true;
     try {
-      let snapshot = await this.testnet.getExecutionSnapshot();
+      let snapshot = this.decorateExecutionSnapshot(await this.testnet.getExecutionSnapshot());
 
       // Self-heal only DDT-managed positions with a fresh matching signal.
       // Never bypass the protection gate if repair cannot be verified.
@@ -1235,7 +1333,7 @@ export class BinanceScanner extends EventEmitter {
         }
       }
 
-      const refreshed = await this.testnet.getExecutionSnapshot();
+      const refreshed = this.decorateExecutionSnapshot(await this.testnet.getExecutionSnapshot());
       this.testnetState = {
         ...this.testnetState,
         auto: this.testnetAuto,
@@ -1272,6 +1370,7 @@ export class BinanceScanner extends EventEmitter {
   }
   private async tryLiveEntries() {
     if (
+      this.risk.snapshot().emergencyStop ||
       this.mode !== "LIVE" ||
       !this.liveAuto ||
       !this.live.isExecutionEnabled() ||
@@ -1280,7 +1379,7 @@ export class BinanceScanner extends EventEmitter {
 
     this.liveExecutionInFlight = true;
     try {
-      let snapshot = await this.live.getExecutionSnapshot();
+      let snapshot = this.decorateExecutionSnapshot(await this.live.getExecutionSnapshot());
 
       // Self-heal only DDT-managed positions with a fresh matching signal.
       // Never bypass the protection gate if repair cannot be verified.
@@ -1383,7 +1482,7 @@ export class BinanceScanner extends EventEmitter {
         }
       }
 
-      const refreshed = await this.live.getExecutionSnapshot();
+      const refreshed = this.decorateExecutionSnapshot(await this.live.getExecutionSnapshot());
       this.liveState = {
         ...this.liveState,
         auto: this.liveAuto,

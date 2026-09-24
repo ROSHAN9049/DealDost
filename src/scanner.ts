@@ -530,7 +530,7 @@ export class BinanceScanner extends EventEmitter {
       let repairError: string | null = null;
 
       // Protection is a safety requirement independent of AUTO. When a
-      // DDT-managed Demo position is missing SL/TP, attempt a verified repair
+      // DDT-managed position is missing SL/TP, attempt a verified repair
       // during reconciliation rather than waiting for AUTO to be enabled.
       if (this.testnet.isExecutionEnabled() && synced.unprotectedOpenPositions > 0) {
         const reconciled = await this.testnet.getExecutionSnapshot();
@@ -582,7 +582,7 @@ export class BinanceScanner extends EventEmitter {
       let repairError: string | null = null;
 
       // Protection is a safety requirement independent of AUTO. When a
-      // DDT-managed Demo position is missing SL/TP, attempt a verified repair
+      // DDT-managed position is missing SL/TP, attempt a verified repair
       // during reconciliation rather than waiting for AUTO to be enabled.
       if (this.live.isExecutionEnabled() && synced.unprotectedOpenPositions > 0) {
         const reconciled = await this.live.getExecutionSnapshot();
@@ -1059,6 +1059,7 @@ export class BinanceScanner extends EventEmitter {
     if (signal.stage !== "CONFIRMED") failures.push("CONFIRMED_STAGE");
     if (!Number.isFinite(signal.updatedAt) || now - signal.updatedAt > maxAgeMs) failures.push("SIGNAL_FRESHNESS");
     if (!signal.risk || !Number.isFinite(signal.entry) || signal.entry <= 0) failures.push("VALID_SIGNAL");
+    if (failures.length > 0) return { passed: false, failures, notionalUsd: 0 };
     if (!(await this.live.isTradablePerpetual(signal.symbol))) failures.push("TRADABLE_PERPETUAL");
 
     const riskDistance = Math.abs(signal.entry - signal.stop);
@@ -1096,7 +1097,7 @@ export class BinanceScanner extends EventEmitter {
       // Never bypass the protection gate if repair cannot be verified.
       let repairError: string | null = null;
       if (snapshot.unprotectedOpenPositions > 0) {
-        const repaired = await this.repairManagedTestnetProtection(snapshot);
+        const repaired = await this.repairManagedLiveProtection(snapshot);
         snapshot = repaired.snapshot;
         repairError = repaired.error;
       }
@@ -1126,7 +1127,7 @@ export class BinanceScanner extends EventEmitter {
       if (snapshot.unprotectedOpenPositions > 0) return;
       // A reconciliation that finds an engine already above its configured
       // 3-position cap is a hard safety stop. Do not "rebalance" by guessing
-      // which existing Demo position should be closed.
+      // which existing position should be closed.
       if (snapshot.momentumOpen > config.testnetMaxMomentumPositions) return;
       if (snapshot.scalpingOpen > config.testnetMaxScalpingPositions) return;
       if (snapshot.openPositions >= config.testnetMaxTotalPositions) return;
@@ -1152,7 +1153,7 @@ export class BinanceScanner extends EventEmitter {
 
         // The public market universe and Binance Demo/Testnet can temporarily
         // disagree on TradFi/adjustment contracts. Never send an order for a
-        // symbol that the Demo exchangeInfo does not currently expose as a
+        // symbol that the exchangeInfo does not currently expose as a
         // TRADING USDT perpetual; silently skip it instead of poisoning the
         // execution status for the whole scanner cycle.
         if (!(await this.testnet.isTradablePerpetual(signal.symbol))) continue;
@@ -1190,8 +1191,8 @@ export class BinanceScanner extends EventEmitter {
           else scalping += 1;
 
           this.testnetState.error = null;
-          console.info("[testnet entry]", result);
-          // One new Demo entry per execution cycle keeps balance/risk sizing
+          console.info("[live entry]", result);
+          // One new entry per execution cycle keeps balance/risk sizing
           // authoritative and avoids a burst of orders from one stale snapshot.
           break;
         } catch (error) {
@@ -1255,7 +1256,7 @@ export class BinanceScanner extends EventEmitter {
       // Never bypass the protection gate if repair cannot be verified.
       let repairError: string | null = null;
       if (snapshot.unprotectedOpenPositions > 0) {
-        const repaired = await this.repairManagedTestnetProtection(snapshot);
+        const repaired = await this.repairManagedLiveProtection(snapshot);
         snapshot = repaired.snapshot;
         repairError = repaired.error;
       }
@@ -1285,7 +1286,7 @@ export class BinanceScanner extends EventEmitter {
       if (snapshot.unprotectedOpenPositions > 0) return;
       // A reconciliation that finds an engine already above its configured
       // 3-position cap is a hard safety stop. Do not "rebalance" by guessing
-      // which existing Demo position should be closed.
+      // which existing position should be closed.
       if (snapshot.momentumOpen > config.maxMomentumPositions) return;
       if (snapshot.scalpingOpen > config.maxScalpingPositions) return;
       if (snapshot.openPositions >= config.maxTotalPositions) return;
@@ -1309,28 +1310,17 @@ export class BinanceScanner extends EventEmitter {
         if (total >= config.maxTotalPositions) break;
         if (usedSymbols.has(signal.symbol)) continue;
 
-        // The public market universe and Binance Demo/Testnet can temporarily
-        // disagree on TradFi/adjustment contracts. Never send an order for a
-        // symbol that the Demo exchangeInfo does not currently expose as a
-        // TRADING USDT perpetual; silently skip it instead of poisoning the
-        // execution status for the whole scanner cycle.
-        if (!(await this.live.isTradablePerpetual(signal.symbol))) continue;
-        if (signal.engine === "MOMENTUM" && momentum >= config.maxMomentumPositions) continue;
-        if (signal.engine === "SCALPING" && scalping >= config.maxScalpingPositions) continue;
-
         const lastClosedAt = snapshot.lastClosedAt[signal.symbol] ?? 0;
         if (lastClosedAt > 0 && Date.now() - lastClosedAt < config.cooldownMinutes * 60_000) continue;
 
-        const riskDistance = Math.abs(signal.entry - signal.stop);
-        if (!Number.isFinite(riskDistance) || riskDistance <= 0 || signal.entry <= 0) continue;
+        const gate = await this.liveExecutionGates(signal, snapshot, usedSymbols);
+        if (!gate.passed) {
+          console.info("[live gate blocked]", signal.symbol, signal.engine, gate.failures.join(","));
+          continue;
+        }
 
-        const riskUsd = snapshot.accountBalanceUsd * (config.riskPerTradePct / 100);
-        const riskBasedNotional = riskUsd * (signal.entry / riskDistance);
-        const maxAccountNotional = snapshot.accountBalanceUsd * (config.maxNotionalPctPerTrade / 100);
-        const maxAvailableNotional = snapshot.availableBalanceUsd * 0.95;
-        const notionalUsd = Math.min(riskBasedNotional, maxAccountNotional, maxAvailableNotional);
+        const notionalUsd = gate.notionalUsd;
         const quantity = notionalUsd > 0 ? notionalUsd / signal.entry : 0;
-
         if (!(quantity > 0)) continue;
 
         try {
@@ -1349,8 +1339,8 @@ export class BinanceScanner extends EventEmitter {
           else scalping += 1;
 
           this.liveState.error = null;
-          console.info("[testnet entry]", result);
-          // One new Demo entry per execution cycle keeps balance/risk sizing
+          console.info("[live entry]", result);
+          // One new entry per execution cycle keeps balance/risk sizing
           // authoritative and avoids a burst of orders from one stale snapshot.
           break;
         } catch (error) {

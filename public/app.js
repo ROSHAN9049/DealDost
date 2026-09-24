@@ -454,6 +454,113 @@ function render(state) {
     }
   }
 
+  const lv = state.live || {};
+  const liveAutoButton = $("liveAuto");
+  if (liveAutoButton) {
+    liveAutoButton.textContent = "LIVE AUTO " + (liveAuto ? "ON" : "OFF");
+    liveAutoButton.dataset.enabled = String(liveAuto);
+    liveAutoButton.className = liveAuto ? "auto on" : "auto";
+    liveAutoButton.dataset.executionEnabled = String(Boolean(lv.executionEnabled));
+  }
+
+  const liveButton = $("liveMode");
+  if (liveButton) {
+    const locked = !Boolean(lv.executionEnabled);
+    liveButton.classList.toggle("disabled", locked);
+    liveButton.title = locked
+      ? "LIVE is locked until LIVE credentials and BINANCE_LIVE_EXECUTION_ENABLED=true are configured"
+      : "LIVE execution enabled • 16-gate preflight required";
+  }
+
+  $("liveStatus").textContent = lv.error
+    ? "ERROR"
+    : lv.connected
+      ? (lv.executionEnabled ? "CONNECTED • ARMED" : "CONNECTED • READ ONLY")
+      : lv.configured
+        ? "CONFIGURED • OFFLINE"
+        : "CREDENTIALS REQUIRED";
+  $("liveStatus").className = "status " + (
+    lv.error ? "warn" : (lv.connected && lv.executionEnabled ? "ok" : "warn")
+  );
+  $("liveBalance").textContent = money(lv.accountBalanceUsd);
+  $("liveOpen").textContent = String(lv.openPositions ?? 0);
+  $("livePnl").textContent = money(lv.realizedPnlTodayUsd);
+  $("liveFees").textContent = money(lv.feesTodayUsd);
+
+  const lvError = $("liveError");
+  const lvHint = $("liveExecutionHint");
+  if (lvError) {
+    lvError.textContent = lv.error ? String(lv.error).slice(0, 140) : "";
+    lvError.title = lv.error || "";
+    lvError.hidden = !lv.error;
+  }
+  if (lvHint) {
+    if (!lv.configured) {
+      lvHint.textContent = "LIVE credentials required • execution remains OFF";
+      lvHint.hidden = false;
+    } else if (!lv.executionEnabled) {
+      lvHint.textContent = lv.connected
+        ? "LIVE connected in READ ONLY mode • execution flag is OFF"
+        : "LIVE configured • waiting for account connection";
+      lvHint.hidden = false;
+    } else if (currentMode === "LIVE" && liveAuto) {
+      lvHint.textContent = "LIVE execution ARMED • AUTO ON • 16-gate preflight on every entry";
+      lvHint.hidden = false;
+    } else if (currentMode === "LIVE") {
+      lvHint.textContent = "LIVE execution ARMED • AUTO OFF";
+      lvHint.hidden = false;
+    } else {
+      lvHint.textContent = "";
+      lvHint.hidden = true;
+    }
+  }
+
+  const lvGate = $("livePositionGate");
+  if (lvGate) {
+    lvGate.textContent = lv.positions?.length
+      ? lv.positions.length + " open" +
+        (lv.unclassifiedOpenPositions ? " • " + lv.unclassifiedOpenPositions + " unclassified" : "")
+      : "0 open";
+  }
+
+  const lvPositions = $("livePositions");
+  if (lvPositions) {
+    if (!lv.positions?.length) {
+      lvPositions.innerHTML = '<tr><td colspan="10" class="empty">No LIVE positions.</td></tr>';
+    } else {
+      lvPositions.innerHTML = lv.positions.map((p) =>
+        "<tr>" +
+        "<td><strong>" + esc(p.symbol) + "</strong></td>" +
+        "<td>" + esc(p.engine || "UNCLASSIFIED") + "</td>" +
+        '<td class="' + (p.side === "LONG" ? "long" : "short") + '">' + esc(p.side) + "</td>" +
+        "<td>" + fmt(p.quantity) + "</td>" +
+        "<td>" + fmt(p.entryPrice) + "</td>" +
+        "<td>" + fmt(p.markPrice) + "</td>" +
+        "<td>" + money(p.unrealizedPnlUsd) + "</td>" +
+        "<td>" + (p.leverage == null ? "—" : fmt(p.leverage) + "x") + "</td>" +
+        "<td>" +
+          '<span class="stage ' + String(p.protection || "MISSING").toLowerCase() + '">' + esc(p.protection || "MISSING") + "</span>" +
+          ((p.protection || "MISSING") !== "OK" && p.engine
+            ? ' <button class="protect-btn" data-live-symbol="' + esc(p.symbol) + '">SYNC</button>'
+            : "") +
+        "</td>" +
+        "<td>" +
+          (p.engine
+            ? '<button class="live-close-btn" data-symbol="' + esc(p.symbol) + '">Close</button>'
+            : "—") +
+        "</td>" +
+        "</tr>"
+      ).join("");
+    }
+  }
+
+  document.querySelectorAll("[data-live-symbol]").forEach((button) => {
+    button.onclick = () => syncLiveProtection(button.dataset.liveSymbol);
+  });
+  document.querySelectorAll(".live-close-btn").forEach((button) => {
+    button.onclick = () => closeLive(button.dataset.symbol);
+  });
+
   $("momentum").textContent = state.engines.momentum.open + "/" + state.engines.momentum.max;
   $("scalping").textContent = state.engines.scalping.open + "/" + state.engines.scalping.max;
   $("total").textContent = state.engines.totalOpen + "/" + state.engines.totalMax;
@@ -605,7 +712,8 @@ async function load() {
         "x-dealdost-mode": currentMode,
         "x-dealdost-auto": String(currentMode === "PAPER" ? paperAuto : testnetAuto),
         "x-dealdost-paper-auto": String(paperAuto),
-        "x-dealdost-testnet-auto": String(testnetAuto)
+        "x-dealdost-testnet-auto": String(testnetAuto),
+        "x-dealdost-live-auto": String(liveAuto)
       }
     });
     if (response.ok) {
@@ -664,6 +772,7 @@ async function load() {
 
 $("paperAuto").onclick = togglePaperAuto;
 $("testnetAuto")?.addEventListener("click", toggleTestnetAuto);
+$("liveAuto")?.addEventListener("click", toggleLiveAuto);
 $("paperMode")?.addEventListener("click", () => setMode("PAPER"));
 $("testnetMode")?.addEventListener("click", () => setMode("TESTNET"));
 $("liveMode")?.addEventListener("click", () => setMode("LIVE"));

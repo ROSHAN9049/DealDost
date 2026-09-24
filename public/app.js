@@ -141,7 +141,7 @@ async function directScannerFallback() {
 }
 
 async function directBinanceFallback() {
-  const ticker = await fetchDirectBinance("/fapi/v1/ticker/24hr");
+  const ticker = await fetchDirectTicker();
   const top = ticker
     .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
     .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))

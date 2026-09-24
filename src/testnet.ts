@@ -124,15 +124,15 @@ export class TestnetClient {
   }
 
   private get apiKey() {
-    return this.profile === "LIVE" ? config.liveApiKey : this.apiKey;
+    return this.profile === "LIVE" ? config.liveApiKey : config.testnetApiKey;
   }
 
   private get apiSecret() {
-    return this.profile === "LIVE" ? config.liveApiSecret : this.apiSecret;
+    return this.profile === "LIVE" ? config.liveApiSecret : config.testnetApiSecret;
   }
 
   private get executionFlag() {
-    return this.profile === "LIVE" ? config.liveExecutionEnabled : this.executionFlag;
+    return this.profile === "LIVE" ? config.liveExecutionEnabled : config.testnetExecutionEnabled;
   }
 
   isConfigured() {

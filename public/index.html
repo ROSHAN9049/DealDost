@@ -15,9 +15,10 @@
     <div class="mode">
       <button id="paperMode" class="pill active" type="button">PAPER</button>
       <button id="testnetMode" class="pill" type="button">TESTNET</button>
-      <button id="liveMode" class="pill disabled" type="button" title="LIVE execution is locked in V2">LIVE</button>
+      <button id="liveMode" class="pill disabled" type="button" title="LIVE is locked until LIVE execution credentials + flag are enabled">LIVE</button>
       <button id="paperAuto" class="auto" type="button">PAPER AUTO OFF</button>
       <button id="testnetAuto" class="auto" type="button">TESTNET AUTO OFF</button>
+      <button id="liveAuto" class="auto" type="button">LIVE AUTO OFF</button>
     </div>
   </header>
   <main class="container">
@@ -28,6 +29,7 @@
       <article class="card"><div class="label">PAPER EQUITY</div><div id="equity" class="big">$1,000</div><div class="muted">Available <span id="available">$1,000</span> • Fees <span id="fees">$0</span></div></article>
       <article class="card"><div class="label">TESTNET ACCOUNT</div><div id="testnetStatus" class="status warn">NOT CONFIGURED</div><div class="muted">Balance <span id="testnetBalance">$0</span> • Open <span id="testnetOpen">0</span></div><div class="muted">Today P&L <span id="testnetPnl">$0</span> • Fees <span id="testnetFees">$0</span></div><div id="testnetError" class="muted error" hidden></div>
         <div id="testnetExecutionHint" class="muted" hidden></div></article>
+      <article class="card"><div class="label">LIVE ACCOUNT</div><div id="liveStatus" class="status warn">LOCKED</div><div class="muted">Balance <span id="liveBalance">$0</span> • Open <span id="liveOpen">0</span></div><div class="muted">Today P&L <span id="livePnl">$0</span> • Fees <span id="liveFees">$0</span></div><div id="liveError" class="muted error" hidden></div><div id="liveExecutionHint" class="muted" hidden></div></article>
     </section>
     <section class="engine-grid">
       <article class="card engine"><div><div class="label">MOMENTUM</div><div id="momentum" class="big">0/3</div></div><span id="momentumStatus" class="badge">READY</span></article>
@@ -41,6 +43,10 @@
     <section class="card">
       <div class="section-head"><div><div class="label">TESTNET POSITIONS</div><div class="muted">Exchange-reconciled Demo positions • engine + SL/TP protection are required for auto execution</div></div><div id="testnetPositionGate" class="badge">0 open</div></div>
       <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Engine</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Unrealized P&L</th><th>Leverage</th><th>Protection</th><th>Action</th></tr></thead><tbody id="testnetPositions"><tr><td colspan="9" class="empty">No TESTNET positions.</td></tr></tbody></table></div>
+    </section>
+    <section class="card">
+      <div class="section-head"><div><div class="label">LIVE POSITIONS</div><div class="muted">Real Binance positions • only when LIVE execution is explicitly enabled</div></div><div id="livePositionGate" class="badge">0 open</div></div>
+      <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Engine</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Unrealized P&L</th><th>Leverage</th><th>Protection</th><th>Action</th></tr></thead><tbody id="livePositions"><tr><td colspan="10" class="empty">LIVE execution locked.</td></tr></tbody></table></div>
     </section>
     <section class="card">
       <div class="section-head"><div><div class="label">LIVE SIGNALS</div><div class="muted">Server-owned signal state • sorted by quality</div></div><div id="signalCount" class="badge">0</div></div>
@@ -74,7 +80,7 @@
         setBoot("PROMISE ERROR • " + reason.slice(0, 120), true);
       });
       const script = document.createElement("script");
-      script.src = "/app.js?build=20260924.1";
+      script.src = "/app.js?build=20260924.2";
       script.defer = true;
       script.onload = () => setBoot("BOOT OK • loading market data…");
       script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260924.1", true);

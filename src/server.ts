@@ -37,13 +37,12 @@ export function createApp(scanner: BinanceScanner) {
   app.get("/api/state", (req, res) => {
     try {
       const requested = String(req.get("x-dealdost-mode") ?? "").toUpperCase();
-      if (requested === "PAPER" || requested === "TESTNET") {
+      if (requested === "PAPER" || requested === "TESTNET" || requested === "LIVE") {
         scanner.setRequestMode(requested, req.get("x-dealdost-auto") === "true", {
           paperAuto: req.get("x-dealdost-paper-auto") === "true",
           testnetAuto: req.get("x-dealdost-testnet-auto") === "true",
+          liveAuto: req.get("x-dealdost-live-auto") === "true",
         });
-      } else if (requested === "LIVE") {
-        return res.status(403).json({ error: "LIVE_EXECUTION_LOCKED" });
       }
 
       res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
@@ -102,11 +101,35 @@ export function createApp(scanner: BinanceScanner) {
     }
   });
 
+  app.post("/api/live/protection-sync", async (req, res) => {
+    try {
+      const symbol = String(req.body?.symbol ?? "").toUpperCase();
+      if (!symbol) return res.status(400).json({ error: "symbol_required" });
+      const state = await scanner.syncLivePositionProtection(symbol);
+      res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+      res.json(state);
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/live/close", async (req, res) => {
+    try {
+      const symbol = String(req.body?.symbol ?? "").toUpperCase();
+      if (!symbol) return res.status(400).json({ error: "symbol_required" });
+      const state = await scanner.closeManagedLivePosition(symbol);
+      res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+      res.json(state);
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.post("/api/mode", async (req, res) => {
     try {
       const body = req.body ?? {};
       const mode = String(body.mode ?? "").toUpperCase();
-      if (mode !== "PAPER" && mode !== "TESTNET") {
+      if (mode !== "PAPER" && mode !== "TESTNET" && mode !== "LIVE") {
         return res.status(mode === "LIVE" ? 403 : 400).json({
           error: mode === "LIVE" ? "LIVE_EXECUTION_LOCKED" : "invalid_mode",
         });

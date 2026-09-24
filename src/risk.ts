@@ -25,8 +25,20 @@ export class RiskGovernor {
     this.emergencyStop = value;
   }
 
+  private getIstDateKey(timestamp = Date.now()) {
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    return new Date(timestamp + istOffsetMs).toISOString().slice(0, 10);
+  }
+
+  private getIstDayStartMs(timestamp = Date.now()) {
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const shifted = new Date(timestamp + istOffsetMs);
+    shifted.setUTCHours(0, 0, 0, 0);
+    return shifted.getTime() - istOffsetMs;
+  }
+
   private resetDailyRiskIfNeeded() {
-    const today = new Date().toDateString();
+    const today = this.getIstDateKey();
     if (today !== this.riskDate) {
       this.riskDate = today;
       this.dailyRiskUsedPct = 0;
@@ -140,12 +152,22 @@ export class RiskGovernor {
     this.dailyRiskUsedPct = 0;
     const now = Date.now();
     const cooldownMs = this.cfg.cooldownMinutes * 60_000;
+    const dayStartMs = this.getIstDayStartMs(now);
     for (const trade of history) {
       const loss = Number(trade.netPnlUsd);
-      if (loss < 0 && this.cfg.accountBalanceUsd > 0) {
+      const closedAt = Number(trade.closedAt);
+
+      // Daily risk is strictly today's IST session; older history must not
+      // carry forward after a serverless runtime restore.
+      if (
+        loss < 0 &&
+        this.cfg.accountBalanceUsd > 0 &&
+        Number.isFinite(closedAt) &&
+        closedAt >= dayStartMs
+      ) {
         this.dailyRiskUsedPct += (Math.abs(loss) / this.cfg.accountBalanceUsd) * 100;
       }
-      const closedAt = Number(trade.closedAt);
+
       if (trade.symbol && Number.isFinite(closedAt) && now - closedAt < cooldownMs) {
         this.cooldowns.set(trade.symbol.toUpperCase(), closedAt + cooldownMs);
       }

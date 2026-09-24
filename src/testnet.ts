@@ -113,6 +113,7 @@ export interface TestnetExecutionSnapshot {
   dailyRiskUsedPct: number;
   realizedPnlTodayUsd: number;
   feesTodayUsd: number;
+  netPnlTodayUsd: number;
   lastClosedAt: Record<string, number>;
 }
 
@@ -163,6 +164,7 @@ export class TestnetClient {
       dailyRiskUsedPct: 0,
       realizedPnlTodayUsd: 0,
       feesTodayUsd: 0,
+      netPnlTodayUsd: 0,
       positions: [],
       lastSyncAt: 0,
       error: null,
@@ -203,6 +205,8 @@ export class TestnetClient {
       leverage: Number.isFinite(Number(row.leverage)) ? Number(row.leverage) : null,
       openedAt: Number(row.updateTime ?? 0),
       protection: "MISSING",
+      takeProfitPrice: null,
+      tpManagedByEngine: false,
     }));
 
     const basic = {
@@ -219,6 +223,7 @@ export class TestnetClient {
       dailyRiskUsedPct: 0,
       realizedPnlTodayUsd: 0,
       feesTodayUsd: 0,
+      netPnlTodayUsd: 0,
       positions: basicPositions,
       lastSyncAt: Date.now(),
     };
@@ -239,6 +244,7 @@ export class TestnetClient {
         dailyRiskUsedPct: enriched.dailyRiskUsedPct,
         realizedPnlTodayUsd: enriched.realizedPnlTodayUsd,
         feesTodayUsd: enriched.feesTodayUsd,
+        netPnlTodayUsd: enriched.netPnlTodayUsd,
         positions: enriched.positions,
         lastSyncAt: Date.now(),
       };
@@ -266,6 +272,7 @@ export class TestnetClient {
         dailyRiskUsedPct: 0,
         realizedPnlTodayUsd: 0,
         feesTodayUsd: 0,
+        netPnlTodayUsd: 0,
         lastClosedAt: {},
       };
     }
@@ -327,6 +334,8 @@ export class TestnetClient {
             : null,
         openedAt: Number(position.updateTime ?? 0),
         protection: item.protection,
+        takeProfitPrice: this.getExistingTakeProfitPrice(item.openOrders),
+        tpManagedByEngine: true,
       });
     }
 
@@ -344,6 +353,7 @@ export class TestnetClient {
     }, 0);
     const dailyLossUsd = negativeRealized + negativeCommission;
     const dailyRiskUsedPct = accountBalanceUsd > 0 ? (dailyLossUsd / accountBalanceUsd) * 100 : 0;
+    const netPnlTodayUsd = realizedPnlTodayUsd - feesTodayUsd;
     const unrealizedPnlUsd = open.reduce(
       (sum, row) => sum + Number(row.unRealizedProfit ?? row.unrealizedProfit ?? 0),
       0,
@@ -363,6 +373,7 @@ export class TestnetClient {
       dailyRiskUsedPct,
       realizedPnlTodayUsd,
       feesTodayUsd,
+      netPnlTodayUsd,
       lastClosedAt,
     };
   }
@@ -527,7 +538,6 @@ export class TestnetClient {
     }
 
     let stopOrderId: string | undefined;
-    let takeProfitOrderId: string | undefined;
 
     try {
       if (plan.stopPrice !== undefined && plan.stopPrice > 0) {
@@ -539,17 +549,6 @@ export class TestnetClient {
           clientOrderId + "-SL",
         );
         stopOrderId = String(stop.orderId);
-      }
-
-      if (plan.takeProfitPrice !== undefined && plan.takeProfitPrice > 0) {
-        const takeProfit = await this.placeCloseProtection(
-          plan.symbol,
-          plan.closeOrderSide,
-          "TAKE_PROFIT_MARKET",
-          plan.takeProfitPrice,
-          clientOrderId + "-TP",
-        );
-        takeProfitOrderId = String(takeProfit.orderId);
       }
     } catch (error) {
       try {
@@ -584,7 +583,7 @@ export class TestnetClient {
       executedQty,
       avgPrice,
       stopOrderId,
-      takeProfitOrderId,
+      takeProfitOrderId: undefined,
     };
   }
 
@@ -619,14 +618,6 @@ export class TestnetClient {
         o.type === "STOP_MARKET" &&
         String(o.clientOrderId ?? "").startsWith("DDT-"),
     );
-    const hasTakeProfit = openOrders.some(
-      (o) =>
-        o.status === "NEW" &&
-        (o.closePosition === true || String(o.closePosition).toLowerCase() === "true") &&
-        o.type === "TAKE_PROFIT_MARKET" &&
-        String(o.clientOrderId ?? "").startsWith("DDT-"),
-    );
-
     const baseId = "DDT-SAFETY-" + symbol;
     if (!hasStop) {
       await this.placeCloseProtection(
@@ -635,15 +626,6 @@ export class TestnetClient {
         "STOP_MARKET",
         input.stopPrice,
         baseId + "-SL",
-      );
-    }
-    if (!hasTakeProfit) {
-      await this.placeCloseProtection(
-        symbol,
-        closeSide,
-        "TAKE_PROFIT_MARKET",
-        input.takeProfitPrice,
-        baseId + "-TP",
       );
     }
 
@@ -800,14 +782,24 @@ export class TestnetClient {
       (o) =>
         o.status === "NEW" &&
         (o.closePosition === true || String(o.closePosition).toLowerCase() === "true") &&
-        (o.type === "STOP_MARKET" || o.type === "TAKE_PROFIT_MARKET") &&
+        o.type === "STOP_MARKET" &&
         String(o.clientOrderId ?? "").startsWith("DDT-"),
     );
-    const hasStop = protections.some((o) => o.type === "STOP_MARKET");
-    const hasTakeProfit = protections.some((o) => o.type === "TAKE_PROFIT_MARKET");
-    if (hasStop && hasTakeProfit) return "OK";
-    if (hasStop || hasTakeProfit) return "PARTIAL";
-    return "MISSING";
+    return protections.length > 0 ? "OK" : "MISSING";
+  }
+
+  private getExistingTakeProfitPrice(openOrders: OrderRow[]): number | null {
+    const tp = openOrders
+      .filter(
+        (o) =>
+          o.status === "NEW" &&
+          (o.closePosition === true || String(o.closePosition).toLowerCase() === "true") &&
+          o.type === "TAKE_PROFIT_MARKET" &&
+          String(o.clientOrderId ?? "").startsWith("DDT-"),
+      )
+      .sort((a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0))[0];
+    const value = Number(tp?.stopPrice ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : null;
   }
 
   private incomePath(type: "REALIZED_PNL" | "COMMISSION") {

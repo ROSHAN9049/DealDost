@@ -166,6 +166,10 @@ export class BinanceScanner extends EventEmitter {
     this.syncPaperRiskState();
     const risk = this.risk.snapshot();
     const allSignals = [...this.signals.values()]
+      // Risk/PASS is dashboard state, so recompute it from the current
+      // exchange/PAPER position snapshot. This prevents a symbol already
+      // open on TESTNET/LIVE from continuing to display PASS.
+      .map((signal) => ({ ...signal, risk: this.previewSignalRisk(signal) }))
       .sort((a, b) => b.quality.total - a.quality.total || b.updatedAt - a.updatedAt)
       .slice(0, 30);
 

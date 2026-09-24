@@ -50,9 +50,6 @@ export interface Signal {
   symbol: string;
   engine: Engine;
   side: Side;
-  signalStage: Stage;
-  qualityScore: number;
-  regime: Regime;
   stage: Stage;
   quality: QualityBreakdown;
   regime: Regime;
@@ -88,6 +85,9 @@ export interface PaperPositionView {
   symbol: string;
   engine: Engine;
   side: Side;
+  signalStage: Stage;
+  qualityScore: number;
+  regime: Regime;
   quantity: number;
   entry: number;
   markPrice: number;

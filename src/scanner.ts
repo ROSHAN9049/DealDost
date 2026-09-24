@@ -342,10 +342,20 @@ export class BinanceScanner extends EventEmitter {
       this.testnetAuto = auto;
     }
 
+    // Execution AUTO is never armed from a request alone. It requires the
+    // account to be configured, execution-enabled, and currently connected.
+    if (this.testnetAuto && (!this.testnet.isExecutionEnabled() || !this.testnetState.connected || this.testnetState.error)) {
+      this.testnetAuto = false;
+    }
+
     if (typeof automation?.liveAuto === "boolean") {
       this.liveAuto = automation.liveAuto;
     } else if (mode === "LIVE" && typeof auto === "boolean") {
       this.liveAuto = auto;
+    }
+
+    if (this.liveAuto && (!this.live.isExecutionEnabled() || !this.liveState.connected || this.liveState.error)) {
+      this.liveAuto = false;
     }
 
     if (this.risk.snapshot().emergencyStop) {
@@ -602,12 +612,16 @@ export class BinanceScanner extends EventEmitter {
       this.processManagedTakeProfits();
       this.emit("update");
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("-2015") || message.includes("Invalid API-key") || message.includes(" 401:")) {
+        this.testnetAuto = false;
+      }
       this.testnetState = {
         ...this.testnet.emptyState(),
         configured: this.testnet.isConfigured(),
         executionEnabled: this.testnet.isExecutionEnabled(),
         auto: this.testnetAuto,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       };
       this.lastTestnetSyncAt = Date.now();
       this.emit("update");
@@ -657,12 +671,16 @@ export class BinanceScanner extends EventEmitter {
       this.processManagedTakeProfits();
       this.emit("update");
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("-2015") || message.includes("Invalid API-key") || message.includes(" 401:")) {
+        this.liveAuto = false;
+      }
       this.liveState = {
         ...this.live.emptyState(),
         configured: this.live.isConfigured(),
         executionEnabled: this.live.isExecutionEnabled(),
         auto: this.liveAuto,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       };
       this.lastLiveSyncAt = Date.now();
       this.emit("update");

@@ -58,6 +58,7 @@ async function fetchDirectBinance(path) {
 }
 
 async function directScannerFallback() {
+  const requestMode = currentMode;
   const ticker = await fetchDirectBinance("/fapi/v1/ticker/24hr");
   const top = ticker
     .filter((t) => t.symbol.endsWith("USDT") && !/_\d{6}$/.test(t.symbol) && Number(t.quoteVolume) >= 10000000)
@@ -109,8 +110,8 @@ async function directScannerFallback() {
     headers: { "content-type": "application/json" },
     cache: "no-store",
     body: JSON.stringify({
-      mode: currentMode,
-      auto: currentMode === "PAPER" ? paperAuto : testnetAuto,
+      mode: requestMode,
+      auto: requestMode === "PAPER" ? paperAuto : requestMode === "TESTNET" ? testnetAuto : liveAuto,
       paperAuto,
       testnetAuto,
       liveAuto,
@@ -131,7 +132,9 @@ async function directScannerFallback() {
   });
 
   if (!response.ok) throw new Error("Signal ingest HTTP " + response.status);
-  render(await response.json());
+  const state = await response.json();
+  if (requestMode !== currentMode) return; // newer mode selection wins
+  render(state);
 }
 
 async function directBinanceFallback() {
@@ -162,11 +165,24 @@ function showApiError(message) {
 
 async function setMode(mode) {
   const auto = mode === "PAPER" ? paperAuto : mode === "TESTNET" ? testnetAuto : liveAuto;
-  $("paperAuto").disabled = true;
+  const token = ++modeChangeToken;
+  const previousMode = currentMode;
+
+  ["paperMode", "testnetMode", "liveMode"].forEach((id) => {
+    const button = $(id);
+    if (button) button.disabled = true;
+  });
+
+  // Set the requested mode immediately so newly-started polling/ingestion
+  // requests cannot carry the old mode while the POST is in flight.
+  currentMode = mode;
+  localStorage.setItem("dealdost.mode", currentMode);
+
   try {
     const response = await fetch("/api/mode", {
       method: "POST",
       headers: { "content-type": "application/json" },
+      cache: "no-store",
       body: JSON.stringify({ mode, auto, paperAuto, testnetAuto, liveAuto })
     });
     if (!response.ok) {
@@ -174,13 +190,20 @@ async function setMode(mode) {
       try { const body = await response.json(); if (body?.error) detail += " • " + body.error; } catch {}
       throw new Error(detail);
     }
-    currentMode = mode;
-    localStorage.setItem("dealdost.mode", currentMode);
+
+    if (token !== modeChangeToken || currentMode !== mode) return;
     render(await response.json());
   } catch (error) {
-    showApiError("Mode change failed: " + (error instanceof Error ? error.message : String(error)));
+    if (token === modeChangeToken) {
+      currentMode = previousMode;
+      localStorage.setItem("dealdost.mode", currentMode);
+      showApiError("Mode change failed: " + (error instanceof Error ? error.message : String(error)));
+    }
   } finally {
-    $("paperAuto").disabled = false;
+    ["paperMode", "testnetMode", "liveMode"].forEach((id) => {
+      const button = $(id);
+      if (button) button.disabled = false;
+    });
   }
 }
 
@@ -702,9 +725,11 @@ function render(state) {
 
 let polling = false;
 let lastBrowserIngestAt = 0;
+let modeChangeToken = 0;
 async function load() {
   if (polling) return;
   polling = true;
+  const requestMode = currentMode;
   try {
     const response = await fetch("/api/state", {
       cache: "no-store",
@@ -718,6 +743,7 @@ async function load() {
     });
     if (response.ok) {
       const state = await response.json();
+      if (requestMode !== currentMode) return; // discard stale mode response
       if (
         state?.market?.universeSize > 0 &&
         state?.feed?.websocket === "ONLINE"
@@ -735,7 +761,7 @@ async function load() {
           await directScannerFallback();
           lastBrowserIngestAt = Date.now();
         } catch (fallbackError) {
-          render(state);
+          if (requestMode === currentMode) render(state);
         }
       }
     } else {

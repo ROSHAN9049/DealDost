@@ -11,6 +11,9 @@ app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.resolve(process.cwd(), "public")));
 
 function applyRequestMode(input: any) {
+  if (input?.emergencyStop !== undefined) {
+    scanner.setEmergencyStop(Boolean(input.emergencyStop));
+  }
   const requested = String(input?.mode ?? "").toUpperCase();
   if (requested === "PAPER" || requested === "TESTNET" || requested === "LIVE") {
     const automation = {
@@ -66,6 +69,7 @@ app.get("/api/state", async (req, res) => {
         req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "TESTNET",
       liveAuto: req.get("x-dealdost-live-auto") === "true" ||
         req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "LIVE",
+      emergencyStop: req.get("x-dealdost-emergency-stop") === "true",
     });
     await scanner.serverlessTick();
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
@@ -121,6 +125,7 @@ app.post("/api/mode", async (req, res) => {
       res.status(400).json({ error: "invalid_mode" });
       return;
     }
+    if (body.emergencyStop !== undefined) scanner.setEmergencyStop(Boolean(body.emergencyStop));
     scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto ?? body.liveAuto), {
       paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
       testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),

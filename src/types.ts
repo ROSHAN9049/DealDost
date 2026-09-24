@@ -159,6 +159,8 @@ export interface TestnetStateView {
   error: string | null;
 }
 
+export interface LiveStateView extends TestnetStateView {}
+
 export interface DashboardState {
   mode: "PAPER" | "TESTNET" | "LIVE";
   auto: boolean;
@@ -179,6 +181,7 @@ export interface DashboardState {
   risk: RiskConfig & { dailyRiskUsedPct: number; emergencyStop: boolean };
   paper: PaperStateView;
   testnet: TestnetStateView;
+  live: LiveStateView;
   rotation: RotationStateView;
   signals: Signal[];
   updatedAt: number;

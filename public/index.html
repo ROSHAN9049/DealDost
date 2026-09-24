@@ -10,7 +10,7 @@
   <header class="topbar">
     <div>
       <div class="brand">DEALDOST</div>
-      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260924.1</span></div>
+      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260924.2</span></div>
     </div>
     <div class="mode">
       <button id="paperMode" class="pill active" type="button">PAPER</button>
@@ -42,7 +42,7 @@
     </section>
     <section class="card">
       <div class="section-head"><div><div class="label">TESTNET POSITIONS</div><div class="muted">Exchange-reconciled Demo positions • engine + SL/TP protection are required for auto execution</div></div><div id="testnetPositionGate" class="badge">0 open</div></div>
-      <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Engine</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Unrealized P&L</th><th>Leverage</th><th>Protection</th><th>Action</th></tr></thead><tbody id="testnetPositions"><tr><td colspan="9" class="empty">No TESTNET positions.</td></tr></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Engine</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Unrealized P&L</th><th>Leverage</th><th>Protection</th><th>Action</th></tr></thead><tbody id="testnetPositions"><tr><td colspan="10" class="empty">No TESTNET positions.</td></tr></tbody></table></div>
     </section>
     <section class="card">
       <div class="section-head"><div><div class="label">LIVE POSITIONS</div><div class="muted">Real Binance positions • only when LIVE execution is explicitly enabled</div></div><div id="livePositionGate" class="badge">0 open</div></div>
@@ -83,7 +83,7 @@
       script.src = "/app.js?build=20260924.2";
       script.defer = true;
       script.onload = () => setBoot("BOOT OK • loading market data…");
-      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260924.1", true);
+      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260924.2", true);
       document.head.appendChild(script);
     })();
   </script>

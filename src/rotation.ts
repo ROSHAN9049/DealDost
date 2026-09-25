@@ -5,27 +5,56 @@ export interface RotationEvent {
   rotationId: string;
   createdAt: number;
   sourceTradeId: string;
+  sourceProfile?: "PAPER" | "TESTNET" | "LIVE";
+  symbol?: string;
+  engine?: string;
+  side?: string;
   releasedUsd: number;
   allocatedUsd: number;
   retainedUsd: number;
   status: "PLANNED";
 }
 
+export interface ExchangeClosedTrade {
+  sourceTradeId: string;
+  sourceProfile: "TESTNET" | "LIVE";
+  symbol: string;
+  engine: string;
+  side: string;
+  netPnlUsd: number;
+  closedAt: number;
+}
+
 export class ProfitRotationV3 {
   private events: RotationEvent[] = [];
   private sequence = 0;
 
-  onClosedTrade(trade: PaperTrade): RotationEvent | null {
-    if (trade.netPnlUsd <= 0) return null;
+  private createEvent(input: {
+    sourceTradeId: string;
+    sourceProfile: "PAPER" | "TESTNET" | "LIVE";
+    symbol?: string;
+    engine?: string;
+    side?: string;
+    netPnlUsd: number;
+    createdAt: number;
+  }): RotationEvent | null {
+    if (!(input.netPnlUsd > 0)) return null;
 
-    const released = trade.netPnlUsd;
+    const existing = this.events.find((event) => event.sourceTradeId === input.sourceTradeId);
+    if (existing) return existing;
+
+    const released = input.netPnlUsd;
     const retained = released * 0.10;
     const allocated = released - retained;
 
     const event: RotationEvent = {
       rotationId: "ROT-" + String(++this.sequence).padStart(4, "0"),
-      createdAt: Date.now(),
-      sourceTradeId: trade.tradeId,
+      createdAt: input.createdAt,
+      sourceTradeId: input.sourceTradeId,
+      sourceProfile: input.sourceProfile,
+      symbol: input.symbol,
+      engine: input.engine,
+      side: input.side,
       releasedUsd: released,
       allocatedUsd: allocated,
       retainedUsd: retained,
@@ -33,8 +62,32 @@ export class ProfitRotationV3 {
     };
 
     this.events.push(event);
-    if (this.events.length > 100) this.events.shift();
+    if (this.events.length > 200) this.events.shift();
     return event;
+  }
+
+  onClosedTrade(trade: PaperTrade): RotationEvent | null {
+    return this.createEvent({
+      sourceTradeId: "PAPER:" + trade.tradeId,
+      sourceProfile: "PAPER",
+      symbol: trade.symbol,
+      engine: trade.engine,
+      side: trade.side,
+      netPnlUsd: trade.netPnlUsd,
+      createdAt: trade.closedAt || Date.now(),
+    });
+  }
+
+  onExchangeClosedTrade(trade: ExchangeClosedTrade): RotationEvent | null {
+    return this.createEvent({
+      sourceTradeId: trade.sourceTradeId,
+      sourceProfile: trade.sourceProfile,
+      symbol: trade.symbol,
+      engine: trade.engine,
+      side: trade.side,
+      netPnlUsd: trade.netPnlUsd,
+      createdAt: trade.closedAt || Date.now(),
+    });
   }
 
   restore(events: unknown[] | null | undefined) {
@@ -51,12 +104,12 @@ export class ProfitRotationV3 {
           Number.isFinite(Number(e.retainedUsd)) &&
           e.status === "PLANNED";
       })
-      .slice(-100)
+      .slice(-200)
       .map((e) => ({ ...e }));
 
     this.sequence = this.events.reduce((max, e) => {
       const n = Number(e.rotationId.replace(/^ROT-/, ""));
-      return Number.isFinite(n) ? Math.max(max, n) : max;
+      return Number.isFinite(n) ? Math.max(n, max) : max;
     }, 0);
   }
 

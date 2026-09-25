@@ -1,3 +1,4 @@
+import "./runtime-hardening.js";
 import { BinanceScanner } from "./scanner.js";
 import { createApp } from "./server.js";
 

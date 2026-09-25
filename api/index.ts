@@ -1,5 +1,6 @@
 import express from "express";
 import path from "node:path";
+import "../src/runtime-hardening.js";
 import { BinanceScanner } from "../src/scanner.js";
 
 const app = express();

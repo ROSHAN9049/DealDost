@@ -137,6 +137,7 @@ export class TestnetClient {
   private serverTimeAt = 0;
   private serverTimeInFlight?: Promise<number>;
   private readonly serverTimeCacheMs = 30_000;
+  private executionSnapshotInFlight?: Promise<TestnetExecutionSnapshot>;
 
   private get baseUrl() {
     return this.profile === "LIVE" ? config.liveRestBase : config.testnetRestBase;
@@ -279,6 +280,17 @@ export class TestnetClient {
   }
 
   async getExecutionSnapshot(): Promise<TestnetExecutionSnapshot> {
+    if (this.executionSnapshotInFlight) return this.executionSnapshotInFlight;
+
+    this.executionSnapshotInFlight = this.getExecutionSnapshotUncached()
+      .finally(() => {
+        this.executionSnapshotInFlight = undefined;
+      });
+
+    return this.executionSnapshotInFlight;
+  }
+
+  private async getExecutionSnapshotUncached(): Promise<TestnetExecutionSnapshot> {
     if (!this.isConfigured()) {
       return {
         connected: false,
@@ -299,10 +311,12 @@ export class TestnetClient {
       };
     }
 
+    const dayStart = this.getIstDayStartMsForAnalytics(Date.now());
+    const endTime = Date.now();
     const [{ balances, positions }, income, commission] = await Promise.all([
       this.getAccountRead(),
-      this.signedGet<IncomeRow[]>(this.incomePath("REALIZED_PNL")),
-      this.signedGet<IncomeRow[]>(this.incomePath("COMMISSION")),
+      this.getIncomeHistory("REALIZED_PNL", dayStart, endTime),
+      this.getIncomeHistory("COMMISSION", dayStart, endTime),
     ]);
 
     const usdt = balances.find((row) => row.asset === "USDT");
@@ -399,7 +413,7 @@ export class TestnetClient {
     };
   }
 
-  async getAnalytics(daysInput = 30) {
+  async getAnalytics(daysInput = 30, symbols: string[] = []) {
     if (!this.isConfigured()) {
       throw new Error(this.profile + "_NOT_CONFIGURED");
     }
@@ -408,14 +422,12 @@ export class TestnetClient {
     const endTime = Date.now();
     const startTime = this.getIstDayStartMsForAnalytics(endTime - (days - 1) * 24 * 60 * 60 * 1000);
 
+    const analyticsEndTime = Date.now();
+    const analyticsSymbols = Array.isArray(symbols) ? symbols : [];
     const [realizedIncome, commissionIncome, orders] = await Promise.all([
-      this.signedGet<IncomeRow[]>(
-        this.incomePath("REALIZED_PNL", startTime),
-      ),
-      this.signedGet<IncomeRow[]>(
-        this.incomePath("COMMISSION", startTime),
-      ),
-      this.getAccountOrdersForAnalytics(startTime),
+      this.getIncomeHistory("REALIZED_PNL", startTime, analyticsEndTime),
+      this.getIncomeHistory("COMMISSION", startTime, analyticsEndTime),
+      this.getAccountOrdersForAnalytics(startTime, analyticsEndTime, analyticsSymbols),
     ]);
     const income = [...realizedIncome, ...commissionIncome];
 
@@ -496,7 +508,7 @@ export class TestnetClient {
         protectionOrders: ddtProtectionOrders,
       },
       daily,
-      recentOrders: orders
+      trades: orders
         .filter((order) => String(order.clientOrderId ?? "").startsWith("DDT-"))
         .sort((a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0))
         .slice(0, 50)
@@ -506,16 +518,19 @@ export class TestnetClient {
           engine: String(order.clientOrderId ?? "").includes("MOM-") ? "MOMENTUM"
             : String(order.clientOrderId ?? "").includes("SCALP-") ? "SCALPING" : "DDT",
           type: String(order.type ?? ""),
-          side: String(order.side ?? ""),
+          side: String(order.side ?? "").toUpperCase() === "BUY" ? "LONG"
+            : String(order.side ?? "").toUpperCase() === "SELL" ? "SHORT" : String(order.side ?? ""),
           status: String(order.status ?? ""),
           clientOrderId: String(order.clientOrderId ?? ""),
         })),
       coverage: {
         incomeRows: income.length,
         orderRows: orders.length,
-        orderRowsLimit: 1000,
-        truncated: orders.length >= 5000,
-        note: "Fees and realized P&L are account-level Binance income data; they may include activity outside DealDost. Engine counts use DDT client order IDs. Individual exchange trade P&L attribution is not inferred unless supported by Binance income/order data.",
+        orderRowsLimit: 60000,
+        truncated: false,
+        orderHistoryWindowDays: 7,
+        symbolsScanned: analyticsSymbols.length,
+        note: "Fees and realized P&L are account-level Binance income data and may include activity outside DealDost. DDT entry counts and recent trade rows use exchange order client IDs scanned across the currently tracked symbols for the latest Binance-valid 7-day allOrders window. Signal stage/quality and per-trade realized P&L are not inferred unless the exchange data directly supports them.",
       },
     };
   }
@@ -945,37 +960,110 @@ export class TestnetClient {
     return shifted.getTime() - istOffsetMs;
   }
 
-  private async getAccountOrdersForAnalytics(startTime: number): Promise<OrderRow[]> {
-    const orders: OrderRow[] = [];
-    let cursor = startTime;
+  private async getAccountOrdersForAnalytics(
+    startTime: number,
+    endTime: number,
+    symbols: string[],
+  ): Promise<OrderRow[]> {
+    // USDⓈ-M allOrders requires a symbol and Binance limits each query window
+    // to less than 7 days. Scan the currently tracked symbols over the latest
+    // exchange-valid window; account income remains available for the full
+    // requested analytics window.
+    const maxWindowMs = 7 * 24 * 60 * 60 * 1000 - 60_000;
+    const queryStart = Math.max(startTime, endTime - maxWindowMs);
+    const uniqueSymbols = [...new Set(
+      symbols
+        .map((symbol) => String(symbol ?? "").toUpperCase())
+        .filter((symbol) => /^[A-Z0-9]+USDT$/.test(symbol)),
+    )].slice(0, 60);
 
-    // Binance currently caps one allOrders response at 1000 rows. Paginate
-    // modestly by the last orderId so analytics does not hammer the API.
-    for (let page = 0; page < 5; page += 1) {
-      const suffix = page === 0
-        ? "&startTime=" + cursor
-        : "&orderId=" + encodeURIComponent(String(Math.max(1, cursor))) +
-          "&startTime=" + startTime;
-      const batch = await this.signedGet<OrderRow[]>(
-        "/fapi/v1/allOrders?limit=1000" + suffix,
-      );
-      if (!batch.length) break;
-      orders.push(...batch);
+    if (!uniqueSymbols.length) return [];
 
-      if (batch.length < 1000) break;
-      const lastId = Number(batch.at(-1)?.orderId ?? 0);
-      if (!Number.isFinite(lastId) || lastId <= 0) break;
-      cursor = lastId + 1;
-    }
+    const results: OrderRow[] = [];
+    const seen = new Set<string>();
+    const concurrency = 6;
+    let cursor = 0;
 
-    return orders;
+    const worker = async () => {
+      while (true) {
+        const index = cursor++;
+        if (index >= uniqueSymbols.length) return;
+        const symbol = uniqueSymbols[index];
+
+        try {
+          const batch = await this.signedGet<OrderRow[]>(
+            "/fapi/v1/allOrders?symbol=" + encodeURIComponent(symbol) +
+              "&startTime=" + queryStart +
+              "&endTime=" + endTime +
+              "&limit=1000",
+          );
+          for (const order of batch) {
+            const key = order.orderId !== undefined
+              ? String(order.orderId)
+              : symbol + "|" + String(order.clientOrderId ?? "") + "|" + String(order.time ?? 0);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            results.push(order);
+          }
+        } catch (error) {
+          // One symbol timing out must not erase the account-level analytics.
+          console.warn(
+            "[analytics allOrders] " + symbol,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        { length: Math.min(concurrency, uniqueSymbols.length) },
+        () => worker(),
+      ),
+    );
+
+    return results.sort(
+      (a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0),
+    );
   }
 
-  private incomePath(type: "REALIZED_PNL" | "COMMISSION", startTime?: number) {
-    const effectiveStart = Number.isFinite(Number(startTime))
-      ? Number(startTime)
-      : this.getIstDayStartMsForAnalytics(Date.now());
-    return "/fapi/v1/income?incomeType=" + type + "&startTime=" + effectiveStart + "&limit=1000";
+  private async getIncomeHistory(
+    type: "REALIZED_PNL" | "COMMISSION",
+    startTime: number,
+    endTime: number,
+  ): Promise<IncomeRow[]> {
+    const rows: IncomeRow[] = [];
+    const seen = new Set<string>();
+
+    // Binance caps income responses at 1000 rows. Keep pagination bounded.
+    for (let page = 1; page <= 20; page += 1) {
+      const batch = await this.signedGet<IncomeRow[]>(
+        "/fapi/v1/income?incomeType=" + type +
+          "&startTime=" + startTime +
+          "&endTime=" + endTime +
+          "&page=" + page +
+          "&limit=1000",
+      );
+      if (!batch.length) break;
+
+      for (const row of batch) {
+        const key = [
+          type,
+          String((row as any).tranId ?? ""),
+          String((row as any).tradeId ?? ""),
+          String(row.time ?? 0),
+          String(row.income ?? 0),
+          String((row as any).symbol ?? ""),
+        ].join("|");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push(row);
+      }
+
+      if (batch.length < 1000) break;
+    }
+
+    return rows;
   }
 
   private async getServerTimeOffset(_forceRefresh = false): Promise<number> {
@@ -1080,37 +1168,9 @@ export class TestnetClient {
   }
 
   private async cleanupStaleProtectionOrders(openSymbols: Set<string>) {
-    const [normalOrders, algoOrders] = await Promise.all([
-      this.signedGet<OrderRow[]>("/fapi/v1/openOrders"),
-      this.signedGet<AlgoOrderRow[]>("/fapi/v1/openAlgoOrders"),
-    ]);
-
-    const staleNormal = normalOrders.filter((order) => {
-      const symbol = String(order.symbol ?? "").toUpperCase();
-      const clientId = String(order.clientOrderId ?? "");
-      return (
-        symbol &&
-        !openSymbols.has(symbol) &&
-        order.status === "NEW" &&
-        (order.closePosition === true || String(order.closePosition).toLowerCase() === "true") &&
-        (order.type === "STOP_MARKET" || order.type === "TAKE_PROFIT_MARKET") &&
-        clientId.startsWith("DDT-")
-      );
-    });
-
-    for (const order of staleNormal) {
-      if (order.orderId === undefined && !order.clientOrderId) continue;
-      try {
-        await this.signedDelete<any>("/fapi/v1/order", {
-          symbol: String(order.symbol ?? "").toUpperCase(),
-          orderId: order.orderId === undefined ? "" : String(order.orderId),
-          origClientOrderId: order.orderId === undefined ? String(order.clientOrderId) : "",
-        });
-        console.info("[testnet cleanup]", order.symbol, order.clientOrderId);
-      } catch (error) {
-        console.error("[testnet cleanup]", order.symbol, error);
-      }
-    }
+    // DDT protections are created/read through Binance's Algo service. Avoid
+    // the legacy /fapi/v1/openOrders dependency during every 30s sync.
+    const algoOrders = await this.signedGet<AlgoOrderRow[]>("/fapi/v1/openAlgoOrders");
 
     const staleAlgo = algoOrders.filter((order) => {
       const symbol = String(order.symbol ?? "").toUpperCase();
@@ -1195,7 +1255,7 @@ export class TestnetClient {
     try {
       const [balances, positions] = await Promise.all([
         this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
-        this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
+        this.getPositionRisk(),
       ]);
 
       const usdt = balances.find((row) => row.asset === "USDT");

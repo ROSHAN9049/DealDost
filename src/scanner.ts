@@ -168,9 +168,18 @@ export class BinanceScanner extends EventEmitter {
     mode: "TESTNET" | "LIVE",
     days = 30,
   ) {
+    const symbols = [
+      ...this.symbols.keys(),
+      ...this.signals.values().map((signal) => signal.symbol),
+      ...this.testnetState.positions.map((position) => position.symbol),
+      ...this.liveState.positions.map((position) => position.symbol),
+    ];
+    const trackedSymbols = [...new Set(symbols.map((symbol) => String(symbol).toUpperCase()))]
+      .slice(0, 60);
+
     return mode === "TESTNET"
-      ? this.testnet.getAnalytics(days)
-      : this.live.getAnalytics(days);
+      ? this.testnet.getAnalytics(days, trackedSymbols)
+      : this.live.getAnalytics(days, trackedSymbols);
   }
 
   state(): DashboardState {

@@ -40,7 +40,7 @@ function sleep(ms: number) {
 
 function parseEntryMetadata(clientOrderId: string) {
   const match = String(clientOrderId).match(
-    /^DDT-(MOM|SCALP)-([A-Z0-9]+)-(L|S)Q(\\d{1,3})(WA|SU|CF|BL)-[A-Za-z0-9]+$/,
+    /^DDT-(MOM|SCALP)-([A-Z0-9]+)-(L|S)Q(\d{1,3})(WA|SU|CF|BL)-[A-Za-z0-9]+$/,
   );
   if (!match) return null;
   return {
@@ -68,7 +68,7 @@ async function getCloseNetPnl(client: TestnetClient, symbol: string, orderId: st
       const closeFills = fills.filter((row: any) => String(row.orderId ?? "") === String(orderId));
 
       if (closeFills.length) {
-        const recentOrders = await api.getRecentOrders(symbol);
+        const recentOrders = await api.getAccountOrdersForAnalytics(closeTime - 7 * 24 * 60 * 60 * 1000, closeTime, [symbol]);
         const closeOrder = recentOrders.find((row: any) => String(row.orderId ?? "") === String(orderId));
         const closeTime = Number(closeOrder?.time ?? closeOrder?.updateTime ?? now);
         const entryOrder = recentOrders

@@ -10,7 +10,10 @@ let startPromise: Promise<void> | undefined;
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.resolve(process.cwd(), "public")));
 
-function applyRequestMode(input: any) {
+// Request mode is mutated only by explicit control endpoints.
+// State/market reads remain side-effect free so stale browser state cannot
+// silently disable server-owned TESTNET automation.
+function applyControlMode(input: any) {
   if (input?.emergencyStop !== undefined) {
     scanner.setEmergencyStop(Boolean(input.emergencyStop));
   }
@@ -22,6 +25,13 @@ function applyRequestMode(input: any) {
       liveAuto: input?.liveAuto === undefined ? undefined : Boolean(input.liveAuto),
     };
     scanner.setRequestMode(requested, Boolean(input?.auto), automation);
+  }
+}
+
+function applyReadMode(input: any) {
+  const requested = String(input?.mode ?? "").toUpperCase();
+  if (requested === "PAPER" || requested === "TESTNET" || requested === "LIVE") {
+    scanner.setRequestMode(requested);
   }
 }
 
@@ -60,17 +70,7 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/state", async (req, res) => {
   try {
     await ensureStarted();
-    applyRequestMode({
-      mode: req.get("x-dealdost-mode"),
-      auto: req.get("x-dealdost-auto") === "true",
-      paperAuto: req.get("x-dealdost-paper-auto") === "true" ||
-        req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "PAPER",
-      testnetAuto: req.get("x-dealdost-testnet-auto") === "true" ||
-        req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "TESTNET",
-      liveAuto: req.get("x-dealdost-live-auto") === "true" ||
-        req.get("x-dealdost-auto") === "true" && req.get("x-dealdost-mode") === "LIVE",
-      emergencyStop: req.get("x-dealdost-emergency-stop") === "true",
-    });
+    applyReadMode({ mode: req.get("x-dealdost-mode") });
     await scanner.serverlessTick();
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
     res.json(scanner.state());
@@ -83,7 +83,7 @@ app.post("/api/market/ingest", async (req, res) => {
   try {
     await ensureStarted();
     const body = req.body ?? {};
-    applyRequestMode(body);
+    applyReadMode({ mode: body.mode });
     scanner.restorePaperRuntime(body.paperState, body.rotationState);
     const universe = Array.isArray(body.universe) ? body.universe : [];
     const symbol = String(body.symbol ?? "").toUpperCase();
@@ -125,7 +125,6 @@ app.post("/api/mode", async (req, res) => {
       res.status(400).json({ error: "invalid_mode" });
       return;
     }
-    if (body.emergencyStop !== undefined) scanner.setEmergencyStop(Boolean(body.emergencyStop));
     scanner.setRequestMode(mode, Boolean(body.auto ?? body.testnetAuto ?? body.liveAuto), {
       paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
       testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),

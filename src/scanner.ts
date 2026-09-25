@@ -35,7 +35,9 @@ export class BinanceScanner extends EventEmitter {
   private testnetState = this.testnet.emptyState();
   private liveState = this.live.emptyState();
   private mode: "PAPER" | "TESTNET" | "LIVE" = "PAPER";
-  private testnetAuto = false;
+  // Optional deployment-level opt-in for persistent TESTNET automation.
+  // Default remains OFF; the dashboard switch can still enable/disable it.
+  private testnetAuto = config.testnetAutoStart;
   private liveAuto = false;
   private testnetExecutionInFlight = false;
   private liveExecutionInFlight = false;
@@ -346,9 +348,10 @@ export class BinanceScanner extends EventEmitter {
       this.testnetAuto = auto;
     }
 
-    // Execution AUTO is never armed from a request alone. It requires the
-    // account to be configured, execution-enabled, and currently connected.
-    if (this.testnetAuto && (!this.testnet.isExecutionEnabled() || !this.testnetState.connected || this.testnetState.error)) {
+    // Never allow a request to arm execution when the deployment flag is OFF.
+    // Temporary connection/reconciliation errors must not silently toggle AUTO
+    // back OFF; the execution cycle itself fails closed until the account recovers.
+    if (this.testnetAuto && !this.testnet.isExecutionEnabled()) {
       this.testnetAuto = false;
     }
 
@@ -358,7 +361,7 @@ export class BinanceScanner extends EventEmitter {
       this.liveAuto = auto;
     }
 
-    if (this.liveAuto && (!this.live.isExecutionEnabled() || !this.liveState.connected || this.liveState.error)) {
+    if (this.liveAuto && !this.live.isExecutionEnabled()) {
       this.liveAuto = false;
     }
 
@@ -389,6 +392,9 @@ export class BinanceScanner extends EventEmitter {
     this.mode = "TESTNET";
     if (enabled && this.risk.snapshot().emergencyStop) {
       throw new Error("EMERGENCY_ENTRY_STOP");
+    }
+    if (enabled && !this.testnet.isExecutionEnabled()) {
+      throw new Error("TESTNET_EXECUTION_LOCKED");
     }
     this.testnetAuto = Boolean(enabled);
     this.emit("update");
@@ -949,8 +955,10 @@ export class BinanceScanner extends EventEmitter {
     // dashboard mode controls which account is shown, but never disables the
     // other explicitly-enabled simulator/execution engine.
     if (this.paper.getAuto()) this.tryPaperEntries();
-    if (this.mode === "TESTNET" && this.testnetAuto) void this.tryTestnetEntries();
-    if (this.mode === "LIVE" && this.liveAuto) void this.tryLiveEntries();
+    // Execution engines are independent of the selected dashboard view.
+    // TESTNET/LIVE continue to run when the user is viewing PAPER.
+    if (this.testnetAuto) void this.tryTestnetEntries();
+    if (this.liveAuto) void this.tryLiveEntries();
   }
 
   private tryPaperEntries() {
@@ -1070,10 +1078,12 @@ export class BinanceScanner extends EventEmitter {
       }
     };
 
-    if (this.mode === "TESTNET" && this.testnet.isExecutionEnabled()) {
+    // TP management is also independent of the selected dashboard view.
+    // An open protected position must be managed even while the UI shows PAPER.
+    if (this.testnet.isExecutionEnabled()) {
       maybeClose("TESTNET", this.testnetState.positions);
     }
-    if (this.mode === "LIVE" && this.live.isExecutionEnabled()) {
+    if (this.live.isExecutionEnabled()) {
       maybeClose("LIVE", this.liveState.positions);
     }
   }

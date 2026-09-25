@@ -827,28 +827,12 @@ export class TestnetClient {
     // protections; cleanup errors do not reopen exposure and will be retried
     // by normal TESTNET reconciliation.
     try {
-      const [normalOrders, algoOrders] = await Promise.all([
-        this.signedGet<OrderRow[]>("/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol)),
-        this.signedGet<AlgoOrderRow[]>("/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol)),
-      ]);
-
-      for (const protection of normalOrders) {
-        const clientId = String(protection.clientOrderId ?? "");
-        const closePosition = protection.closePosition === true || String(protection.closePosition).toLowerCase() === "true";
-        if (
-          protection.status === "NEW" &&
-          closePosition &&
-          (protection.type === "STOP_MARKET" || protection.type === "TAKE_PROFIT_MARKET") &&
-          clientId.startsWith("DDT-") &&
-          (protection.orderId !== undefined || protection.clientOrderId)
-        ) {
-          await this.signedDelete<any>("/fapi/v1/order", {
-            symbol,
-            orderId: protection.orderId === undefined ? "" : String(protection.orderId),
-            origClientOrderId: protection.orderId === undefined ? clientId : "",
-          });
-        }
-      }
+      // DDT STOP/TP protections are Algo orders after Binance's 2026
+      // USDⓈ-M conditional-order migration. Clean up only that authoritative
+      // protection store after the close is confirmed.
+      const algoOrders = await this.signedGet<AlgoOrderRow[]>(
+        "/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol),
+      );
 
       for (const protection of algoOrders) {
         const clientId = String(protection.clientAlgoId ?? "");
@@ -980,16 +964,16 @@ export class TestnetClient {
   }
 
   private async getOpenOrders(symbol: string): Promise<OrderRow[]> {
-    const [normalOrders, algoOrders] = await Promise.all([
-      this.signedGet<OrderRow[]>(
-        "/fapi/v1/openOrders?symbol=" + encodeURIComponent(symbol),
-      ),
-      this.signedGet<AlgoOrderRow[]>(
-        "/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol),
-      ),
-    ]);
+    // Since the 2026 USDⓈ-M conditional-order migration, DealDost protection
+    // orders are created through the Algo service. Do not hit the legacy
+    // /fapi/v1/openOrders endpoint for protection reconciliation: it is not
+    // needed for DDT-managed STOP/TP and was the source of repeated TESTNET
+    // symbol-scoped timeouts.
+    const algoOrders = await this.signedGet<AlgoOrderRow[]>(
+      "/fapi/v1/openAlgoOrders?symbol=" + encodeURIComponent(symbol),
+    );
 
-    const normalizedAlgoOrders: OrderRow[] = algoOrders.map((order) => ({
+    return algoOrders.map((order) => ({
       symbol: order.symbol,
       side: order.side,
       type: order.orderType,
@@ -1001,8 +985,6 @@ export class TestnetClient {
       time: order.createTime,
       updateTime: order.updateTime,
     }));
-
-    return [...normalOrders, ...normalizedAlgoOrders];
   }
 
   private async cleanupStaleProtectionOrders(openSymbols: Set<string>) {

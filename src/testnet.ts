@@ -133,6 +133,10 @@ export class TestnetClient {
     positions: PositionRow[];
   }>;
   private readonly accountReadCacheMs = 3000;
+  private serverTimeOffsetMs = 0;
+  private serverTimeAt = 0;
+  private serverTimeInFlight?: Promise<number>;
+  private readonly serverTimeCacheMs = 30_000;
 
   private get baseUrl() {
     return this.profile === "LIVE" ? config.liveRestBase : config.testnetRestBase;
@@ -964,6 +968,35 @@ export class TestnetClient {
     return "/fapi/v1/income?incomeType=" + type + "&startTime=" + effectiveStart + "&limit=1000";
   }
 
+  private async getServerTimeOffset(forceRefresh = false): Promise<number> {
+    const now = Date.now();
+    if (!forceRefresh && now - this.serverTimeAt < this.serverTimeCacheMs) {
+      return this.serverTimeOffsetMs;
+    }
+    if (this.serverTimeInFlight) return this.serverTimeInFlight;
+
+    this.serverTimeInFlight = (async () => {
+      const requestStarted = Date.now();
+      const result = await this.publicGet<{ serverTime?: number }>("/fapi/v1/time");
+      const requestFinished = Date.now();
+      const serverTime = Number(result.serverTime ?? 0);
+      if (!Number.isFinite(serverTime) || serverTime <= 0) {
+        throw new Error("Binance " + this.profile + " server time unavailable");
+      }
+
+      // Estimate the offset using the midpoint of the request so network
+      // latency does not become part of the signed timestamp skew.
+      const midpoint = Math.floor((requestStarted + requestFinished) / 2);
+      this.serverTimeOffsetMs = serverTime - midpoint;
+      this.serverTimeAt = requestFinished;
+      return this.serverTimeOffsetMs;
+    })().finally(() => {
+      this.serverTimeInFlight = undefined;
+    });
+
+    return this.serverTimeInFlight;
+  }
+
   private async getAccountRead(): Promise<{
     balances: BalanceRow[];
     positions: PositionRow[];
@@ -1328,9 +1361,12 @@ export class TestnetClient {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt > 0) this.serverTimeAt = 0;
+      const serverTimeOffset = await this.getServerTimeOffset(attempt > 0);
+
       const params = new URLSearchParams(rawQuery);
       params.set("recvWindow", "5000");
-      params.set("timestamp", String(Date.now()));
+      params.set("timestamp", String(Date.now() + serverTimeOffset));
       const signature = createHmac("sha256", this.apiSecret)
         .update(params.toString())
         .digest("hex");
@@ -1347,15 +1383,26 @@ export class TestnetClient {
 
         const body = await response.text();
         if (!response.ok) {
-          throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
+          const error = new Error(
+            "Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300),
+          );
+          if (body.includes('"code":-1021') && attempt === 0) {
+            lastError = error;
+            continue;
+          }
+          throw error;
         }
 
         return JSON.parse(body) as T;
       } catch (error) {
         lastError = error;
         const timedOut = error instanceof DOMException && error.name === "TimeoutError";
-        if (!timedOut || attempt === 1) break;
-        await new Promise((resolve) => setTimeout(resolve, 350));
+        const timestampRejected = error instanceof Error && error.message.includes('"code":-1021');
+        if ((timedOut || timestampRejected) && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          continue;
+        }
+        break;
       }
     }
 
@@ -1365,59 +1412,106 @@ export class TestnetClient {
     throw new Error("Binance " + this.profile + " signed request failed: " + pathname + " • " +
       (lastError instanceof Error ? lastError.message : String(lastError)));
   }
-
   private async signedDelete<T>(path: string, payload: Record<string, string>): Promise<T> {
-    const params = new URLSearchParams(
-      Object.fromEntries(Object.entries(payload).filter(([, value]) => value)),
-    );
-    params.set("recvWindow", "5000");
-    params.set("timestamp", String(Date.now()));
+    let lastError: unknown;
 
-    const signature = createHmac("sha256", this.apiSecret)
-      .update(params.toString())
-      .digest("hex");
-    params.set("signature", signature);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt > 0) this.serverTimeAt = 0;
+      const serverTimeOffset = await this.getServerTimeOffset(attempt > 0);
+      const params = new URLSearchParams(
+        Object.fromEntries(Object.entries(payload).filter(([, value]) => value)),
+      );
+      params.set("recvWindow", "5000");
+      params.set("timestamp", String(Date.now() + serverTimeOffset));
 
-    const response = await fetch(this.baseUrl + path + "?" + params.toString(), {
-      method: "DELETE",
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        "X-MBX-APIKEY": this.apiKey,
-        "User-Agent": "DealDost/2.4",
-      },
-    });
+      const signature = createHmac("sha256", this.apiSecret)
+        .update(params.toString())
+        .digest("hex");
+      params.set("signature", signature);
 
-    const body = await response.text();
-    if (!response.ok) {
-      throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
+      try {
+        const response = await fetch(this.baseUrl + path + "?" + params.toString(), {
+          method: "DELETE",
+          signal: AbortSignal.timeout(10_000),
+          headers: {
+            "X-MBX-APIKEY": this.apiKey,
+            "User-Agent": "DealDost/2.4",
+          },
+        });
+
+        const body = await response.text();
+        if (!response.ok) {
+          const error = new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
+          if (body.includes('"code":-1021') && attempt === 0) {
+            lastError = error;
+            continue;
+          }
+          throw error;
+        }
+        return JSON.parse(body) as T;
+      } catch (error) {
+        lastError = error;
+        if (error instanceof Error && error.message.includes('"code":-1021') && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          continue;
+        }
+        break;
+      }
     }
-    return JSON.parse(body) as T;
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Binance " + this.profile + " signed DELETE failed: " + path);
   }
-
   private async signedPost<T>(path: string, payload: Record<string, string>): Promise<T> {
-    const params = new URLSearchParams(payload);
-    params.set("recvWindow", "5000");
-    params.set("timestamp", String(Date.now()));
+    let lastError: unknown;
 
-    const signature = createHmac("sha256", this.apiSecret)
-      .update(params.toString())
-      .digest("hex");
-    params.set("signature", signature);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt > 0) this.serverTimeAt = 0;
+      const serverTimeOffset = await this.getServerTimeOffset(attempt > 0);
+      const params = new URLSearchParams(payload);
+      params.set("recvWindow", "5000");
+      params.set("timestamp", String(Date.now() + serverTimeOffset));
 
-    const response = await fetch(this.baseUrl + path + "?" + params.toString(), {
-      method: "POST",
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        "X-MBX-APIKEY": this.apiKey,
-        "User-Agent": "DealDost/2.4",
-      },
-    });
+      const signature = createHmac("sha256", this.apiSecret)
+        .update(params.toString())
+        .digest("hex");
+      params.set("signature", signature);
 
-    const body = await response.text();
-    if (!response.ok) {
-      throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
+      try {
+        const response = await fetch(this.baseUrl + path + "?" + params.toString(), {
+          method: "POST",
+          signal: AbortSignal.timeout(10_000),
+          headers: {
+            "X-MBX-APIKEY": this.apiKey,
+            "User-Agent": "DealDost/2.4",
+          },
+        });
+
+        const body = await response.text();
+        if (!response.ok) {
+          const error = new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
+          if (body.includes('"code":-1021') && attempt === 0) {
+            lastError = error;
+            continue;
+          }
+          throw error;
+        }
+
+        return JSON.parse(body) as T;
+      } catch (error) {
+        lastError = error;
+        if (error instanceof Error && error.message.includes('"code":-1021') && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          continue;
+        }
+        break;
+      }
     }
 
-    return JSON.parse(body) as T;
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Binance " + this.profile + " signed POST failed: " + path);
+  }
   }
 }

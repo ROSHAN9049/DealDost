@@ -626,12 +626,16 @@ export class BinanceScanner extends EventEmitter {
       if (message.includes("-2015") || message.includes("Invalid API-key") || message.includes(" 401:")) {
         this.testnetAuto = false;
       }
+      // Preserve the last authoritative TESTNET state on transient Binance
+      // read failures. Never display a fake zero-balance/zero-position state
+      // simply because one reconciliation request timed out.
       this.testnetState = {
-        ...this.testnet.emptyState(),
+        ...this.testnetState,
         configured: this.testnet.isConfigured(),
         executionEnabled: this.testnet.isExecutionEnabled(),
         auto: this.testnetAuto,
         error: message,
+        lastSyncAt: Date.now(),
       };
       this.lastTestnetSyncAt = Date.now();
       this.emit("update");

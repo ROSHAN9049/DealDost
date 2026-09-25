@@ -195,13 +195,23 @@ export class TestnetClient {
     const { balances, positions } = await this.getAccountRead();
 
     if (this.isExecutionEnabled()) {
-      await this.cleanupStaleProtectionOrders(
-        new Set(
-          positions
-            .filter((row) => Math.abs(Number(row.positionAmt ?? 0)) > 0)
-            .map((row) => String(row.symbol ?? "").toUpperCase()),
-        ),
-      );
+      try {
+        await this.cleanupStaleProtectionOrders(
+          new Set(
+            positions
+              .filter((row) => Math.abs(Number(row.positionAmt ?? 0)) > 0)
+              .map((row) => String(row.symbol ?? "").toUpperCase()),
+          ),
+        );
+      } catch (error) {
+        // Protection cleanup is maintenance, not the authoritative account
+        // read. A transient cleanup timeout must not blank the account or
+        // interrupt position reconciliation.
+        console.warn(
+          "[testnet stale protection cleanup]",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
 
     const usdt = balances.find((row) => row.asset === "USDT");
@@ -991,7 +1001,7 @@ export class TestnetClient {
 
     this.accountReadInFlight = Promise.all([
       this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
-      this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
+      this.getPositionRisk(),
     ])
       .then(([balances, positions]) => {
         this.accountReadCache = {
@@ -1001,11 +1011,42 @@ export class TestnetClient {
         };
         return { balances, positions };
       })
+      .catch((error) => {
+        // A transient account-read failure must not erase the last known
+        // exchange state. Reconciliation callers can continue using the most
+        // recent authoritative snapshot until Binance recovers.
+        if (this.accountReadCache) {
+          console.warn(
+            "[testnet account read stale fallback]",
+            error instanceof Error ? error.message : String(error),
+          );
+          return {
+            balances: this.accountReadCache.balances,
+            positions: this.accountReadCache.positions,
+          };
+        }
+        throw error;
+      })
       .finally(() => {
         this.accountReadInFlight = undefined;
       });
 
     return this.accountReadInFlight;
+  }
+
+  private async getPositionRisk(): Promise<PositionRow[]> {
+    try {
+      return await this.signedGet<PositionRow[]>("/fapi/v3/positionRisk");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("/fapi/v3/positionRisk")) throw error;
+
+      // Keep v3 as the primary endpoint. If Demo v3 is temporarily slow,
+      // fall back to the proven v2 position-risk response so one flaky
+      // endpoint does not block account reconciliation.
+      console.warn("[testnet positionRisk v3 fallback]", message);
+      return await this.signedGet<PositionRow[]>("/fapi/v2/positionRisk");
+    }
   }
 
   private async getRecentOrders(symbol: string): Promise<OrderRow[]> {

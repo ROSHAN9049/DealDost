@@ -170,7 +170,7 @@ export class BinanceScanner extends EventEmitter {
   ) {
     const symbols = [
       ...this.symbols.keys(),
-      ...this.signals.values().map((signal) => signal.symbol),
+      ...[...this.signals.values()].map((signal) => signal.symbol),
       ...this.testnetState.positions.map((position) => position.symbol),
       ...this.liveState.positions.map((position) => position.symbol),
     ];

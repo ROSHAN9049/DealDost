@@ -1485,5 +1485,4 @@ export class TestnetClient {
       ? lastError
       : new Error("Binance " + this.profile + " signed POST failed: " + path);
   }
-  }
 }

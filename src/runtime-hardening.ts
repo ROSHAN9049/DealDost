@@ -62,17 +62,40 @@ async function getCloseNetPnl(client: TestnetClient, symbol: string, orderId: st
   const api = client as any;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const rows = await api.getUserTradesForAnalytics(
-        Date.now() - 120_000,
-        Date.now(),
-        [symbol],
-      );
-      const fills = (Array.isArray(rows) ? rows : [])
-        .filter((row: any) => String(row.orderId ?? "") === String(orderId));
+      const now = Date.now();
+      const rows = await api.getUserTradesForAnalytics(now - 120_000, now, [symbol]);
+      const fills = Array.isArray(rows) ? rows : [];
+      const closeFills = fills.filter((row: any) => String(row.orderId ?? "") === String(orderId));
 
-      if (fills.length) {
-        const realized = fills.reduce((sum: number, row: any) => sum + Number(row.realizedPnl ?? 0), 0);
-        const fees = fills.reduce((sum: number, row: any) => {
+      if (closeFills.length) {
+        const recentOrders = await api.getRecentOrders(symbol);
+        const closeOrder = recentOrders.find((row: any) => String(row.orderId ?? "") === String(orderId));
+        const closeTime = Number(closeOrder?.time ?? closeOrder?.updateTime ?? now);
+        const entryOrder = recentOrders
+          .filter((row: any) => {
+            const id = String(row.clientOrderId ?? "");
+            const time = Number(row.time ?? row.updateTime ?? 0);
+            return row.status === "FILLED" &&
+              String(row.type ?? "") === "MARKET" &&
+              !row.reduceOnly &&
+              !row.closePosition &&
+              (id.startsWith("DDT-MOM-") || id.startsWith("DDT-SCALP-")) &&
+              time > 0 &&
+              time <= closeTime;
+          })
+          .sort((a: any, b: any) =>
+            Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0),
+          )[0];
+
+        const feeOrderIds = new Set<string>([String(orderId)]);
+        if (entryOrder?.orderId !== undefined) feeOrderIds.add(String(entryOrder.orderId));
+
+        const relatedFills = fills.filter((row: any) => feeOrderIds.has(String(row.orderId ?? "")));
+        const realized = closeFills.reduce(
+          (sum: number, row: any) => sum + Number(row.realizedPnl ?? 0),
+          0,
+        );
+        const fees = relatedFills.reduce((sum: number, row: any) => {
           const asset = String(row.commissionAsset ?? "").toUpperCase();
           return sum + (asset === "USDT" ? Math.abs(Number(row.commission ?? 0)) : 0);
         }, 0);
@@ -312,7 +335,7 @@ async function patchExchangeAnalytics(client: TestnetClient, base: any, symbols:
     .sort((a: any, b: any) => Number(b.time) - Number(a.time))
     .slice(0, 50);
 
-  const ddtEntries = trades.filter((row: any) =>
+  const ddtEntries = fullOrderRows.filter((row: any) =>
     row.status === "FILLED" &&
     !row.reduceOnly &&
     !row.closePosition &&
@@ -510,6 +533,22 @@ export function applyRuntimeHardening() {
   };
 
   const scannerProto = BinanceScanner.prototype as any;
+  const originalTryTestnetEntries = scannerProto.tryTestnetEntries;
+  if (typeof originalTryTestnetEntries === "function") {
+    scannerProto.tryTestnetEntries = async function (...args: any[]) {
+      applyScannerClientAssociation(this);
+      return originalTryTestnetEntries.apply(this, args);
+    };
+  }
+
+  const originalTryLiveEntries = scannerProto.tryLiveEntries;
+  if (typeof originalTryLiveEntries === "function") {
+    scannerProto.tryLiveEntries = async function (...args: any[]) {
+      applyScannerClientAssociation(this);
+      return originalTryLiveEntries.apply(this, args);
+    };
+  }
+
   const originalScannerState = scannerProto.state;
   if (!scannerProto.__dealdostRuntimeStatePatched) {
     scannerProto.__dealdostRuntimeStatePatched = true;

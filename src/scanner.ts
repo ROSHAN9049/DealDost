@@ -1350,7 +1350,9 @@ export class BinanceScanner extends EventEmitter {
         // TRADING USDT perpetual; silently skip it instead of poisoning the
         // execution status for the whole scanner cycle.
         if (!(await this.testnet.isTradablePerpetual(signal.symbol))) {
-          lastEntryFailure = signal.symbol + " not available as active TESTNET USDT perpetual";
+          // A signal can exist in the public/live market universe while the
+          // Binance Demo environment does not list that contract. This is a
+          // normal eligibility skip, not an execution/API error.
           continue;
         }
         if (signal.engine === "MOMENTUM" && momentum >= config.testnetMaxMomentumPositions) continue;

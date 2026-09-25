@@ -138,6 +138,8 @@ export class TestnetClient {
   private serverTimeInFlight?: Promise<number>;
   private readonly serverTimeCacheMs = 30_000;
   private executionSnapshotInFlight?: Promise<TestnetExecutionSnapshot>;
+  private readonly lastClosedAtCache = new Map<string, { at: number; value: number }>();
+  private readonly lastClosedAtCacheMs = 2_000;
 
   private get baseUrl() {
     return this.profile === "LIVE" ? config.liveRestBase : config.testnetRestBase;
@@ -336,6 +338,9 @@ export class TestnetClient {
         ]);
         const engine = this.detectEngine(orders);
         const lastClosedAt = this.detectLastClosedAt(orders);
+        if (lastClosedAt > 0) {
+          this.lastClosedAtCache.set(symbol, { at: Date.now(), value: lastClosedAt });
+        }
         const protection = this.getProtectionStatus(openOrders);
         return { row, symbol, orders, openOrders, engine, lastClosedAt, protection };
       }),
@@ -894,6 +899,10 @@ export class TestnetClient {
       );
     }
 
+    // Seed the cooldown cache with the confirmed exchange close time so a
+    // subsequent entry attempt cannot immediately re-enter the same symbol.
+    this.lastClosedAtCache.set(symbol, { at: Date.now(), value: Date.now() });
+
     return {
       symbol,
       side: position.side,
@@ -1135,6 +1144,20 @@ export class TestnetClient {
       console.warn("[testnet positionRisk v3 fallback]", message);
       return await this.signedGet<PositionRow[]>("/fapi/v2/positionRisk");
     }
+  }
+
+  async getLastClosedAt(symbolInput: string): Promise<number> {
+    const symbol = symbolInput.toUpperCase();
+    const now = Date.now();
+    const cached = this.lastClosedAtCache.get(symbol);
+    if (cached && now - cached.at < this.lastClosedAtCacheMs) {
+      return cached.value;
+    }
+
+    const orders = await this.getRecentOrders(symbol);
+    const value = this.detectLastClosedAt(orders);
+    this.lastClosedAtCache.set(symbol, { at: now, value });
+    return value;
   }
 
   private async getRecentOrders(symbol: string): Promise<OrderRow[]> {

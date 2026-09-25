@@ -136,11 +136,6 @@ async function directScannerFallback() {
     cache: "no-store",
     body: JSON.stringify({
       mode: requestMode,
-      auto: requestMode === "PAPER" ? paperAuto : requestMode === "TESTNET" ? testnetAuto : liveAuto,
-      paperAuto,
-      testnetAuto,
-      liveAuto,
-      emergencyStop,
       ...loadPaperRuntime(),
       universe: top.map((t) => ({
         symbol: t.symbol,

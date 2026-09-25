@@ -163,6 +163,17 @@ app.post("/api/risk/emergency-stop", async (req, res) => {
   }
 });
 
+app.post("/api/testnet/preflight", async (_req, res) => {
+  try {
+    await ensureStarted();
+    const result = await scanner.testnetPreflight();
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.json(result);
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.post("/api/testnet/protection-sync", async (req, res) => {
   try {
     await ensureStarted();

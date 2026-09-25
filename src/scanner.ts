@@ -158,6 +158,10 @@ export class BinanceScanner extends EventEmitter {
     );
   }
 
+  async testnetPreflight() {
+    return this.testnet.preflight();
+  }
+
   async accountAnalytics(
     mode: "TESTNET" | "LIVE",
     days = 30,

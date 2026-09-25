@@ -309,6 +309,45 @@ async function toggleTestnetAuto() {
   }
 }
 
+async function runTestnetPreflight() {
+  const button = $("testnetPreflight");
+  const output = $("testnetPreflightResult");
+  if (button) button.disabled = true;
+  if (output) {
+    output.hidden = false;
+    output.className = "muted";
+    output.textContent = "Running non-trading Binance Demo order test…";
+  }
+
+  try {
+    const response = await fetch("/api/testnet/preflight", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store"
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body?.ok) {
+      const message = body?.reason || body?.error || ("HTTP " + response.status);
+      throw new Error(message);
+    }
+    if (output) {
+      output.className = "muted";
+      output.textContent =
+        "PREFLIGHT PASS • trading endpoint accepted test request • " +
+        body.symbol + " qty " + body.quantity +
+        " • account $" + Number(body.balanceUsd || 0).toFixed(2) +
+        " • no order was created";
+    }
+  } catch (error) {
+    if (output) {
+      output.className = "muted error";
+      output.textContent = "PREFLIGHT FAILED • " + (error instanceof Error ? error.message : String(error));
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 async function toggleLiveAuto() {
   if ($("liveAuto").dataset.executionEnabled !== "true") {
     showApiError("LIVE execution is locked. Enable BINANCE_LIVE_EXECUTION_ENABLED only after reviewing the 16-gate safety path.");
@@ -1066,6 +1105,7 @@ async function load() {
 
 $("paperAuto").onclick = togglePaperAuto;
 $("testnetAuto")?.addEventListener("click", toggleTestnetAuto);
+$("testnetPreflight")?.addEventListener("click", runTestnetPreflight);
 $("liveAuto")?.addEventListener("click", toggleLiveAuto);
 $("emergencyStop")?.addEventListener("click", toggleEmergencyStop);
 $("analyticsRefresh")?.addEventListener("click", () => {

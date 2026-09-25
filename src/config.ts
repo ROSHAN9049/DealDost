@@ -30,6 +30,7 @@ export const config = {
   testnetApiKey: credential("BINANCE_TESTNET_API_KEY"),
   testnetApiSecret: credential("BINANCE_TESTNET_API_SECRET"),
   testnetExecutionEnabled: bool("BINANCE_TESTNET_EXECUTION_ENABLED", false),
+  testnetAutoStart: bool("BINANCE_TESTNET_AUTO_START", false),
   liveRestBase: (process.env.BINANCE_LIVE_REST_BASE ?? "https://fapi.binance.com").replace(/\/+$/, ""),
   liveApiKey: credential("BINANCE_LIVE_API_KEY"),
   liveApiSecret: credential("BINANCE_LIVE_API_SECRET"),

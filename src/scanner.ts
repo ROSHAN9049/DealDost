@@ -1566,7 +1566,11 @@ export class BinanceScanner extends EventEmitter {
             quantity,
             stopPrice: signal.stop,
             takeProfitPrice: signal.takeProfit1,
-            clientOrderId: "DDT-" + (signal.engine === "MOMENTUM" ? "MOM-" : "SCALP-") + signal.symbol + "-" + signal.signalId.slice(-10),
+            // Engine prefix + symbol attribution + unique per-entry suffix.
+            // Never reuse a signal-derived client ID for repeated/future entries.
+            clientOrderId: "DDT-" +
+              (signal.engine === "MOMENTUM" ? "MOM-" : "SCALP-") +
+              signal.symbol + "-" + Date.now().toString(36),
           });
 
           total += 1;

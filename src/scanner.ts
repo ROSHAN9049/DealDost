@@ -1273,7 +1273,6 @@ export class BinanceScanner extends EventEmitter {
   private async tryTestnetEntries() {
     if (
       this.risk.snapshot().emergencyStop ||
-      this.mode !== "TESTNET" ||
       !this.testnetAuto ||
       !this.testnet.isExecutionEnabled() ||
       this.testnetExecutionInFlight
@@ -1338,6 +1337,9 @@ export class BinanceScanner extends EventEmitter {
         })
         .sort((a, b) => b.quality.total - a.quality.total);
 
+      let lastEntryFailure: string | null = null;
+      let entryPlaced = false;
+
       for (const signal of candidates) {
         if (total >= config.testnetMaxTotalPositions) break;
         if (usedSymbols.has(signal.symbol)) continue;
@@ -1347,7 +1349,10 @@ export class BinanceScanner extends EventEmitter {
         // symbol that the exchangeInfo does not currently expose as a
         // TRADING USDT perpetual; silently skip it instead of poisoning the
         // execution status for the whole scanner cycle.
-        if (!(await this.testnet.isTradablePerpetual(signal.symbol))) continue;
+        if (!(await this.testnet.isTradablePerpetual(signal.symbol))) {
+          lastEntryFailure = signal.symbol + " not available as active TESTNET USDT perpetual";
+          continue;
+        }
         if (signal.engine === "MOMENTUM" && momentum >= config.testnetMaxMomentumPositions) continue;
         if (signal.engine === "SCALPING" && scalping >= config.testnetMaxScalpingPositions) continue;
 
@@ -1383,14 +1388,17 @@ export class BinanceScanner extends EventEmitter {
 
           this.testnetState.error = null;
           console.info("[testnet entry]", result);
+          entryPlaced = true;
           // One new entry per execution cycle keeps balance/risk sizing
           // authoritative and avoids a burst of orders from one stale snapshot.
           break;
         } catch (error) {
+          lastEntryFailure = signal.symbol + " " + signal.engine + ": " +
+            (error instanceof Error ? error.message : String(error));
           this.testnetState = {
             ...this.testnetState,
             auto: this.testnetAuto,
-            error: error instanceof Error ? error.message : String(error),
+            error: lastEntryFailure,
             lastSyncAt: Date.now(),
           };
         }
@@ -1415,10 +1423,9 @@ export class BinanceScanner extends EventEmitter {
         netPnlTodayUsd: refreshed.netPnlTodayUsd,
         positions: refreshed.positions,
         lastSyncAt: Date.now(),
-        // A successful exchange reconciliation clears stale candidate/order
-        // errors from the dashboard. Genuine execution failures are still
-        // surfaced during the cycle in which they occur.
-        error: null,
+        // Preserve a real entry failure until the next successful cycle so
+        // the dashboard does not hide why a CONFIRMED signal was skipped.
+        error: entryPlaced || !lastEntryFailure ? null : lastEntryFailure,
       };
     } catch (error) {
       this.testnetState = {
@@ -1435,7 +1442,6 @@ export class BinanceScanner extends EventEmitter {
   private async tryLiveEntries() {
     if (
       this.risk.snapshot().emergencyStop ||
-      this.mode !== "LIVE" ||
       !this.liveAuto ||
       !this.live.isExecutionEnabled() ||
       this.liveExecutionInFlight

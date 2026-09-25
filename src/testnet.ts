@@ -630,7 +630,6 @@ export class TestnetClient {
         userTradeRows: userTrades.length,
         note: "Fees and realized P&L are account-level Binance income data and may include activity outside DealDost. DDT order rows are scanned across tracked symbols for the latest Binance-valid 7-day allOrders window. Close-order fill price and per-order realized P&L are enriched from Binance userTrades when available. Signal stage/quality remain unset for historical exchange rows because that metadata was not persisted to Binance.",
       }
-      },
     };
   }
 

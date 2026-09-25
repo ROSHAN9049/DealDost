@@ -123,6 +123,17 @@ export class TestnetClient {
   private exchangeInfo?: ExchangeInfo;
   private exchangeInfoAt = 0;
 
+  private accountReadCache?: {
+    at: number;
+    balances: BalanceRow[];
+    positions: PositionRow[];
+  };
+  private accountReadInFlight?: Promise<{
+    balances: BalanceRow[];
+    positions: PositionRow[];
+  }>;
+  private readonly accountReadCacheMs = 3000;
+
   private get baseUrl() {
     return this.profile === "LIVE" ? config.liveRestBase : config.testnetRestBase;
   }
@@ -177,10 +188,7 @@ export class TestnetClient {
       return { ...base, lastSyncAt: Date.now() };
     }
 
-    const [balances, positions] = await Promise.all([
-      this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
-      this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
-    ]);
+    const { balances, positions } = await this.getAccountRead();
 
     if (this.isExecutionEnabled()) {
       await this.cleanupStaleProtectionOrders(
@@ -277,9 +285,8 @@ export class TestnetClient {
       };
     }
 
-    const [balances, positions, income, commission] = await Promise.all([
-      this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
-      this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
+    const [{ balances, positions }, income, commission] = await Promise.all([
+      this.getAccountRead(),
       this.signedGet<IncomeRow[]>(this.incomePath("REALIZED_PNL")),
       this.signedGet<IncomeRow[]>(this.incomePath("COMMISSION")),
     ]);
@@ -957,6 +964,39 @@ export class TestnetClient {
     return "/fapi/v1/income?incomeType=" + type + "&startTime=" + effectiveStart + "&limit=1000";
   }
 
+  private async getAccountRead(): Promise<{
+    balances: BalanceRow[];
+    positions: PositionRow[];
+  }> {
+    const now = Date.now();
+    if (this.accountReadCache && now - this.accountReadCache.at < this.accountReadCacheMs) {
+      return {
+        balances: this.accountReadCache.balances,
+        positions: this.accountReadCache.positions,
+      };
+    }
+
+    if (this.accountReadInFlight) return this.accountReadInFlight;
+
+    this.accountReadInFlight = Promise.all([
+      this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
+      this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
+    ])
+      .then(([balances, positions]) => {
+        this.accountReadCache = {
+          at: Date.now(),
+          balances,
+          positions,
+        };
+        return { balances, positions };
+      })
+      .finally(() => {
+        this.accountReadInFlight = undefined;
+      });
+
+    return this.accountReadInFlight;
+  }
+
   private async getRecentOrders(symbol: string): Promise<OrderRow[]> {
     return this.signedGet<OrderRow[]>(
       "/fapi/v1/allOrders?symbol=" + encodeURIComponent(symbol) + "&limit=50",
@@ -1285,37 +1325,45 @@ export class TestnetClient {
 
   private async signedGet<T>(path: string): Promise<T> {
     const [pathname, rawQuery = ""] = path.split("?");
-    const params = new URLSearchParams(rawQuery);
-    params.set("recvWindow", "5000");
-    params.set("timestamp", String(Date.now()));
-    const signature = createHmac("sha256", this.apiSecret)
-      .update(params.toString())
-      .digest("hex");
-    params.set("signature", signature);
+    let lastError: unknown;
 
-    let response: Response;
-    try {
-      response = await fetch(this.baseUrl + pathname + "?" + params.toString(), {
-        signal: AbortSignal.timeout(7000),
-        headers: {
-          "X-MBX-APIKEY": this.apiKey,
-          "User-Agent": "DealDost/2.4",
-        },
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "TimeoutError") {
-        throw new Error("Binance " + this.profile + " signed timeout: " + pathname);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const params = new URLSearchParams(rawQuery);
+      params.set("recvWindow", "5000");
+      params.set("timestamp", String(Date.now()));
+      const signature = createHmac("sha256", this.apiSecret)
+        .update(params.toString())
+        .digest("hex");
+      params.set("signature", signature);
+
+      try {
+        const response = await fetch(this.baseUrl + pathname + "?" + params.toString(), {
+          signal: AbortSignal.timeout(7000),
+          headers: {
+            "X-MBX-APIKEY": this.apiKey,
+            "User-Agent": "DealDost/2.4",
+          },
+        });
+
+        const body = await response.text();
+        if (!response.ok) {
+          throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
+        }
+
+        return JSON.parse(body) as T;
+      } catch (error) {
+        lastError = error;
+        const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+        if (!timedOut || attempt === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 350));
       }
-      throw new Error("Binance " + this.profile + " signed request failed: " + pathname + " • " +
-        (error instanceof Error ? error.message : String(error)));
     }
 
-    const body = await response.text();
-    if (!response.ok) {
-      throw new Error("Binance " + this.profile + " " + response.status + ": " + body.slice(0, 300));
+    if (lastError instanceof DOMException && lastError.name === "TimeoutError") {
+      throw new Error("Binance " + this.profile + " signed timeout: " + pathname + " • retried once");
     }
-
-    return JSON.parse(body) as T;
+    throw new Error("Binance " + this.profile + " signed request failed: " + pathname + " • " +
+      (lastError instanceof Error ? lastError.message : String(lastError)));
   }
 
   private async signedDelete<T>(path: string, payload: Record<string, string>): Promise<T> {

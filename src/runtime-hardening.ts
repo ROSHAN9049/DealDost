@@ -190,8 +190,9 @@ async function patchExchangeAnalytics(client: TestnetClient, base: any, symbols:
 
     if (isEntry) {
       const metadata = parseEntryMetadata(id);
-      const side = metadata?.side ??
-        (String(order.side ?? "").toUpperCase() === "BUY" ? "LONG" : "SHORT");
+      const side: "LONG" | "SHORT" = metadata?.side === "SHORT"
+        ? "SHORT"
+        : "LONG";
       openBySymbol.set(symbol, {
         side,
         entryOrderId: orderId,
@@ -210,7 +211,7 @@ async function patchExchangeAnalytics(client: TestnetClient, base: any, symbols:
 
     const open = openBySymbol.get(symbol);
     const exitSide = String(order.side ?? "").toUpperCase() === "BUY" ? "BUY" : "SELL";
-    const positionSide = open?.side ?? (exitSide === "BUY" ? "SHORT" : "LONG");
+    const positionSide: "LONG" | "SHORT" = open?.side ?? (exitSide === "BUY" ? "SHORT" : "LONG");
     const closeRealized = fill?.realized ?? 0;
     const closeFees = fill?.fees ?? 0;
     const closeNet = closeRealized - closeFees;

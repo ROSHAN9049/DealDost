@@ -1278,13 +1278,22 @@ export class TestnetClient {
   }
 
   private async publicGet<T>(path: string): Promise<T> {
-    const response = await fetch(this.baseUrl + path, {
-      signal: AbortSignal.timeout(7000),
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "DealDost/2.4",
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch(this.baseUrl + path, {
+        signal: AbortSignal.timeout(7000),
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "DealDost/2.4",
+        },
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new Error("Binance " + this.profile + " public timeout: " + path);
+      }
+      throw new Error("Binance " + this.profile + " public request failed: " + path + " • " +
+        (error instanceof Error ? error.message : String(error)));
+    }
     const body = await response.text();
     if (!response.ok) {
       throw new Error("Binance " + this.profile + " public " + response.status + ": " + body.slice(0, 300));
@@ -1302,13 +1311,22 @@ export class TestnetClient {
       .digest("hex");
     params.set("signature", signature);
 
-    const response = await fetch(this.baseUrl + pathname + "?" + params.toString(), {
-      signal: AbortSignal.timeout(7000),
-      headers: {
-        "X-MBX-APIKEY": this.apiKey,
-        "User-Agent": "DealDost/2.4",
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch(this.baseUrl + pathname + "?" + params.toString(), {
+        signal: AbortSignal.timeout(7000),
+        headers: {
+          "X-MBX-APIKEY": this.apiKey,
+          "User-Agent": "DealDost/2.4",
+        },
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new Error("Binance " + this.profile + " signed timeout: " + pathname);
+      }
+      throw new Error("Binance " + this.profile + " signed request failed: " + pathname + " • " +
+        (error instanceof Error ? error.message : String(error)));
+    }
 
     const body = await response.text();
     if (!response.ok) {

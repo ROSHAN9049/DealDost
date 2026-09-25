@@ -1103,6 +1103,131 @@ export class TestnetClient {
     });
   }
 
+  async preflight() {
+    if (!this.isConfigured()) {
+      return {
+        connected: false,
+        executionEnabled: false,
+        tradePermission: false,
+        symbol: "BTCUSDT",
+        quantity: 0,
+        balanceUsd: 0,
+        openPositions: 0,
+        ok: false,
+        reason: this.profile + "_NOT_CONFIGURED",
+      };
+    }
+
+    try {
+      const [balances, positions] = await Promise.all([
+        this.signedGet<BalanceRow[]>("/fapi/v3/balance"),
+        this.signedGet<PositionRow[]>("/fapi/v3/positionRisk"),
+      ]);
+
+      const usdt = balances.find((row) => row.asset === "USDT");
+      const openPositions = positions.filter((row) => Math.abs(Number(row.positionAmt ?? 0)) > 0).length;
+      const symbol = "BTCUSDT";
+      const rules = await this.getSymbolRules(symbol);
+      if (rules.status !== "TRADING" || rules.quoteAsset !== "USDT" || rules.contractType !== "PERPETUAL") {
+        return {
+          connected: true,
+          executionEnabled: this.isExecutionEnabled(),
+          tradePermission: false,
+          symbol,
+          quantity: 0,
+          balanceUsd: Number(usdt?.balance ?? 0),
+          openPositions,
+          ok: false,
+          reason: "SYMBOL_NOT_TRADABLE",
+        };
+      }
+
+      const mark = await this.publicGet<{ markPrice?: string }>(
+        "/fapi/v1/premiumIndex?symbol=" + encodeURIComponent(symbol),
+      );
+      const markPrice = Number(mark.markPrice ?? 0);
+      const lot = (rules.filters ?? []).find((f) => f.filterType === "MARKET_LOT_SIZE")
+        ?? (rules.filters ?? []).find((f) => f.filterType === "LOT_SIZE");
+      const priceFilter = (rules.filters ?? []).find((f) => f.filterType === "PRICE_FILTER");
+      const minQty = Number(lot?.minQty ?? 0);
+      const maxQty = Number(lot?.maxQty ?? Number.POSITIVE_INFINITY);
+      const stepSize = Number(lot?.stepSize ?? 0);
+      const minNotional = Number(
+        (rules.filters ?? []).find((f) => f.filterType === "MIN_NOTIONAL")?.notional ?? 0,
+      );
+
+      if (!(markPrice > 0) || !(minQty > 0) || !(stepSize > 0)) {
+        return {
+          connected: true,
+          executionEnabled: this.isExecutionEnabled(),
+          tradePermission: false,
+          symbol,
+          quantity: 0,
+          balanceUsd: Number(usdt?.balance ?? 0),
+          openPositions,
+          ok: false,
+          reason: "SYMBOL_FILTERS_UNAVAILABLE",
+        };
+      }
+
+      const minimumByNotional = minNotional > 0 ? (minNotional / markPrice) * 1.01 : 0;
+      const rawQuantity = Math.max(minQty, minimumByNotional);
+      const quantity = this.ceilToStep(rawQuantity, stepSize);
+
+      if (!(quantity > 0) || quantity > maxQty) {
+        return {
+          connected: true,
+          executionEnabled: this.isExecutionEnabled(),
+          tradePermission: false,
+          symbol,
+          quantity,
+          balanceUsd: Number(usdt?.balance ?? 0),
+          openPositions,
+          ok: false,
+          reason: "TEST_QUANTITY_INVALID",
+        };
+      }
+
+      // Binance's order-test endpoint validates the signed trade request
+      // without creating a real order or position. This is the safest way to
+      // verify that the Demo key can reach the trading endpoint before AUTO is
+      // armed.
+      await this.signedPost<any>("/fapi/v1/order/test", {
+        symbol,
+        side: "BUY",
+        type: "MARKET",
+        quantity: this.formatNumber(quantity),
+        positionSide: "BOTH",
+      });
+
+      return {
+        connected: true,
+        executionEnabled: this.isExecutionEnabled(),
+        tradePermission: true,
+        symbol,
+        quantity,
+        balanceUsd: Number(usdt?.balance ?? 0),
+        openPositions,
+        markPrice,
+        tickSize: Number(priceFilter?.tickSize ?? 0),
+        ok: true,
+        reason: "ORDER_TEST_PASSED",
+      };
+    } catch (error) {
+      return {
+        connected: false,
+        executionEnabled: this.isExecutionEnabled(),
+        tradePermission: false,
+        symbol: "BTCUSDT",
+        quantity: 0,
+        balanceUsd: 0,
+        openPositions: 0,
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   async isTradablePerpetual(symbol: string) {
     try {
       const row = await this.getSymbolRules(symbol.toUpperCase());

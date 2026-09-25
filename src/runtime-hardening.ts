@@ -68,9 +68,9 @@ async function getCloseNetPnl(client: TestnetClient, symbol: string, orderId: st
       const closeFills = fills.filter((row: any) => String(row.orderId ?? "") === String(orderId));
 
       if (closeFills.length) {
-        const recentOrders = await api.getAccountOrdersForAnalytics(closeTime - 7 * 24 * 60 * 60 * 1000, closeTime, [symbol]);
-        const closeOrder = recentOrders.find((row: any) => String(row.orderId ?? "") === String(orderId));
-        const closeTime = Number(closeOrder?.time ?? closeOrder?.updateTime ?? now);
+        const recentOrders = await api.getAccountOrdersForAnalytics(now - 7 * 24 * 60 * 60 * 1000, now, [symbol]);
+        const closeOrder: any = recentOrders.find((row: any) => String(row.orderId ?? "") === String(orderId));
+        const closeTime: number = Number(closeOrder?.time ?? closeOrder?.updateTime ?? now);
         const entryOrder = recentOrders
           .filter((row: any) => {
             const id = String(row.clientOrderId ?? "");

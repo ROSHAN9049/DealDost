@@ -40,7 +40,7 @@ function sleep(ms: number) {
 
 function parseEntryMetadata(clientOrderId: string) {
   const match = String(clientOrderId).match(
-    /^DDT-(MOM|SCALP)-([A-Z0-9]+)-(L|S)-Q(\\d+)-(WA|SU|CF|BL)-[A-Za-z0-9]+$/,
+    /^DDT-(MOM|SCALP)-([A-Z0-9]+)-(L|S)Q(\\d{1,3})(WA|SU|CF|BL)-[A-Za-z0-9]+$/,
   );
   if (!match) return null;
   return {
@@ -89,14 +89,26 @@ async function getCloseNetPnl(client: TestnetClient, symbol: string, orderId: st
 async function patchExchangeAnalytics(client: TestnetClient, base: any, symbols: string[]) {
   const api = client as any;
   const orderRows = Array.isArray(base?.trades) ? base.trades : [];
+  let fullOrderRows = orderRows;
+  try {
+    const fetched = await api.getAccountOrdersForAnalytics(
+      Number(base.startTime),
+      Number(base.endTime),
+      symbols,
+    );
+    if (Array.isArray(fetched) && fetched.length) fullOrderRows = fetched;
+  } catch {
+    // Keep the primary analytics result when a second historical scan is unavailable.
+  }
+
   const ddtOrderIds = new Set(
-    orderRows
+    fullOrderRows
       .map((row: any) => String(row.clientOrderId ?? ""))
       .filter((id: string) => id.startsWith("DDT-")),
   );
 
   const ddtSymbols = [...new Set(
-    orderRows
+    fullOrderRows
       .filter((row: any) => ddtOrderIds.has(String(row.clientOrderId ?? "")))
       .map((row: any) => String(row.symbol ?? "").toUpperCase())
       .filter(Boolean),
@@ -122,20 +134,24 @@ async function patchExchangeAnalytics(client: TestnetClient, base: any, symbols:
     userTrades = [];
   }
 
-  const fillsByOrder = new Map<string, { realized: number; fees: number; lastTime: number }>();
+  const fillsByOrder = new Map<string, { realized: number; fees: number; lastTime: number; quantity: number; notional: number }>();
   for (const fill of userTrades) {
     const orderId = String(fill?.orderId ?? "");
     if (!orderId) continue;
-    const existing = fillsByOrder.get(orderId) ?? { realized: 0, fees: 0, lastTime: 0 };
+    const existing = fillsByOrder.get(orderId) ?? { realized: 0, fees: 0, lastTime: 0, quantity: 0, notional: 0 };
     existing.realized += Number(fill?.realizedPnl ?? 0) || 0;
     if (String(fill?.commissionAsset ?? "").toUpperCase() === "USDT") {
       existing.fees += Math.abs(Number(fill?.commission ?? 0)) || 0;
     }
+    const quantity = Math.abs(Number(fill?.qty ?? 0)) || 0;
+    const price = Number(fill?.price ?? 0) || 0;
+    existing.quantity += quantity;
+    existing.notional += quantity * price;
     existing.lastTime = Math.max(existing.lastTime, Number(fill?.time ?? 0) || 0);
     fillsByOrder.set(orderId, existing);
   }
 
-  const chronological = [...orderRows]
+  const chronological = [...fullOrderRows]
     .filter((row: any) => String(row.clientOrderId ?? "").startsWith("DDT-"))
     .sort((a: any, b: any) =>
       Number(a.time ?? a.updateTime ?? 0) - Number(b.time ?? b.updateTime ?? 0),
@@ -214,7 +230,8 @@ async function patchExchangeAnalytics(client: TestnetClient, base: any, symbols:
     const positionSide: "LONG" | "SHORT" = open?.side ?? (exitSide === "BUY" ? "SHORT" : "LONG");
     const closeRealized = fill?.realized ?? 0;
     const closeFees = fill?.fees ?? 0;
-    const closeNet = closeRealized - closeFees;
+    const entryFees = open ? (fillsByOrder.get(open.entryOrderId)?.fees ?? 0) : 0;
+    const closeNet = closeRealized - closeFees - entryFees;
 
     realizedPnlUsd += closeRealized;
     feesUsd += closeFees;
@@ -281,11 +298,9 @@ async function patchExchangeAnalytics(client: TestnetClient, base: any, symbols:
         side: metadata?.side ?? meta?.positionSide ?? null,
         stage: metadata?.stage ?? meta?.entryMeta?.stage ?? null,
         quality: metadata?.quality ?? meta?.entryMeta?.quality ?? null,
-        exit: isClose ? (
-          fill && Number.isFinite(fill.lastTime) && fill.lastTime > 0
-            ? Number(row.avgPrice ?? 0) || null
-            : Number(row.avgPrice ?? 0) || null
-        ) : null,
+        exit: isClose && fill && fill.quantity > 0
+          ? fill.notional / fill.quantity
+          : null,
         reason:
           id.includes("-SL") ? "SL" :
           id.startsWith("DDT-TP-") ? "TP" :
@@ -486,8 +501,7 @@ export function applyRuntimeHardening() {
             ...input,
             clientOrderId:
               "DDT-" + match[1] + "-" + match[2] + "-" + side +
-              "-Q" + Math.round(signal.quality?.total ?? 0) +
-              "-" + code + "-" + match[3],
+              "Q" + Math.round(signal.quality?.total ?? 0) + code + "-" + match[3],
           };
         }
       }

@@ -968,33 +968,11 @@ export class TestnetClient {
     return "/fapi/v1/income?incomeType=" + type + "&startTime=" + effectiveStart + "&limit=1000";
   }
 
-  private async getServerTimeOffset(forceRefresh = false): Promise<number> {
-    const now = Date.now();
-    if (!forceRefresh && now - this.serverTimeAt < this.serverTimeCacheMs) {
-      return this.serverTimeOffsetMs;
-    }
-    if (this.serverTimeInFlight) return this.serverTimeInFlight;
-
-    this.serverTimeInFlight = (async () => {
-      const requestStarted = Date.now();
-      const result = await this.publicGet<{ serverTime?: number }>("/fapi/v1/time");
-      const requestFinished = Date.now();
-      const serverTime = Number(result.serverTime ?? 0);
-      if (!Number.isFinite(serverTime) || serverTime <= 0) {
-        throw new Error("Binance " + this.profile + " server time unavailable");
-      }
-
-      // Estimate the offset using the midpoint of the request so network
-      // latency does not become part of the signed timestamp skew.
-      const midpoint = Math.floor((requestStarted + requestFinished) / 2);
-      this.serverTimeOffsetMs = serverTime - midpoint;
-      this.serverTimeAt = requestFinished;
-      return this.serverTimeOffsetMs;
-    })().finally(() => {
-      this.serverTimeInFlight = undefined;
-    });
-
-    return this.serverTimeInFlight;
+  private async getServerTimeOffset(_forceRefresh = false): Promise<number> {
+    // Do not make /fapi/v1/time a prerequisite for account reconciliation.
+    // The signed endpoints already validate timestamp freshness and the
+    // serverless/persistent clocks are expected to be NTP-synchronized.
+    return this.serverTimeOffsetMs;
   }
 
   private async getAccountRead(): Promise<{
@@ -1361,12 +1339,10 @@ export class TestnetClient {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (attempt > 0) this.serverTimeAt = 0;
-      const serverTimeOffset = await this.getServerTimeOffset(attempt > 0);
 
       const params = new URLSearchParams(rawQuery);
-      params.set("recvWindow", "5000");
-      params.set("timestamp", String(Date.now() + serverTimeOffset));
+      params.set("recvWindow", "60000");
+      params.set("timestamp", String(Date.now() + this.serverTimeOffsetMs));
       const signature = createHmac("sha256", this.apiSecret)
         .update(params.toString())
         .digest("hex");
@@ -1416,13 +1392,11 @@ export class TestnetClient {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (attempt > 0) this.serverTimeAt = 0;
-      const serverTimeOffset = await this.getServerTimeOffset(attempt > 0);
       const params = new URLSearchParams(
         Object.fromEntries(Object.entries(payload).filter(([, value]) => value)),
       );
-      params.set("recvWindow", "5000");
-      params.set("timestamp", String(Date.now() + serverTimeOffset));
+      params.set("recvWindow", "60000");
+      params.set("timestamp", String(Date.now() + this.serverTimeOffsetMs));
 
       const signature = createHmac("sha256", this.apiSecret)
         .update(params.toString())
@@ -1467,11 +1441,9 @@ export class TestnetClient {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (attempt > 0) this.serverTimeAt = 0;
-      const serverTimeOffset = await this.getServerTimeOffset(attempt > 0);
       const params = new URLSearchParams(payload);
-      params.set("recvWindow", "5000");
-      params.set("timestamp", String(Date.now() + serverTimeOffset));
+      params.set("recvWindow", "60000");
+      params.set("timestamp", String(Date.now() + this.serverTimeOffsetMs));
 
       const signature = createHmac("sha256", this.apiSecret)
         .update(params.toString())

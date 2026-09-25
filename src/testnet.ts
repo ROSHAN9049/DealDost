@@ -74,6 +74,19 @@ type IncomeRow = {
   time?: number;
 };
 
+type UserTradeRow = {
+  symbol?: string;
+  id?: number;
+  orderId?: number | string;
+  side?: "BUY" | "SELL";
+  price?: string;
+  qty?: string;
+  realizedPnl?: string;
+  commission?: string;
+  commissionAsset?: string;
+  time?: number;
+};
+
 export interface TestnetOrderPlan {
   symbol: string;
   side: Side;
@@ -436,6 +449,60 @@ export class TestnetClient {
     ]);
     const income = [...realizedIncome, ...commissionIncome];
 
+    // Enrich only DDT order symbols with Binance fill-level trade data.
+    // userTrades exposes realizedPnl, commission and fill price per trade,
+    // allowing exact close attribution without inventing signal metadata.
+    const ddtSymbols = [...new Set(
+      orders
+        .filter((order) => String(order.clientOrderId ?? "").startsWith("DDT-"))
+        .map((order) => String(order.symbol ?? "").toUpperCase())
+        .filter(Boolean),
+    )];
+    const userTrades = await this.getUserTradesForAnalytics(
+      startTime,
+      analyticsEndTime,
+      ddtSymbols,
+    );
+    const fillByOrder = new Map<string, {
+      realizedPnlUsd: number;
+      commissionUsd: number;
+      fillQty: number;
+      notionalUsd: number;
+      firstTime: number;
+      lastTime: number;
+    }>();
+
+    for (const trade of userTrades) {
+      const orderId = trade.orderId === undefined ? "" : String(trade.orderId);
+      if (!orderId) continue;
+      const qty = Math.abs(Number(trade.qty ?? 0));
+      const price = Number(trade.price ?? 0);
+      const realizedPnlUsd = Number(trade.realizedPnl ?? 0);
+      const commissionUsd = String(trade.commissionAsset ?? "").toUpperCase() === "USDT"
+        ? Math.abs(Number(trade.commission ?? 0))
+        : 0;
+      const existing = fillByOrder.get(orderId) ?? {
+        realizedPnlUsd: 0,
+        commissionUsd: 0,
+        fillQty: 0,
+        notionalUsd: 0,
+        firstTime: Number.MAX_SAFE_INTEGER,
+        lastTime: 0,
+      };
+      existing.realizedPnlUsd += Number.isFinite(realizedPnlUsd) ? realizedPnlUsd : 0;
+      existing.commissionUsd += Number.isFinite(commissionUsd) ? commissionUsd : 0;
+      if (Number.isFinite(qty) && qty > 0) {
+        existing.fillQty += qty;
+        if (Number.isFinite(price) && price > 0) existing.notionalUsd += qty * price;
+      }
+      const ts = Number(trade.time ?? 0);
+      if (Number.isFinite(ts) && ts > 0) {
+        existing.firstTime = Math.min(existing.firstTime, ts);
+        existing.lastTime = Math.max(existing.lastTime, ts);
+      }
+      fillByOrder.set(orderId, existing);
+    }
+
     const dayKeys = Array.from({ length: days }, (_, index) => {
       const ts = startTime + index * 24 * 60 * 60 * 1000;
       return this.getIstDateKey(ts);
@@ -517,17 +584,41 @@ export class TestnetClient {
         .filter((order) => String(order.clientOrderId ?? "").startsWith("DDT-"))
         .sort((a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0))
         .slice(0, 50)
-        .map((order) => ({
-          time: Number(order.time ?? order.updateTime ?? 0),
-          symbol: String(order.symbol ?? ""),
-          engine: String(order.clientOrderId ?? "").includes("MOM-") ? "MOMENTUM"
-            : String(order.clientOrderId ?? "").includes("SCALP-") ? "SCALPING" : "DDT",
-          type: String(order.type ?? ""),
-          side: String(order.side ?? "").toUpperCase() === "BUY" ? "LONG"
-            : String(order.side ?? "").toUpperCase() === "SELL" ? "SHORT" : String(order.side ?? ""),
-          status: String(order.status ?? ""),
-          clientOrderId: String(order.clientOrderId ?? ""),
-        })),
+        .map((order) => {
+          const clientOrderId = String(order.clientOrderId ?? "");
+          const fill = order.orderId === undefined ? undefined : fillByOrder.get(String(order.orderId));
+          const isClose = Boolean(order.reduceOnly || order.closePosition) ||
+            /-(SL|TP)$/.test(clientOrderId) ||
+            clientOrderId.startsWith("DDT-TP-") ||
+            clientOrderId.startsWith("DDT-MAN-");
+          const exitPrice = fill && fill.fillQty > 0 && fill.notionalUsd > 0
+            ? fill.notionalUsd / fill.fillQty
+            : Number((order as any).avgPrice ?? 0);
+          const netPnlUsd = isClose && fill
+            ? fill.realizedPnlUsd - fill.commissionUsd
+            : null;
+          const reason =
+            clientOrderId.includes("-SL") ? "SL" :
+            clientOrderId.startsWith("DDT-TP-") ? "TP" :
+            clientOrderId.startsWith("DDT-MAN-") ? "MANUAL" :
+            String(order.type ?? order.status ?? "MARKET");
+          return {
+            time: Number(order.time ?? order.updateTime ?? fill?.lastTime ?? 0),
+            symbol: String(order.symbol ?? ""),
+            engine: clientOrderId.includes("MOM-") ? "MOMENTUM"
+              : clientOrderId.includes("SCALP-") ? "SCALPING" : "DDT",
+            type: String(order.type ?? ""),
+            side: String(order.side ?? "").toUpperCase() === "BUY" ? "LONG"
+              : String(order.side ?? "").toUpperCase() === "SELL" ? "SHORT" : String(order.side ?? ""),
+            status: String(order.status ?? ""),
+            stage: null,
+            quality: null,
+            exit: isClose && Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : null,
+            reason,
+            netPnlUsd,
+            clientOrderId,
+          };
+        }),
       coverage: {
         incomeRows: income.length,
         orderRows: orders.length,
@@ -535,7 +626,10 @@ export class TestnetClient {
         truncated: false,
         orderHistoryWindowDays: 7,
         symbolsScanned: analyticsSymbols.length,
-        note: "Fees and realized P&L are account-level Binance income data and may include activity outside DealDost. DDT entry counts and recent trade rows use exchange order client IDs scanned across the currently tracked symbols for the latest Binance-valid 7-day allOrders window. Signal stage/quality and per-trade realized P&L are not inferred unless the exchange data directly supports them.",
+        ddtTradeSymbolsScanned: ddtSymbols.length,
+        userTradeRows: userTrades.length,
+        note: "Fees and realized P&L are account-level Binance income data and may include activity outside DealDost. DDT order rows are scanned across tracked symbols for the latest Binance-valid 7-day allOrders window. Close-order fill price and per-order realized P&L are enriched from Binance userTrades when available. Signal stage/quality remain unset for historical exchange rows because that metadata was not persisted to Binance.",
+      }
       },
     };
   }
@@ -1034,6 +1128,63 @@ export class TestnetClient {
     return results.sort(
       (a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0),
     );
+  }
+
+  private async getUserTradesForAnalytics(
+    startTime: number,
+    endTime: number,
+    symbols: string[],
+  ): Promise<UserTradeRow[]> {
+    if (!symbols.length) return [];
+
+    const maxWindowMs = 7 * 24 * 60 * 60 * 1000 - 60_000;
+    const queryStart = Math.max(startTime, endTime - maxWindowMs);
+    const results: UserTradeRow[] = [];
+    const seen = new Set<string>();
+    const concurrency = 6;
+    let cursor = 0;
+
+    const worker = async () => {
+      while (true) {
+        const index = cursor++;
+        if (index >= symbols.length) return;
+        const symbol = symbols[index];
+
+        try {
+          const batch = await this.signedGet<UserTradeRow[]>(
+            "/fapi/v1/userTrades?symbol=" + encodeURIComponent(symbol) +
+              "&startTime=" + queryStart +
+              "&endTime=" + endTime +
+              "&limit=1000",
+          );
+          for (const trade of batch) {
+            const key = [
+              symbol,
+              String(trade.id ?? ""),
+              String(trade.orderId ?? ""),
+              String(trade.time ?? 0),
+            ].join("|");
+            if (seen.has(key)) continue;
+            seen.add(key);
+            results.push(trade);
+          }
+        } catch (error) {
+          console.warn(
+            "[analytics userTrades] " + symbol,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        { length: Math.min(concurrency, symbols.length) },
+        () => worker(),
+      ),
+    );
+
+    return results.sort((a, b) => Number(b.time ?? 0) - Number(a.time ?? 0));
   }
 
   private async getIncomeHistory(

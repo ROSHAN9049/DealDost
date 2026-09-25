@@ -39,13 +39,13 @@ export function createApp(scanner: BinanceScanner) {
       if (req.get("x-dealdost-emergency-stop") !== undefined) {
         scanner.setEmergencyStop(req.get("x-dealdost-emergency-stop") === "true");
       }
+      // State reads must be side-effect free. The dashboard may send its
+      // current mode for rendering affinity, but AUTO switches are changed
+      // only through the explicit /api/mode mutation endpoint. This prevents
+      // stale browser localStorage from silently turning TESTNET AUTO off. 
       const requested = String(req.get("x-dealdost-mode") ?? "").toUpperCase();
       if (requested === "PAPER" || requested === "TESTNET" || requested === "LIVE") {
-        scanner.setRequestMode(requested, req.get("x-dealdost-auto") === "true", {
-          paperAuto: req.get("x-dealdost-paper-auto") === "true",
-          testnetAuto: req.get("x-dealdost-testnet-auto") === "true",
-          liveAuto: req.get("x-dealdost-live-auto") === "true",
-        });
+        scanner.setRequestMode(requested);
       }
 
       res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
@@ -58,14 +58,12 @@ export function createApp(scanner: BinanceScanner) {
   app.post("/api/market/ingest", async (req, res) => {
     try {
       const body = req.body ?? {};
-      if (body.emergencyStop !== undefined) scanner.setEmergencyStop(Boolean(body.emergencyStop));
+      // Market ingest is a data-plane endpoint. It must not mutate execution
+      // switches or emergency-stop state; those controls use explicit mutation
+      // endpoints so browser polling cannot overwrite server-owned automation.
       const mode = String(body.mode ?? "").toUpperCase();
       if (mode === "PAPER" || mode === "TESTNET" || mode === "LIVE") {
-        scanner.setRequestMode(mode, Boolean(body.auto), {
-          paperAuto: body.paperAuto === undefined ? undefined : Boolean(body.paperAuto),
-          testnetAuto: body.testnetAuto === undefined ? undefined : Boolean(body.testnetAuto),
-          liveAuto: body.liveAuto === undefined ? undefined : Boolean(body.liveAuto),
-        });
+        scanner.setRequestMode(mode);
       }
 
       const universe = Array.isArray(body.universe) ? body.universe : [];

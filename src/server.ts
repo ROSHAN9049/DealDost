@@ -36,9 +36,7 @@ export function createApp(scanner: BinanceScanner) {
 
   app.get("/api/state", (req, res) => {
     try {
-      if (req.get("x-dealdost-emergency-stop") !== undefined) {
-        scanner.setEmergencyStop(req.get("x-dealdost-emergency-stop") === "true");
-      }
+      // State reads are strictly read-only; execution controls use explicit mutation endpoints.
       // State reads must be side-effect free. The dashboard may send its
       // current mode for rendering affinity, but AUTO switches are changed
       // only through the explicit /api/mode mutation endpoint. This prevents

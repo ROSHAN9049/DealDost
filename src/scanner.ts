@@ -1371,7 +1371,17 @@ export class BinanceScanner extends EventEmitter {
         if (signal.engine === "MOMENTUM" && momentum >= config.testnetMaxMomentumPositions) continue;
         if (signal.engine === "SCALPING" && scalping >= config.testnetMaxScalpingPositions) continue;
 
-        const lastClosedAt = snapshot.lastClosedAt[signal.symbol] ?? 0;
+        // Closed symbols disappear from positionRisk, so cooldown
+        // must also be verified from exchange order history.
+        let lastClosedAt = 0;
+        try {
+          lastClosedAt = await this.testnet.getLastClosedAt(signal.symbol);
+        } catch (error) {
+          // Fail closed when cooldown cannot be verified.
+          lastEntryFailure = signal.symbol + " cooldown check: " +
+            (error instanceof Error ? error.message : String(error));
+          continue;
+        }
         if (lastClosedAt > 0 && Date.now() - lastClosedAt < config.cooldownMinutes * 60_000) continue;
 
         const riskDistance = Math.abs(signal.entry - signal.stop);
@@ -1393,7 +1403,11 @@ export class BinanceScanner extends EventEmitter {
             quantity,
             stopPrice: signal.stop,
             takeProfitPrice: signal.takeProfit1,
-            clientOrderId: "DDT-" + (signal.engine === "MOMENTUM" ? "MOM-" : "SCALP-") + signal.symbol + "-" + signal.signalId.slice(-10),
+            // Keep engine prefixes for attribution while making every
+            // entry client ID unique even when the same candle signal persists.
+            clientOrderId: "DDT-" +
+              (signal.engine === "MOMENTUM" ? "MOM-" : "SCALP-") +
+              signal.symbol + "-" + Date.now().toString(36),
           });
 
           total += 1;
@@ -1525,7 +1539,14 @@ export class BinanceScanner extends EventEmitter {
         if (total >= config.maxTotalPositions) break;
         if (usedSymbols.has(signal.symbol)) continue;
 
-        const lastClosedAt = snapshot.lastClosedAt[signal.symbol] ?? 0;
+        // Never rely only on open position state for cooldown;
+        // query exchange close history after the symbol becomes flat.
+        let lastClosedAt = 0;
+        try {
+          lastClosedAt = await this.live.getLastClosedAt(signal.symbol);
+        } catch {
+          continue; // fail closed if cooldown cannot be verified
+        }
         if (lastClosedAt > 0 && Date.now() - lastClosedAt < config.cooldownMinutes * 60_000) continue;
 
         const gate = await this.liveExecutionGates(signal, snapshot, usedSymbols);

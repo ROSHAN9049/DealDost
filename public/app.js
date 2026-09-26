@@ -643,6 +643,10 @@ async function closeLive(symbol) {
 
 
 function render(state) {
+  window.__dealdostLastState = state;
+  if (typeof window.__dealdostRenderHealth === "function") {
+    try { window.__dealdostRenderHealth(state); } catch {}
+  }
   savePaperRuntime(state);
   emergencyStop = Boolean(state?.risk?.emergencyStop);
   localStorage.setItem("dealdost.emergencyStop", String(emergencyStop));

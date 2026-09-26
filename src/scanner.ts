@@ -792,7 +792,7 @@ export class BinanceScanner extends EventEmitter {
     // market endpoint as a read-only market-data fallback. Execution remains
     // isolated to the TESTNET/LIVE signed clients below.
     const testnetBase = config.testnetRestBase.replace(/\/+$/, "");
-    if (!bases.includes(testnetBase) && this.testnet.isConfigured()) {
+    if (!bases.includes(testnetBase)) {
       try {
         const response = await fetch(testnetBase + path, {
           headers: {

@@ -401,7 +401,7 @@ async function toggleEmergencyStop() {
 async function loadAccountAnalytics(force = false) {
   if (analyticsLoading) return;
   if (currentMode === "PAPER") return;
-  if (!force && Date.now() - lastAnalyticsLoadedAt < 60000) return;
+  if (!force && Date.now() - lastAnalyticsLoadedAt < ANALYTICS_RETRY_MS) return;
 
   analyticsLoading = true;
   try {

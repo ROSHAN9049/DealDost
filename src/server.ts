@@ -154,7 +154,39 @@ export function createApp(scanner: BinanceScanner) {
       res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
       res.json(analytics);
     } catch (error) {
-      res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "TESTNET_NOT_CONFIGURED" || message === "LIVE_NOT_CONFIGURED") {
+        res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+        res.json({
+          profile: mode,
+          generatedAt: Date.now(),
+          windowDays: days,
+          startTime: Date.now() - (days - 1) * 24 * 60 * 60 * 1000,
+          endTime: Date.now(),
+          configured: false,
+          totals: {
+            realizedPnlUsd: 0,
+            feesUsd: 0,
+            netPnlUsd: 0,
+          },
+          ddt: {
+            filledEntries: 0,
+            momentumEntries: 0,
+            scalpingEntries: 0,
+            protectionOrders: 0,
+          },
+          daily: [],
+          trades: [],
+          coverage: {
+            incomeRows: 0,
+            orderRows: 0,
+            orderRowsLimit: 0,
+            note: message + " • configure the execution account in the running deployment",
+          },
+        });
+        return;
+      }
+      res.status(503).json({ error: message });
     }
   });
 

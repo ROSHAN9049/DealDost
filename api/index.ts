@@ -11,7 +11,7 @@ let startPromise: Promise<void> | undefined;
 const EXECUTION_BASE = (
   process.env.DEALDOST_EXECUTION_URL ??
   "https://dealdost-production.up.railway.app"
-).replace(/\\/+$/, "");
+).replace(/\/+$/, "");
 
 const isExecutionMode = (mode: unknown) => {
   const value = String(mode ?? "").toUpperCase();
@@ -205,7 +205,6 @@ app.post("/api/mode", async (req, res) => {
     }
 
     await ensureStarted();
-    const mode = String(body.mode ?? "").toUpperCase();
     if (mode !== "PAPER" && mode !== "TESTNET" && mode !== "LIVE") {
       res.status(400).json({ error: "invalid_mode" });
       return;

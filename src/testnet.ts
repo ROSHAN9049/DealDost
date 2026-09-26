@@ -1077,11 +1077,13 @@ export class TestnetClient {
     // requested analytics window.
     const maxWindowMs = 7 * 24 * 60 * 60 * 1000 - 60_000;
     const queryStart = Math.max(startTime, endTime - maxWindowMs);
-    const uniqueSymbols = [...new Set(
-      symbols
-        .map((symbol) => String(symbol ?? "").toUpperCase())
-        .filter((symbol) => /^[A-Z0-9]+USDT$/.test(symbol)),
-    )].slice(0, 60);
+    const uniqueSymbols = await this.getAnalyticsTradableSymbols(
+      [...new Set(
+        symbols
+          .map((symbol) => String(symbol ?? "").toUpperCase())
+          .filter((symbol) => /^[A-Z0-9]+USDT$/.test(symbol)),
+      )].slice(0, 60),
+    );
 
     if (!uniqueSymbols.length) return [];
 
@@ -1131,6 +1133,58 @@ export class TestnetClient {
     return results.sort(
       (a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0),
     );
+  }
+
+  private async getAnalyticsTradableSymbols(symbols: string[]): Promise<string[]> {
+    if (!symbols.length) return [];
+
+    let info = this.exchangeInfo;
+    try {
+      const now = Date.now();
+      if (!info || now - this.exchangeInfoAt > 5 * 60_000) {
+        info = await this.publicGet<ExchangeInfo>("/fapi/v1/exchangeInfo");
+        this.exchangeInfo = info;
+        this.exchangeInfoAt = now;
+      }
+    } catch (error) {
+      // Analytics should never hammer /allOrders with symbols that this
+      // execution profile does not support. If a refresh fails, use a still
+      // available cached exchange-info snapshot; otherwise skip order scans
+      // safely and keep account-level income analytics intact.
+      if (!info?.symbols?.length) {
+        console.warn(
+          "[analytics symbols] unable to validate symbols",
+          error instanceof Error ? error.message : String(error),
+        );
+        return [];
+      }
+    }
+
+    const tradable = new Set(
+      (info?.symbols ?? [])
+        .filter((row) =>
+          row.status === "TRADING" &&
+          row.quoteAsset === "USDT" &&
+          row.contractType === "PERPETUAL"
+        )
+        .map((row) => row.symbol.toUpperCase()),
+    );
+
+    const filtered = symbols.filter((symbol) => tradable.has(symbol));
+    const skipped = symbols.filter((symbol) => !tradable.has(symbol));
+    if (skipped.length) {
+      console.info(
+        "[analytics symbols] skipped " +
+          skipped.length +
+          " non-tradable " +
+          this.profile +
+          " symbols: " +
+          skipped.slice(0, 20).join(",") +
+          (skipped.length > 20 ? " …" : ""),
+      );
+    }
+
+    return filtered;
   }
 
   private async getUserTradesForAnalytics(

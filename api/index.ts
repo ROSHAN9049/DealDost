@@ -132,6 +132,48 @@ async function ensureStarted() {
   await startPromise;
 }
 
+app.get("/api/execution-health", async (_req, res) => {
+  try {
+    const remote = await proxyJson("/api/state", { headers: { "x-dealdost-mode": "TESTNET" } });
+    const tn = remote.payload?.testnet ?? {};
+    const regionRestricted = String(tn.error || "").includes("451") ||
+      String(tn.error || "").includes("restricted location");
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.status(200).json({
+      ok: remote.status >= 200 && remote.status < 300 && Boolean(tn.configured),
+      backendReachable: remote.status >= 200 && remote.status < 500,
+      testnet: {
+        configured: Boolean(tn.configured),
+        executionEnabled: Boolean(tn.executionEnabled),
+        connected: Boolean(tn.connected),
+        auto: Boolean(tn.auto),
+        regionRestricted,
+        error: tn.error ?? null,
+      },
+      note: regionRestricted
+        ? "Railway execution backend is reachable, but Binance Demo denied its current egress region (HTTP 451)."
+        : null,
+      updatedAt: Date.now(),
+    });
+  } catch (error) {
+    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    res.status(200).json({
+      ok: false,
+      backendReachable: false,
+      testnet: {
+        configured: false,
+        executionEnabled: false,
+        connected: false,
+        auto: false,
+        regionRestricted: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      note: "Execution backend could not be reached from Vercel.",
+      updatedAt: Date.now(),
+    });
+  }
+});
+
 app.get("/api/health", async (_req, res) => {
   try {
     await ensureStarted();
@@ -170,7 +212,10 @@ app.get("/api/state", async (req, res) => {
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
     res.json(state);
   } catch (error) {
-    res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+    res.status(503).json({
+      error: error instanceof Error ? error.message : String(error),
+      source: "vercel-execution-proxy",
+    });
   }
 });
 
@@ -274,9 +319,6 @@ app.get("/api/analytics", async (req, res) => {
     res.status(remote.status).json(remote.payload);
     return;
 
-    const analytics = await scanner.accountAnalytics(mode, days);
-    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
-    res.json(analytics);
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -300,9 +342,6 @@ app.post("/api/testnet/preflight", async (_req, res) => {
     res.status(remote.status).json(remote.payload);
     return;
 
-    const result = await scanner.testnetPreflight();
-    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
-    res.json(result);
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -319,14 +358,6 @@ app.post("/api/testnet/protection-sync", async (req, res) => {
     res.status(remote.status).json(remote.payload);
     return;
 
-    await ensureStarted();
-    if (!symbol) {
-      res.status(400).json({ error: "symbol_required" });
-      return;
-    }
-    const state = await scanner.syncTestnetPositionProtection(symbol);
-    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
-    res.json(state);
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -343,14 +374,6 @@ app.post("/api/testnet/close", async (req, res) => {
     res.status(remote.status).json(remote.payload);
     return;
 
-    await ensureStarted();
-    if (!symbol) {
-      res.status(400).json({ error: "symbol_required" });
-      return;
-    }
-    const state = await scanner.closeManagedTestnetPosition(symbol);
-    res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
-    res.json(state);
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
   }

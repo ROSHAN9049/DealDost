@@ -189,9 +189,6 @@ function friendlyBinanceError(message) {
   if (value.includes("-4120")) {
     return "BINANCE CONDITIONAL ORDER API ERROR (-4120): outdated conditional-order endpoint.";
   }
-  if (value.includes(" 451:") || value.includes("HTTP 451") || value.includes("restricted location")) {
-    return "BINANCE REGION RESTRICTION (HTTP 451): Railway egress region is not allowed for Binance Demo API.";
-  }
   return value;
 }
 
@@ -685,11 +682,6 @@ function render(state) {
   $("fees").textContent = money(state.paper.feesUsd);
 
   const tn = state.testnet;
-  const tnErrorValue = String(tn?.error || "");
-  const tnRegionRestricted =
-    tnErrorValue.includes(" 451:") ||
-    tnErrorValue.includes("HTTP 451") ||
-    tnErrorValue.includes("restricted location");
   const testnetAutoButton = $("testnetAuto");
   if (testnetAutoButton) {
     testnetAutoButton.textContent = "TESTNET AUTO " + (testnetAuto ? "ON" : "OFF");
@@ -721,17 +713,7 @@ function render(state) {
     tnError.hidden = !tn.error;
   }
   if (tnHint) {
-    if (currentMode === "TESTNET" && tnRegionRestricted) {
-      tnHint.textContent = testnetAuto
-        ? "TESTNET AUTO ON • ENTRIES BLOCKED • Binance denied the Railway egress region (HTTP 451)"
-        : "TESTNET AUTO OFF • Binance denied the Railway egress region (HTTP 451)";
-      tnHint.hidden = false;
-    } else if (currentMode === "TESTNET" && tn.error) {
-      tnHint.textContent = testnetAuto
-        ? "TESTNET AUTO ON • ENTRIES BLOCKED • account/API error"
-        : "TESTNET account/API error • AUTO OFF";
-      tnHint.hidden = false;
-    } else if (currentMode === "TESTNET" && !tn.configured) {
+    if (currentMode === "TESTNET" && !tn.configured) {
       tnHint.textContent = "TESTNET Demo/Futures key + secret required in the running deployment environment • execution stays OFF";
       tnHint.hidden = false;
     } else if (currentMode === "TESTNET" && !tn.executionEnabled) {

@@ -58,21 +58,12 @@
         : String(feed.error || feed.data || "No fresh market data")
     );
 
-    const tnError = String(tn.error || "");
-    const tnRegionRestricted =
-      tnError.includes(" 451:") ||
-      tnError.includes("HTTP 451") ||
-      tnError.includes("restricted location");
-    const tnHealth = tnRegionRestricted
-      ? "REGION BLOCKED"
-      : (tn.health || (tn.connected ? "ONLINE" : "OFFLINE"));
+    const tnHealth = tn.health || (tn.connected ? "ONLINE" : "OFFLINE");
     setHealth(
       "dd-testnet-health",
       tnHealth,
-      tnRegionRestricted
-        ? "Binance Demo API denied Railway egress region • entries blocked"
-        : tn.healthDetail ||
-          (tn.executionEnabled ? (tn.auto ? "Demo execution armed" : "Demo execution ready") : "Read-only / execution locked")
+      tn.healthDetail ||
+        (tn.executionEnabled ? (tn.auto ? "Demo execution armed" : "Demo execution ready") : "Read-only / execution locked")
     );
 
     const liveHealth = live.health || (live.connected ? "ONLINE" : "OFFLINE");
@@ -100,23 +91,7 @@
     if (summary) {
       const mode = String(state.mode || "PAPER");
       const auto = Boolean(state.auto);
-      const tnErrorValue = String(tn.error || "");
-      const tnRegionRestricted =
-        tnErrorValue.includes(" 451:") ||
-        tnErrorValue.includes("HTTP 451") ||
-        tnErrorValue.includes("restricted location");
-      const liveErrorValue = String(live.error || "");
-      const liveBlocked = Boolean(liveErrorValue) || !live.connected || !live.executionEnabled;
-      const modeBlocked = mode === "TESTNET"
-        ? tnRegionRestricted || Boolean(tn.error) || !tn.connected || !tn.executionEnabled
-        : mode === "LIVE"
-          ? liveBlocked
-          : false;
-      summary.textContent = mode + (
-        auto
-          ? (modeBlocked ? " • AUTO ON / ENTRY BLOCKED" : " • AUTO ACTIVE")
-          : " • MANUAL / ARMED"
-      );
+      summary.textContent = mode + (auto ? " • AUTO ACTIVE" : " • MANUAL / ARMED");
     }
 
     const clock = byId("dd-clock");

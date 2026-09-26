@@ -52,24 +52,35 @@ async function proxyJson(
 }
 
 // PAPER remains local on Vercel, but the dashboard still shows TESTNET/LIVE
-// account status. Merge the persistent Railway execution snapshot into the
-// local PAPER state so account cards do not appear falsely unconfigured.
+// account status. Read the persistent execution profiles explicitly so the
+// Railway default PAPER profile can never masquerade as an unconfigured account.
 let executionSnapshotCache: { expiresAt: number; payload: any } | null = null;
 const EXECUTION_SNAPSHOT_CACHE_MS = 5000;
 
 async function mergeExecutionAccounts(localState: any) {
   try {
     if (!executionSnapshotCache || Date.now() >= executionSnapshotCache.expiresAt) {
-      const remote = await proxyJson("/api/state");
-      if (remote.status >= 200 && remote.status < 300 && remote.payload) {
-        executionSnapshotCache = {
-          expiresAt: Date.now() + EXECUTION_SNAPSHOT_CACHE_MS,
-          payload: remote.payload,
-        };
-      }
+      const [testnetRemote, liveRemote] = await Promise.all([
+        proxyJson("/api/state", { headers: { "x-dealdost-mode": "TESTNET" } }),
+        proxyJson("/api/state", { headers: { "x-dealdost-mode": "LIVE" } }),
+      ]);
+
+      const testnet = testnetRemote.status >= 200 && testnetRemote.status < 300
+        ? testnetRemote.payload?.testnet
+        : undefined;
+      const live = liveRemote.status >= 200 && liveRemote.status < 300
+        ? liveRemote.payload?.live
+        : undefined;
+
+      executionSnapshotCache = {
+        expiresAt: Date.now() + EXECUTION_SNAPSHOT_CACHE_MS,
+        payload: { testnet, live },
+      };
     }
+
     const remoteState = executionSnapshotCache?.payload;
     if (!remoteState) return localState;
+
     return {
       ...localState,
       testnet: remoteState.testnet ?? localState.testnet,

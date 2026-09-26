@@ -9,6 +9,7 @@ let paperAuto = localStorage.getItem("dealdost.paperAuto") === "true";
 let emergencyStop = localStorage.getItem("dealdost.emergencyStop") === "true";
 let analyticsLoading = false;
 let lastAnalyticsLoadedAt = 0;
+const ANALYTICS_RETRY_MS = 60_000;
 
 const fmt = (n) =>
   Number.isFinite(Number(n))
@@ -412,6 +413,9 @@ async function loadAccountAnalytics(force = false) {
     lastAnalyticsLoadedAt = Date.now();
     renderAccountAnalytics(body);
   } catch (error) {
+    // Failed account reads should not trigger an analytics request on every
+    // scanner render. Back off before retrying while keeping the error visible.
+    lastAnalyticsLoadedAt = Date.now();
     const note = $("analyticsNote");
     if (note) note.textContent = "Account analytics unavailable: " + (error instanceof Error ? error.message : String(error));
   } finally {

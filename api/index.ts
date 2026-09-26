@@ -51,6 +51,35 @@ async function proxyJson(
   return { status: response.status, payload };
 }
 
+// PAPER remains local on Vercel, but the dashboard still shows TESTNET/LIVE
+// account status. Merge the persistent Railway execution snapshot into the
+// local PAPER state so account cards do not appear falsely unconfigured.
+let executionSnapshotCache: { expiresAt: number; payload: any } | null = null;
+const EXECUTION_SNAPSHOT_CACHE_MS = 5000;
+
+async function mergeExecutionAccounts(localState: any) {
+  try {
+    if (!executionSnapshotCache || Date.now() >= executionSnapshotCache.expiresAt) {
+      const remote = await proxyJson("/api/state");
+      if (remote.status >= 200 && remote.status < 300 && remote.payload) {
+        executionSnapshotCache = {
+          expiresAt: Date.now() + EXECUTION_SNAPSHOT_CACHE_MS,
+          payload: remote.payload,
+        };
+      }
+    }
+    const remoteState = executionSnapshotCache?.payload;
+    if (!remoteState) return localState;
+    return {
+      ...localState,
+      testnet: remoteState.testnet ?? localState.testnet,
+      live: remoteState.live ?? localState.live,
+    };
+  } catch {
+    return localState;
+  }
+}
+
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.resolve(process.cwd(), "public")));
 
@@ -126,8 +155,9 @@ app.get("/api/state", async (req, res) => {
     await ensureStarted();
     applyReadMode({ mode: requestedMode });
     await scanner.serverlessTick();
+    const state = await mergeExecutionAccounts(scanner.state());
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
-    res.json(scanner.state());
+    res.json(state);
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -173,8 +203,9 @@ app.post("/api/market/ingest", async (req, res) => {
       btc15m: Array.isArray(body.btc15m) ? body.btc15m : undefined,
     });
 
+    const mergedState = await mergeExecutionAccounts(state);
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
-    res.json(state);
+    res.json(mergedState);
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
   }

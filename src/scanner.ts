@@ -99,6 +99,13 @@ export class BinanceScanner extends EventEmitter {
   async startServerless() {
     this.serverlessMode = true;
 
+    // A Vercel/serverless instance is not a distributed execution lock.
+    // Keep TESTNET/LIVE automation fail-closed there unless explicitly opted in.
+    if (!config.allowServerlessExecution) {
+      this.testnetAuto = false;
+      this.liveAuto = false;
+    }
+
     // Vercel/serverless market data is browser-owned. A cold start must never
     // fire the 24h ticker request (weight 40) and historical klines just to
     // render /api/state; that pattern creates avoidable Binance 429 pressure.
@@ -374,6 +381,11 @@ export class BinanceScanner extends EventEmitter {
       this.liveAuto = false;
     }
 
+    if (this.serverlessMode && !config.allowServerlessExecution) {
+      this.testnetAuto = false;
+      this.liveAuto = false;
+    }
+
     if (this.risk.snapshot().emergencyStop) {
       this.testnetAuto = false;
       this.liveAuto = false;
@@ -399,6 +411,9 @@ export class BinanceScanner extends EventEmitter {
 
   setTestnetAuto(enabled: boolean) {
     this.mode = "TESTNET";
+    if (enabled && this.serverlessMode && !config.allowServerlessExecution) {
+      throw new Error("TESTNET_SERVERLESS_EXECUTION_LOCKED");
+    }
     if (enabled && this.risk.snapshot().emergencyStop) {
       throw new Error("EMERGENCY_ENTRY_STOP");
     }
@@ -411,6 +426,9 @@ export class BinanceScanner extends EventEmitter {
   }
 
   setLiveAuto(enabled: boolean) {
+    if (enabled && this.serverlessMode && !config.allowServerlessExecution) {
+      throw new Error("LIVE_SERVERLESS_EXECUTION_LOCKED");
+    }
     if (enabled && !this.live.isExecutionEnabled()) {
       throw new Error("LIVE_EXECUTION_LOCKED");
     }
@@ -551,8 +569,10 @@ export class BinanceScanner extends EventEmitter {
     this.emit("update");
   }
 
-  async closeManagedTestnetPosition(symbol: string, reason: "TP1" | "MANUAL" = "MANUAL") {
-    if (this.mode !== "TESTNET") throw new Error("TESTNET_MODE_REQUIRED");
+  private async closeManagedTestnetPositionInternal(
+    symbol: string,
+    reason: "TP1" | "MANUAL" = "MANUAL",
+  ) {
     const result = await this.testnet.closeManagedPosition(symbol, reason);
     this.testnetState = {
       ...this.testnetState,
@@ -564,8 +584,16 @@ export class BinanceScanner extends EventEmitter {
     this.emit("update");
     return this.state();
   }
-  async closeManagedLivePosition(symbol: string, reason: "TP1" | "MANUAL" = "MANUAL") {
-    if (this.mode !== "LIVE") throw new Error("LIVE_MODE_REQUIRED");
+
+  async closeManagedTestnetPosition(symbol: string, reason: "TP1" | "MANUAL" = "MANUAL") {
+    if (this.mode !== "TESTNET") throw new Error("TESTNET_MODE_REQUIRED");
+    return this.closeManagedTestnetPositionInternal(symbol, reason);
+  }
+
+  private async closeManagedLivePositionInternal(
+    symbol: string,
+    reason: "TP1" | "MANUAL" = "MANUAL",
+  ) {
     const result = await this.live.closeManagedPosition(symbol, reason);
     this.liveState = {
       ...this.liveState,
@@ -576,6 +604,11 @@ export class BinanceScanner extends EventEmitter {
     };
     this.emit("update");
     return this.state();
+  }
+
+  async closeManagedLivePosition(symbol: string, reason: "TP1" | "MANUAL" = "MANUAL") {
+    if (this.mode !== "LIVE") throw new Error("LIVE_MODE_REQUIRED");
+    return this.closeManagedLivePositionInternal(symbol, reason);
   }
 
   private handlePaperMark(symbol: string, price: number) {
@@ -1057,7 +1090,8 @@ export class BinanceScanner extends EventEmitter {
   }
 
   private processManagedTakeProfits() {
-    if (this.risk.snapshot().emergencyStop) return;
+    // Emergency Stop blocks new entries only. Existing positions must continue
+    // to receive engine-managed TP handling; exchange SL protection remains live.
 
     const maybeClose = (
       profile: "TESTNET" | "LIVE",
@@ -1078,8 +1112,8 @@ export class BinanceScanner extends EventEmitter {
 
         inFlight.add(position.symbol);
         const closer = profile === "TESTNET"
-          ? this.closeManagedTestnetPosition(position.symbol, "TP1")
-          : this.closeManagedLivePosition(position.symbol, "TP1");
+          ? this.closeManagedTestnetPositionInternal(position.symbol, "TP1")
+          : this.closeManagedLivePositionInternal(position.symbol, "TP1");
 
         void closer
           .catch((error) => {

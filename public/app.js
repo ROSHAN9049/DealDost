@@ -221,7 +221,7 @@ async function setMode(mode) {
       method: "POST",
       headers: { "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto, liveAuto, emergencyStop })
+      body: JSON.stringify({ mode, auto, paperAuto, testnetAuto, liveAuto, emergencyStop, action: "select-mode" })
     });
     if (!response.ok) {
       let detail = "HTTP " + response.status;

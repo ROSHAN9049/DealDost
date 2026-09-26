@@ -474,7 +474,7 @@ function paperAnalytics(state) {
       averageLossUsd: losses ? grossLoss / losses : 0,
       maxDrawdownUsd: maxDrawdown
     },
-    trades: history.slice(0, 50).map(t => ({
+    trades: history.slice(0, 20).map(t => ({
       time: Number(t.closedAt || 0),
       symbol: t.symbol,
       engine: t.engine,
@@ -529,7 +529,8 @@ function renderAnalytics(data) {
         ).join("")
       : '<tr><td colspan="4" class="empty">No account history in the selected window.</td></tr>';
   }
-  const tradeRows = Array.isArray(data.trades) ? data.trades : [];
+  // Keep the full analytics/history data intact, but render only the latest 20 rows in the visible table.
+  const tradeRows = Array.isArray(data.trades) ? data.trades.slice(0, 20) : [];
   const tradeBody = $("tradeHistory");
   if (tradeBody) {
     tradeBody.innerHTML = tradeRows.length

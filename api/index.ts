@@ -139,9 +139,17 @@ app.get("/api/execution-health", async (_req, res) => {
     const regionRestricted = String(tn.error || "").includes("451") ||
       String(tn.error || "").includes("restricted location");
     res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+    const backendReachable = remote.status >= 200 && remote.status < 500;
+    const executionReady =
+      backendReachable &&
+      Boolean(tn.configured) &&
+      Boolean(tn.executionEnabled) &&
+      Boolean(tn.connected) &&
+      !regionRestricted;
     res.status(200).json({
-      ok: remote.status >= 200 && remote.status < 300 && Boolean(tn.configured),
-      backendReachable: remote.status >= 200 && remote.status < 500,
+      ok: executionReady,
+      backendReachable,
+      executionReady,
       testnet: {
         configured: Boolean(tn.configured),
         executionEnabled: Boolean(tn.executionEnabled),
@@ -152,7 +160,7 @@ app.get("/api/execution-health", async (_req, res) => {
       },
       note: regionRestricted
         ? "Railway execution backend is reachable, but Binance Demo denied its current egress region (HTTP 451)."
-        : null,
+        : (executionReady ? "TESTNET execution path is connected and enabled." : "TESTNET execution is not ready."),
       updatedAt: Date.now(),
     });
   } catch (error) {

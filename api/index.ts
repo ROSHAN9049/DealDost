@@ -235,8 +235,42 @@ app.post("/api/market/ingest", async (req, res) => {
         method: "POST",
         body,
       });
+
+      // TESTNET execution can be blocked by Binance HTTP 451 while public
+      // market data remains usable. In that case, keep scanner visibility
+      // alive with the same local serverless market-ingest path, but never
+      // enable serverless execution. Preserve the remote account error so
+      // the UI continues to show REGION BLOCKED truthfully.
+      const regionBlocked = String(remote.payload?.error || remote.payload?.reason || "").includes("451") ||
+        String(remote.payload?.error || remote.payload?.reason || "").toLowerCase().includes("restricted location");
+      if (!(body.mode === "TESTNET" && regionBlocked)) {
+        res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
+        res.status(remote.status).json(remote.payload);
+        return;
+      }
+
+      await ensureStarted();
+      applyReadMode({ mode: body.mode });
+      const localState = await scanner.ingestBrowserMarket({
+        universe: Array.isArray(body.universe) ? body.universe.map((t: any) => ({
+          symbol: String(t.symbol ?? "").toUpperCase(),
+          quoteVolume: Number(t.quoteVolume),
+          lastPrice: Number(t.lastPrice),
+        })) : [],
+        symbol: String(body.symbol ?? "").toUpperCase(),
+        candles: {
+          "1m": Array.isArray(body.candles?.["1m"]) ? body.candles["1m"] : [],
+          "5m": Array.isArray(body.candles?.["5m"]) ? body.candles["5m"] : [],
+          "15m": Array.isArray(body.candles?.["15m"]) ? body.candles["15m"] : [],
+        },
+        btc15m: Array.isArray(body.btc15m) ? body.btc15m : [],
+      });
+      const merged = {
+        ...localState,
+        testnet: remote.payload?.testnet ?? localState.testnet,
+      };
       res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
-      res.status(remote.status).json(remote.payload);
+      res.status(200).json(merged);
       return;
     }
 

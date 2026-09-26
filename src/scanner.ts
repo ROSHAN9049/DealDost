@@ -787,6 +787,32 @@ export class BinanceScanner extends EventEmitter {
       }
     }
 
+    // Railway may run from a Binance-restricted egress region (for example SFO).
+    // When that happens, use the configured Binance Futures Demo/TESTNET public
+    // market endpoint as a read-only market-data fallback. Execution remains
+    // isolated to the TESTNET/LIVE signed clients below.
+    const testnetBase = config.testnetRestBase.replace(/\/+$/, "");
+    if (!bases.includes(testnetBase) && this.testnet.isConfigured()) {
+      try {
+        const response = await fetch(testnetBase + path, {
+          headers: {
+            "User-Agent": "DealDost/2.4",
+            "Accept": "application/json",
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        const body = await response.text();
+        if (response.ok) {
+          this.lastMarketError = null;
+          console.info("[market data] using Binance TESTNET public fallback for", path);
+          return JSON.parse(body) as T;
+        }
+        failures.push(testnetBase + " -> HTTP " + response.status + " " + body.slice(0, 160));
+      } catch (error) {
+        failures.push(testnetBase + " -> " + (error instanceof Error ? error.message : String(error)));
+      }
+    }
+
     const message = "Binance REST unavailable: " + failures.join(" | ");
     this.lastMarketError = message;
     throw new Error(message);

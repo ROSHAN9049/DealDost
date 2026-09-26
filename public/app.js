@@ -498,22 +498,25 @@ function renderAnalytics(data) {
   $("analyticsRealized").textContent = money(totals.realizedPnlUsd);
   $("analyticsFees").textContent = money(totals.feesUsd);
   $("analyticsNet").textContent = money(totals.netPnlUsd);
-  $("analyticsEntries").textContent = String(ddt.filledEntries || 0);
+  const visibleTradeRows = Array.isArray(data.trades) ? data.trades.slice(0, 20) : [];
+  const visibleMomentumEntries = visibleTradeRows.filter(t => t.engine === "MOMENTUM").length;
+  const visibleScalpingEntries = visibleTradeRows.filter(t => t.engine === "SCALPING").length;
+  const visibleDdtEntries = visibleTradeRows.length;
+  $("analyticsEntries").textContent = String(visibleDdtEntries);
 
   const stats = data.stats;
   const engine = $("engineAnalytics");
   if (engine) {
     if (stats) {
       engine.textContent =
-        "Win rate " + Number(stats.winRate || 0).toFixed(1) + "% • " +
-        "Profit factor " + (Number.isFinite(Number(stats.profitFactor)) ? Number(stats.profitFactor).toFixed(2) : "∞") + " • " +
-        "Avg win " + money(stats.averageWinUsd) + " • Avg loss " + money(stats.averageLossUsd) + " • " +
-        "Max drawdown " + money(stats.maxDrawdownUsd);
+        "Momentum entries " + String(visibleMomentumEntries) + " • " +
+        "Scalping entries " + String(visibleScalpingEntries) + " • " +
+        "DDT entries " + String(visibleDdtEntries);
     } else {
       engine.textContent =
-        "Momentum entries " + String(ddt.momentumEntries || 0) + " • " +
-        "Scalping entries " + String(ddt.scalpingEntries || 0) + " • " +
-        "DDT entries " + String(ddt.filledEntries || 0);
+        "Momentum entries " + String(visibleMomentumEntries) + " • " +
+        "Scalping entries " + String(visibleScalpingEntries) + " • " +
+        "DDT entries " + String(visibleDdtEntries);
     }
   }
 

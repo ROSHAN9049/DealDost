@@ -30,13 +30,12 @@ export const config = {
   testnetApiKey: credential("BINANCE_TESTNET_API_KEY"),
   testnetApiSecret: credential("BINANCE_TESTNET_API_SECRET"),
   testnetExecutionEnabled: bool("BINANCE_TESTNET_EXECUTION_ENABLED", false),
-  // TESTNET is Binance Demo only. When TESTNET execution is enabled, default
-  // automation to ON unless explicitly overridden by BINANCE_TESTNET_AUTO_START.
-  // LIVE remains independently locked by its own execution flag (default OFF).
-  testnetAutoStart: bool(
-    "BINANCE_TESTNET_AUTO_START",
-    bool("BINANCE_TESTNET_EXECUTION_ENABLED", false),
-  ),
+  // TESTNET execution and TESTNET AUTO are separate controls. AUTO is never
+  // armed implicitly by the execution credential flag.
+  testnetAutoStart: bool("BINANCE_TESTNET_AUTO_START", false),
+  // Vercel/serverless instances are not a distributed trading lock. Keep
+  // exchange execution disabled there unless the operator explicitly opts in.
+  allowServerlessExecution: bool("ALLOW_SERVERLESS_EXECUTION", false),
   liveRestBase: (process.env.BINANCE_LIVE_REST_BASE ?? "https://fapi.binance.com").replace(/\/+$/, ""),
   liveApiKey: credential("BINANCE_LIVE_API_KEY"),
   liveApiSecret: credential("BINANCE_LIVE_API_SECRET"),

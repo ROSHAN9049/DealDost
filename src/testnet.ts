@@ -326,6 +326,8 @@ export class TestnetClient {
       };
     }
 
+    await this.assertOneWayMode();
+
     const dayStart = this.getIstDayStartMsForAnalytics(Date.now());
     const endTime = Date.now();
     const [{ balances, positions }, income, commission] = await Promise.all([
@@ -652,6 +654,8 @@ export class TestnetClient {
     if (!/^[A-Z0-9]+USDT$/.test(symbol)) {
       throw new Error(this.profile + " symbol must be a USDT-M symbol: " + symbol);
     }
+
+    await this.assertOneWayMode();
 
     const rules = await this.getSymbolRules(symbol);
     if (rules.status !== "TRADING" || rules.quoteAsset !== "USDT" || rules.contractType !== "PERPETUAL") {
@@ -1225,11 +1229,40 @@ export class TestnetClient {
     return rows;
   }
 
-  private async getServerTimeOffset(_forceRefresh = false): Promise<number> {
-    // Do not make /fapi/v1/time a prerequisite for account reconciliation.
-    // The signed endpoints already validate timestamp freshness and the
-    // serverless/persistent clocks are expected to be NTP-synchronized.
-    return this.serverTimeOffsetMs;
+  private async getServerTimeOffset(forceRefresh = false): Promise<number> {
+    const now = Date.now();
+    if (!forceRefresh && this.serverTimeAt > 0 && now - this.serverTimeAt < this.serverTimeCacheMs) {
+      return this.serverTimeOffsetMs;
+    }
+    if (this.serverTimeInFlight) return this.serverTimeInFlight;
+
+    this.serverTimeInFlight = this.publicGet<{ serverTime?: number }>("/fapi/v1/time")
+      .then((payload) => {
+        const serverTime = Number(payload.serverTime ?? 0);
+        if (!Number.isFinite(serverTime) || serverTime <= 0) {
+          throw new Error("Binance " + this.profile + " returned invalid server time");
+        }
+        this.serverTimeOffsetMs = serverTime - Date.now();
+        this.serverTimeAt = Date.now();
+        return this.serverTimeOffsetMs;
+      })
+      .finally(() => {
+        this.serverTimeInFlight = undefined;
+      });
+
+    return this.serverTimeInFlight;
+  }
+
+  private async getPositionMode() {
+    const payload = await this.signedGet<{ dualSidePosition?: boolean }>("/fapi/v1/positionSide/dual");
+    return Boolean(payload.dualSidePosition);
+  }
+
+  private async assertOneWayMode() {
+    const hedgeMode = await this.getPositionMode();
+    if (hedgeMode) {
+      throw new Error(this.profile + "_HEDGE_MODE_UNSUPPORTED: switch Binance Futures account to One-way Mode");
+    }
   }
 
   private async getAccountRead(): Promise<{
@@ -1613,10 +1646,10 @@ export class TestnetClient {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-
+      const offset = await this.getServerTimeOffset(attempt > 0);
       const params = new URLSearchParams(rawQuery);
-      params.set("recvWindow", "60000");
-      params.set("timestamp", String(Date.now() + this.serverTimeOffsetMs));
+      params.set("recvWindow", "5000");
+      params.set("timestamp", String(Date.now() + offset));
       const signature = createHmac("sha256", this.apiSecret)
         .update(params.toString())
         .digest("hex");
@@ -1666,11 +1699,12 @@ export class TestnetClient {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      const offset = await this.getServerTimeOffset(attempt > 0);
       const params = new URLSearchParams(
         Object.fromEntries(Object.entries(payload).filter(([, value]) => value)),
       );
-      params.set("recvWindow", "60000");
-      params.set("timestamp", String(Date.now() + this.serverTimeOffsetMs));
+      params.set("recvWindow", "5000");
+      params.set("timestamp", String(Date.now() + offset));
 
       const signature = createHmac("sha256", this.apiSecret)
         .update(params.toString())
@@ -1715,9 +1749,10 @@ export class TestnetClient {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      const offset = await this.getServerTimeOffset(attempt > 0);
       const params = new URLSearchParams(payload);
-      params.set("recvWindow", "60000");
-      params.set("timestamp", String(Date.now() + this.serverTimeOffsetMs));
+      params.set("recvWindow", "5000");
+      params.set("timestamp", String(Date.now() + offset));
 
       const signature = createHmac("sha256", this.apiSecret)
         .update(params.toString())

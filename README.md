@@ -70,3 +70,21 @@ TESTNET execution phase 2:
 - TESTNET AUTO accepts only fresh CONFIRMED signals (Scalping <= 90s, Momentum <= 10m) and places at most one new entry per execution cycle.
 - Dashboard exposes TESTNET and LIVE realized PNL and fees for the current IST trading day.
 - LIVE AUTO never turns on implicitly; it remains OFF until the operator explicitly enables it after the separate LIVE account has been configured.
+
+## Production hardening (2026-09-26)
+
+- TESTNET AUTO is explicitly opt-in. Enabling BINANCE_TESTNET_EXECUTION_ENABLED does not automatically arm AUTO.
+- Vercel/serverless execution is locked by default with ALLOW_SERVERLESS_EXECUTION=false. Continuous TESTNET/LIVE automation should run only on the persistent Railway service.
+- Binance signed requests use cached exchange server-time synchronization with a 5-second recvWindow.
+- The execution adapter checks the account position mode and fails closed when Hedge Mode is detected because the current execution contract uses positionSide=BOTH / One-way Mode.
+- Emergency Stop blocks new entries but does not suspend protection or engine-managed TP handling for existing positions.
+- Background TESTNET/LIVE TP handling no longer depends on which dashboard mode is selected.
+- Railway production is pinned to one replica in Southeast Asia/Singapore via railway.json. This avoids the current US-West Binance HTTP 451 restricted-location failure and preserves the scanner's single in-memory execution state.
+- Railway exposes /api/health as the deployment healthcheck.
+
+## Safety boundaries
+
+- TESTNET credentials and LIVE credentials are independent environment variables.
+- LIVE execution remains disabled by default and requires the separate LIVE execution flag.
+- Never commit Binance API keys/secrets to GitHub.
+- This project does not guarantee profitability or eliminate exchange/network failures; it fails closed when required reconciliation, permissions, timing, or protection checks cannot be verified.

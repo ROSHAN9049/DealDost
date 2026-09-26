@@ -84,6 +84,8 @@ for (const signal of paperSignals) {
 }
 
 assert.equal(paper.positionsList().length, 6);
+assert.equal(paper.positionsList().filter((p) => p.engine === "MOMENTUM").length, 3);
+assert.equal(paper.positionsList().filter((p) => p.engine === "SCALPING").length, 3);
 
 const seventh = paper.tryOpen(makeSignal(7, "SCALPING"));
 assert.equal(seventh.opened, false);

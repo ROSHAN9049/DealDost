@@ -732,6 +732,15 @@ function render(state) {
     ) {
       tnHint.textContent = "TESTNET AUTO ON • POSITION GATE BLOCKED • close excess managed position(s)";
       tnHint.hidden = false;
+    } else if (
+      currentMode === "TESTNET" &&
+      tn.error &&
+      (String(tn.error).includes("451") || String(tn.error).toLowerCase().includes("restricted location"))
+    ) {
+      tnHint.textContent = testnetAuto
+        ? "TESTNET AUTO ON • ENTRIES BLOCKED • Binance denied the execution region (HTTP 451)"
+        : "TESTNET AUTO OFF • Binance denied the execution region (HTTP 451)";
+      tnHint.hidden = false;
     } else if (currentMode === "TESTNET" && state.auto) {
       tnHint.textContent = "TESTNET execution ARMED • AUTO is ON";
       tnHint.hidden = false;

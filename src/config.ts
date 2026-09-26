@@ -15,7 +15,7 @@ const credential = (key: string) => {
   // Vercel secret values are entered as plain strings. Be tolerant of
   // accidental copy/paste whitespace/newlines so Node fetch never receives
   // an invalid HTTP header value.
-  return (process.env[key] ?? "").trim().replace(/\s+/g, "");
+  return (process.env[key] ?? "").trim().replace(/s+/g, "");
 };
 
 export const config = {
@@ -31,7 +31,7 @@ export const config = {
   testnetApiSecret: credential("BINANCE_TESTNET_API_SECRET"),
   testnetExecutionEnabled: bool("BINANCE_TESTNET_EXECUTION_ENABLED", false),
   // TESTNET execution and TESTNET AUTO are separate controls. AUTO is never
-  // armed implicitly by the execution credential flag.
+  // armed implicitly by the credential flag.
   testnetAutoStart: bool("BINANCE_TESTNET_AUTO_START", false),
   // Vercel/serverless instances are not a distributed trading lock. Keep
   // exchange execution disabled there unless the operator explicitly opts in.
@@ -47,7 +47,7 @@ export const config = {
   paperBalance: n("PAPER_BALANCE_USDT", 1000),
   paperFeeBps: n("PAPER_FEE_BPS", 5),
   paperSlippageBps: n("PAPER_SLIPPAGE_BPS", 2),
-  paperAuto: bool("PAPER_AUTO", false),
+  paperAuto: bool("PAPER_AUTO", true),
   maxNotionalPctPerTrade: n("MAX_NOTIONAL_PCT_PER_TRADE", 15),
   testnetRiskPerTradePct: n("TESTNET_RISK_PER_TRADE_PCT", 1),
   testnetMaxDailyRiskPct: n("TESTNET_MAX_DAILY_RISK_PCT", 6),

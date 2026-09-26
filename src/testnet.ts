@@ -585,7 +585,7 @@ export class TestnetClient {
       trades: orders
         .filter((order) => String(order.clientOrderId ?? "").startsWith("DDT-"))
         .sort((a, b) => Number(b.time ?? b.updateTime ?? 0) - Number(a.time ?? a.updateTime ?? 0))
-        .slice(0, 50)
+        .slice(0, 20)
         .map((order) => {
           const clientOrderId = String(order.clientOrderId ?? "");
           const fill = order.orderId === undefined ? undefined : fillByOrder.get(String(order.orderId));

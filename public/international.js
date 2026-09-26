@@ -107,23 +107,14 @@
     if (clock) clock.textContent = new Date().toLocaleTimeString([], { hour12: false });
   }
 
-  async function pollHealth() {
-    try {
-      const mode = localStorage.getItem("dealdost.mode") || "PAPER";
-      const response = await fetch("/api/state", {
-        cache: "no-store",
-        headers: { "x-dealdost-mode": mode }
-      });
-      if (!response.ok) return;
-      renderState(await response.json());
-    } catch {}
-  }
+  // The main app owns scanner state. Reusing that same render snapshot
+  // prevents a second polling loop from showing a different mode/AUTO state.
+  window.__dealdostRenderHealth = renderState;
 
   function boot() {
     ensureHealthRail();
     document.title = "DealDost • Global Execution Terminal";
-    void pollHealth();
-    window.setInterval(pollHealth, 10000);
+    if (window.__dealdostLastState) renderState(window.__dealdostLastState);
     window.setInterval(() => {
       const clock = byId("dd-clock");
       if (clock) clock.textContent = new Date().toLocaleTimeString([], { hour12: false });

@@ -507,17 +507,10 @@ function renderAnalytics(data) {
   const stats = data.stats;
   const engine = $("engineAnalytics");
   if (engine) {
-    if (stats) {
-      engine.textContent =
-        "Momentum entries " + String(visibleMomentumEntries) + " • " +
-        "Scalping entries " + String(visibleScalpingEntries) + " • " +
-        "DDT entries " + String(visibleDdtEntries);
-    } else {
-      engine.textContent =
-        "Momentum entries " + String(visibleMomentumEntries) + " • " +
-        "Scalping entries " + String(visibleScalpingEntries) + " • " +
-        "DDT entries " + String(visibleDdtEntries);
-    }
+    engine.textContent =
+      "Latest 20 visible • Momentum " + String(visibleMomentumEntries) +
+      " • Scalping " + String(visibleScalpingEntries) +
+      " • DDT " + String(visibleDdtEntries);
   }
 
   const rows = Array.isArray(data.daily) ? data.daily : [];

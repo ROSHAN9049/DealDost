@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>DealDost — Binance Scanner V2</title>
-  <link rel="stylesheet" href="/styles.css?build=20260926.01" />
-  <script src="/request-guard.js?build=20260926.01"></script>
+  <link rel="stylesheet" href="/styles.css?build=20260926.02" />
+  <script src="/request-guard.js?build=20260926.02"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
       <div class="brand">DEALDOST</div>
-      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260926.01</span></div>
+      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260926.02</span></div>
     </div>
     <div class="mode">
       <button id="paperMode" class="pill active" type="button">PAPER</button>
@@ -116,13 +116,13 @@
         setBoot("PROMISE ERROR • " + reason.slice(0, 120), true);
       });
       const script = document.createElement("script");
-      script.src = "/app.js?build=20260926.01";
+      script.src = "/app.js?build=20260926.02";
       script.defer = true;
       script.onload = () => setBoot("BOOT OK • loading market data…");
-      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260926.01", true);
+      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260926.02", true);
       document.head.appendChild(script);
     })();
   </script>
-  <script src="/international.js?build=20260926.01" defer></script>
+  <script src="/international.js?build=20260926.02" defer></script>
 </body>
 </html>

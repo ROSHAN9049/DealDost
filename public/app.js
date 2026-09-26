@@ -986,7 +986,7 @@ function render(state) {
         "<td>" + fmt(s.entry) + "</td>" +
         "<td>" + fmt(s.stop) + "</td>" +
         "<td>" + fmt(s.takeProfit1) + "</td>" +
-        '<td title="' + esc(s.risk.reason || "") + '">' + (s.risk.eligible ? "PASS" : "BLOCKED") + "</td>" +
+        (() => {\n          const riskText = s.risk.eligible ? "RISK PASS" : "RISK BLOCKED";\n          let execText = "SIGNAL ONLY";\n          const mode = String(currentMode || "PAPER");\n          if (mode === "TESTNET") {\n            const tn = state.testnet || {};\n            const regionBlocked = String(tn.error || "").includes("451") || String(tn.error || "").toLowerCase().includes("restricted location");\n            execText = regionBlocked ? "EXEC BLOCKED • REGION" : (tn.connected && tn.executionEnabled ? "EXEC READY" : "EXEC BLOCKED");\n          } else if (mode === "LIVE") {\n            const lv = state.live || {};\n            execText = lv.connected && lv.executionEnabled ? "EXEC READY" : "EXEC BLOCKED";\n          } else {\n            execText = paperAuto ? "PAPER AUTO" : "PAPER MANUAL";\n          }\n          return "<td title=\"" + esc(s.risk.reason || "") + "\">" + esc(riskText + " • " + execText) + "</td>";\n        })() +
         "</tr>"
       );
     }).join("");

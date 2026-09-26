@@ -58,13 +58,22 @@
         : String(feed.error || feed.data || "No fresh market data")
     );
 
-    const tnHealth = tn.health || (tn.connected ? "ONLINE" : "OFFLINE");
-    setHealth(
-      "dd-testnet-health",
-      tnHealth,
-      tn.healthDetail ||
-        (tn.executionEnabled ? (tn.auto ? "Demo execution armed" : "Demo execution ready") : "Read-only / execution locked")
-    );
+    const tnError = String(tn.error || "");
+    const tnRegionRestricted =
+      tnError.includes("451") ||
+      tnError.toLowerCase().includes("restricted location");
+    const tnHealth = tnRegionRestricted
+      ? "REGION BLOCKED"
+      : (tn.health || (tn.connected ? "ONLINE" : "OFFLINE"));
+    const tnDetail = tnRegionRestricted
+      ? "Binance Demo API denied Railway/Vercel execution region • entries blocked"
+      : (
+          tn.healthDetail ||
+          (tn.executionEnabled
+            ? (tn.auto ? "Demo execution armed" : "Demo execution ready")
+            : "Read-only / execution locked")
+        );
+    setHealth("dd-testnet-health", tnHealth, tnDetail);
 
     const liveHealth = live.health || (live.connected ? "ONLINE" : "OFFLINE");
     setHealth(

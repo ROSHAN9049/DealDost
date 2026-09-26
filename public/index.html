@@ -113,7 +113,7 @@
         // remain stuck at BOOT ERROR while the app is otherwise healthy.
         if (!event?.error) return;
         const filename = String(event.filename || "");
-        if (filename && !/(?:^|\/)\/(?:app|international|request-guard)\.js/.test(filename)) return;
+        if (filename && !/(^|\/)(?:app|international|request-guard)\.js(?:\?|$)/.test(filename)) return;
         const message = event?.message || event?.error?.message || "JavaScript runtime error";
         setBoot("JS ERROR • " + String(message).slice(0, 120), true);
       });

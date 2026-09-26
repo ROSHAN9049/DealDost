@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>DealDost — Binance Scanner V2</title>
-  <link rel="stylesheet" href="/styles.css?build=20260926.07" />
-  <script src="/request-guard.js?build=20260926.07"></script>
+  <link rel="stylesheet" href="/styles.css?build=20260926.08" />
+  <script src="/request-guard.js?build=20260926.08"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
       <div class="brand">DEALDOST</div>
-      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260926.07</span></div>
+      <div class="subtitle">BINANCE SCANNER V2 <span class="muted">• BUILD 20260926.08</span></div>
     </div>
     <div class="mode">
       <button id="paperMode" class="pill active" type="button">PAPER</button>
@@ -108,7 +108,13 @@
         }
       };
       window.addEventListener("error", (event) => {
-        const message = event?.message || "JavaScript runtime error";
+        // Ignore resource-load errors from unrelated browser assets/extensions.
+        // Only surface actual JavaScript exceptions so the boot rail cannot
+        // remain stuck at BOOT ERROR while the app is otherwise healthy.
+        if (!event?.error) return;
+        const filename = String(event.filename || "");
+        if (filename && !/(?:^|\/)\/(?:app|international|request-guard)\.js/.test(filename)) return;
+        const message = event?.message || event?.error?.message || "JavaScript runtime error";
         setBoot("JS ERROR • " + String(message).slice(0, 120), true);
       });
       window.addEventListener("unhandledrejection", (event) => {
@@ -116,13 +122,13 @@
         setBoot("PROMISE ERROR • " + reason.slice(0, 120), true);
       });
       const script = document.createElement("script");
-      script.src = "/app.js?build=20260926.07";
+      script.src = "/app.js?build=20260926.08";
       script.defer = true;
       script.onload = () => setBoot("BOOT OK • loading market data…");
-      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260926.07", true);
+      script.onerror = () => setBoot("APP.JS LOAD FAILED • build 20260926.08", true);
       document.head.appendChild(script);
     })();
   </script>
-  <script src="/international.js?build=20260926.07" defer></script>
+  <script src="/international.js?build=20260926.08" defer></script>
 </body>
 </html>
